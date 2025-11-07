@@ -4,9 +4,9 @@
 //! that match against types. Schemas support wildcards, variable capture, and
 //! application type matching.
 
+use crate::types::Type;
 use pyo3::prelude::*;
 use std::collections::HashMap;
-use crate::types::Type;
 
 /// Represents a regex-like pattern for matching types.
 ///
@@ -181,6 +181,7 @@ impl TypeSchema {
         self.matches_internal(r#type).is_some()
     }
 
+    #[allow(clippy::only_used_in_recursion)]
     fn matches_recursive(
         &self,
         pattern: &str,
@@ -195,7 +196,12 @@ impl TypeSchema {
         }
 
         // Variable matching: $name$
-        if pattern.starts_with('$') && pattern.ends_with('$') && !pattern.contains("->") && !pattern.contains(':') && !pattern.contains('(') {
+        if pattern.starts_with('$')
+            && pattern.ends_with('$')
+            && !pattern.contains("->")
+            && !pattern.contains(':')
+            && !pattern.contains('(')
+        {
             let var_name = &pattern[1..pattern.len() - 1];
             if var_name == "*" {
                 return true;
@@ -276,7 +282,7 @@ fn find_arrow(s: &str) -> Option<usize> {
     let mut depth = 0;
     let chars: Vec<char> = s.chars().collect();
     let mut i = 0;
-    
+
     while i < chars.len() {
         match chars[i] {
             '(' => depth += 1,
@@ -294,7 +300,7 @@ fn find_arrow(s: &str) -> Option<usize> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::{Variable, Application, Type};
+    use crate::types::{Application, Type, Variable};
 
     #[test]
     fn test_wildcard_schema() {

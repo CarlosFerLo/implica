@@ -46,6 +46,25 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-cargo-
 
+      - name: Create virtual environment
+        run: python -m venv .venv
+
+      - name: Activate virtual environment (Unix)
+        if: runner.os != 'Windows'
+        run: echo "VIRTUAL_ENV=$PWD/.venv" >> $GITHUB_ENV
+
+      - name: Activate virtual environment (Windows)
+        if: runner.os == 'Windows'
+        run: echo "VIRTUAL_ENV=$PWD\.venv" >> $env:GITHUB_ENV
+
+      - name: Add venv to PATH (Unix)
+        if: runner.os != 'Windows'
+        run: echo "$PWD/.venv/bin" >> $GITHUB_PATH
+
+      - name: Add venv to PATH (Windows)
+        if: runner.os == 'Windows'
+        run: echo "$PWD\.venv\Scripts" >> $env:GITHUB_PATH
+
       - name: Install Python dependencies
         run: |
           python -m pip install --upgrade pip
@@ -91,11 +110,11 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Check Python formatting (if black is configured)
-        run: |
-          pip install black
-          black --check . || true
-        continue-on-error: true
+      - name: Install black
+        run: pip install black
+
+      - name: Check Python formatting
+        run: black --check .
 
   docs:
     name: Build Documentation

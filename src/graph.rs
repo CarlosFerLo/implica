@@ -4,13 +4,13 @@
 //! edges representing typed terms, and the graph structure itself. The graph
 //! serves as the main data structure for modeling type theoretical theories.
 
+use crate::term::Term;
+use crate::types::{python_to_type, type_to_python, Type};
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
-use std::sync::Arc;
+use sha2::{Digest, Sha256};
 use std::collections::HashMap;
-use crate::types::{Type, python_to_type, type_to_python};
-use crate::term::Term;
-use sha2::{Sha256, Digest};
+use std::sync::Arc;
 
 /// Represents a node in the graph (a type in the model).
 ///
@@ -46,12 +46,10 @@ pub struct Node {
 
 impl Clone for Node {
     fn clone(&self) -> Self {
-        Python::with_gil(|py| {
-            Node {
-                r#type: self.r#type.clone(),
-                properties: self.properties.clone_ref(py),
-                uid_cache: self.uid_cache.clone(),
-            }
+        Python::with_gil(|py| Node {
+            r#type: self.r#type.clone(),
+            properties: self.properties.clone_ref(py),
+            uid_cache: self.uid_cache.clone(),
         })
     }
 }
@@ -179,14 +177,12 @@ pub struct Edge {
 
 impl Clone for Edge {
     fn clone(&self) -> Self {
-        Python::with_gil(|py| {
-            Edge {
-                term: self.term.clone(),
-                start: self.start.clone(),
-                end: self.end.clone(),
-                properties: self.properties.clone_ref(py),
-                uid_cache: self.uid_cache.clone(),
-            }
+        Python::with_gil(|py| Edge {
+            term: self.term.clone(),
+            start: self.start.clone(),
+            end: self.end.clone(),
+            properties: self.properties.clone_ref(py),
+            uid_cache: self.uid_cache.clone(),
         })
     }
 }
@@ -230,7 +226,7 @@ impl Edge {
             let start_obj = start.bind(py).extract::<Node>()?;
             let end_obj = end.bind(py).extract::<Node>()?;
             let props = properties.unwrap_or_else(|| PyDict::new(py).into());
-            
+
             Ok(Edge {
                 term: Arc::new(term_obj),
                 start: Arc::new(start_obj),
@@ -289,14 +285,20 @@ impl Edge {
     ///
     /// Format: "Edge(term_name: start_type -> end_type)"
     fn __str__(&self) -> String {
-        format!("Edge({}: {} -> {})", self.term.name, self.start.r#type, self.end.r#type)
+        format!(
+            "Edge({}: {} -> {})",
+            self.term.name, self.start.r#type, self.end.r#type
+        )
     }
 
     /// Returns a detailed representation for debugging.
     ///
     /// Format: "Edge(term_name: start_type -> end_type)"
     fn __repr__(&self) -> String {
-        format!("Edge({}: {} -> {})", self.term.name, self.start.r#type, self.end.r#type)
+        format!(
+            "Edge({}: {} -> {})",
+            self.term.name, self.start.r#type, self.end.r#type
+        )
     }
 }
 
@@ -330,18 +332,16 @@ impl Edge {
 #[derive(Debug)]
 pub struct Graph {
     #[pyo3(get)]
-    pub nodes: Py<PyDict>,  // uid -> Node
+    pub nodes: Py<PyDict>, // uid -> Node
     #[pyo3(get)]
-    pub edges: Py<PyDict>,  // uid -> Edge
+    pub edges: Py<PyDict>, // uid -> Edge
 }
 
 impl Clone for Graph {
     fn clone(&self) -> Self {
-        Python::with_gil(|py| {
-            Graph {
-                nodes: self.nodes.clone_ref(py),
-                edges: self.edges.clone_ref(py),
-            }
+        Python::with_gil(|py| Graph {
+            nodes: self.nodes.clone_ref(py),
+            edges: self.edges.clone_ref(py),
         })
     }
 }
@@ -419,17 +419,15 @@ impl Graph {
     pub fn build_type_index(&self, py: Python) -> PyResult<HashMap<String, Vec<String>>> {
         let mut index: HashMap<String, Vec<String>> = HashMap::new();
         let nodes_dict = self.nodes.bind(py);
-        
+
         for (uid_obj, node_obj) in nodes_dict.iter() {
             let uid: String = uid_obj.extract()?;
             let node: Node = node_obj.extract()?;
             let type_uid = node.r#type.uid();
-            
-            index.entry(type_uid)
-                .or_insert_with(Vec::new)
-                .push(uid);
+
+            index.entry(type_uid).or_default().push(uid);
         }
-        
+
         Ok(index)
     }
 
@@ -449,7 +447,7 @@ impl Graph {
         let index = self.build_type_index(py)?;
         let nodes_dict = self.nodes.bind(py);
         let mut result = Vec::new();
-        
+
         if let Some(node_uids) = index.get(type_uid) {
             for uid in node_uids {
                 if let Some(node_obj) = nodes_dict.get_item(uid)? {
@@ -458,7 +456,7 @@ impl Graph {
                 }
             }
         }
-        
+
         Ok(result)
     }
 
@@ -474,7 +472,7 @@ impl Graph {
     /// An Option containing the node if found
     pub fn get_node_by_uid(&self, uid: &str, py: Python) -> PyResult<Option<Node>> {
         let nodes_dict = self.nodes.bind(py);
-        
+
         if let Some(node_obj) = nodes_dict.get_item(uid)? {
             Ok(Some(node_obj.extract()?))
         } else {
@@ -494,7 +492,7 @@ impl Graph {
     /// An Option containing the edge if found
     pub fn get_edge_by_uid(&self, uid: &str, py: Python) -> PyResult<Option<Edge>> {
         let edges_dict = self.edges.bind(py);
-        
+
         if let Some(edge_obj) = edges_dict.get_item(uid)? {
             Ok(Some(edge_obj.extract()?))
         } else {
@@ -505,11 +503,9 @@ impl Graph {
 
 impl Default for Graph {
     fn default() -> Self {
-        Python::with_gil(|py| {
-            Graph {
-                nodes: PyDict::new(py).into(),
-                edges: PyDict::new(py).into(),
-            }
+        Python::with_gil(|py| Graph {
+            nodes: PyDict::new(py).into(),
+            edges: PyDict::new(py).into(),
         })
     }
 }
@@ -525,7 +521,7 @@ mod tests {
         Python::with_gil(|py| {
             let var_a = Py::new(py, Variable::new("A".to_string())).unwrap();
             let node = Node::new(var_a.into(), None).unwrap();
-            
+
             assert_eq!(node.__str__(), "Node(A)");
             assert!(node.uid().starts_with("node_"));
         });

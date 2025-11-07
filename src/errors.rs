@@ -254,9 +254,7 @@ impl std::error::Error for ImplicaError {}
 impl From<ImplicaError> for PyErr {
     fn from(err: ImplicaError) -> PyErr {
         match err {
-            ImplicaError::TypeMismatch { .. } => {
-                exceptions::PyTypeError::new_err(err.to_string())
-            }
+            ImplicaError::TypeMismatch { .. } => exceptions::PyTypeError::new_err(err.to_string()),
             ImplicaError::NodeNotFound { .. } | ImplicaError::EdgeNotFound { .. } => {
                 exceptions::PyKeyError::new_err(err.to_string())
             }
@@ -310,10 +308,7 @@ impl ImplicaError {
     }
 
     /// Creates a node not found error with context.
-    pub fn node_not_found_with_context(
-        uid: impl Into<String>,
-        context: impl Into<String>,
-    ) -> Self {
+    pub fn node_not_found_with_context(uid: impl Into<String>, context: impl Into<String>) -> Self {
         ImplicaError::NodeNotFound {
             uid: uid.into(),
             context: Some(context.into()),

@@ -4,9 +4,9 @@
 //! Types form the foundation for the type theoretical graph model.
 
 use pyo3::prelude::*;
+use sha2::{Digest, Sha256};
 use std::fmt;
 use std::sync::Arc;
-use sha2::{Sha256, Digest};
 
 /// Represents a type in the type theory.
 ///
@@ -38,13 +38,13 @@ impl Type {
             Type::Variable(v) => {
                 hasher.update(b"var:");
                 hasher.update(v.name.as_bytes());
-            },
+            }
             Type::Application(a) => {
                 hasher.update(b"app:");
                 hasher.update(a.left.uid().as_bytes());
                 hasher.update(b":");
                 hasher.update(a.right.uid().as_bytes());
-            },
+            }
         }
         format!("{:x}", hasher.finalize())
     }

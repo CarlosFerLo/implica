@@ -6,13 +6,13 @@
 
 #![allow(unused_variables)]
 
+use crate::errors::ImplicaError;
+use crate::graph::{Edge, Graph, Node};
+use crate::patterns::{EdgePattern, NodePattern, PathPattern};
+use crate::types::type_to_python;
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
 use std::collections::HashMap;
-use crate::graph::{Graph, Node, Edge};
-use crate::patterns::{NodePattern, EdgePattern, PathPattern};
-use crate::types::{type_to_python};
-use crate::errors::ImplicaError;
 
 /// Cypher-like query builder for the graph.
 ///
@@ -82,19 +82,19 @@ pub enum QueryOperation {
 
 impl Clone for QueryOperation {
     fn clone(&self) -> Self {
-        Python::with_gil(|py| {
-            match self {
-                QueryOperation::Match(m) => QueryOperation::Match(m.clone()),
-                QueryOperation::Where(w) => QueryOperation::Where(w.clone()),
-                QueryOperation::Create(c) => QueryOperation::Create(c.clone()),
-                QueryOperation::Set(var, dict) => QueryOperation::Set(var.clone(), dict.clone_ref(py)),
-                QueryOperation::Delete(vars, detach) => QueryOperation::Delete(vars.clone(), *detach),
-                QueryOperation::Merge(m) => QueryOperation::Merge(m.clone()),
-                QueryOperation::With(w) => QueryOperation::With(w.clone()),
-                QueryOperation::OrderBy(v, k, asc) => QueryOperation::OrderBy(v.clone(), k.clone(), *asc),
-                QueryOperation::Limit(l) => QueryOperation::Limit(*l),
-                QueryOperation::Skip(s) => QueryOperation::Skip(*s),
+        Python::with_gil(|py| match self {
+            QueryOperation::Match(m) => QueryOperation::Match(m.clone()),
+            QueryOperation::Where(w) => QueryOperation::Where(w.clone()),
+            QueryOperation::Create(c) => QueryOperation::Create(c.clone()),
+            QueryOperation::Set(var, dict) => QueryOperation::Set(var.clone(), dict.clone_ref(py)),
+            QueryOperation::Delete(vars, detach) => QueryOperation::Delete(vars.clone(), *detach),
+            QueryOperation::Merge(m) => QueryOperation::Merge(m.clone()),
+            QueryOperation::With(w) => QueryOperation::With(w.clone()),
+            QueryOperation::OrderBy(v, k, asc) => {
+                QueryOperation::OrderBy(v.clone(), k.clone(), *asc)
             }
+            QueryOperation::Limit(l) => QueryOperation::Limit(*l),
+            QueryOperation::Skip(s) => QueryOperation::Skip(*s),
         })
     }
 }
@@ -186,6 +186,7 @@ impl Query {
     /// # Match edge
     /// q.match(edge="e", start=start_node, end=end_node)
     /// ```
+    #[allow(clippy::too_many_arguments)]
     #[pyo3(signature = (pattern=None, *, node=None, edge=None, start=None, end=None, r#type=None, type_schema=None, term=None, term_type_schema=None, properties=None))]
     pub fn r#match(
         &mut self,
@@ -203,17 +204,29 @@ impl Query {
         if let Some(p) = pattern {
             // Parse Cypher-like pattern
             let path = PathPattern::parse(p)?;
-            self.operations.push(QueryOperation::Match(MatchOp::Path(path)));
+            self.operations
+                .push(QueryOperation::Match(MatchOp::Path(path)));
         } else if node.is_some() {
             // Match node
             let node_pattern = NodePattern::new(node, r#type, type_schema, properties)?;
-            self.operations.push(QueryOperation::Match(MatchOp::Node(node_pattern)));
+            self.operations
+                .push(QueryOperation::Match(MatchOp::Node(node_pattern)));
         } else if edge.is_some() {
             // Match edge
-            let edge_pattern = EdgePattern::new(edge.clone(), term, term_type_schema, properties, "forward".to_string())?;
+            let edge_pattern = EdgePattern::new(
+                edge.clone(),
+                term,
+                term_type_schema,
+                properties,
+                "forward".to_string(),
+            )?;
             let start_var = Self::extract_var_or_none(start)?;
             let end_var = Self::extract_var_or_none(end)?;
-            self.operations.push(QueryOperation::Match(MatchOp::Edge(edge_pattern, start_var, end_var)));
+            self.operations.push(QueryOperation::Match(MatchOp::Edge(
+                edge_pattern,
+                start_var,
+                end_var,
+            )));
         }
 
         Ok(self.clone())
@@ -262,14 +275,19 @@ impl Query {
 
         // Collect results
         let mut results = Vec::new();
-        
+
         if self.matched_vars.is_empty() {
             return Ok(results);
         }
 
         // Find maximum length
-        let max_len = self.matched_vars.values().map(|v| v.len()).max().unwrap_or(0);
-        
+        let max_len = self
+            .matched_vars
+            .values()
+            .map(|v| v.len())
+            .max()
+            .unwrap_or(0);
+
         for i in 0..max_len {
             let dict = PyDict::new(py);
             for var in &variables {
@@ -296,20 +314,30 @@ impl Query {
 
     pub fn return_count(&mut self, py: Python) -> PyResult<usize> {
         self.execute_operations(py)?;
-        
+
         if self.matched_vars.is_empty() {
             return Ok(0);
         }
-        
-        Ok(self.matched_vars.values().map(|v| v.len()).max().unwrap_or(0))
+
+        Ok(self
+            .matched_vars
+            .values()
+            .map(|v| v.len())
+            .max()
+            .unwrap_or(0))
     }
 
     #[pyo3(signature = (*variables))]
-    pub fn return_distinct(&mut self, py: Python, variables: Vec<String>) -> PyResult<Vec<PyObject>> {
+    pub fn return_distinct(
+        &mut self,
+        py: Python,
+        variables: Vec<String>,
+    ) -> PyResult<Vec<PyObject>> {
         // For now, just return regular results (would need proper deduplication)
         self.return_(py, variables)
     }
 
+    #[allow(clippy::too_many_arguments)]
     #[pyo3(signature = (pattern=None, *, node=None, edge=None, r#type=None, term=None, start=None, end=None, properties=None))]
     pub fn create(
         &mut self,
@@ -324,15 +352,22 @@ impl Query {
     ) -> PyResult<Self> {
         if let Some(p) = pattern {
             let path = PathPattern::parse(p)?;
-            self.operations.push(QueryOperation::Create(CreateOp::Path(path)));
+            self.operations
+                .push(QueryOperation::Create(CreateOp::Path(path)));
         } else if node.is_some() {
             let node_pattern = NodePattern::new(node, r#type, None, properties)?;
-            self.operations.push(QueryOperation::Create(CreateOp::Node(node_pattern)));
+            self.operations
+                .push(QueryOperation::Create(CreateOp::Node(node_pattern)));
         } else if edge.is_some() {
-            let edge_pattern = EdgePattern::new(edge.clone(), term, None, properties, "forward".to_string())?;
+            let edge_pattern =
+                EdgePattern::new(edge.clone(), term, None, properties, "forward".to_string())?;
             let start_var = Self::extract_var(start)?;
             let end_var = Self::extract_var(end)?;
-            self.operations.push(QueryOperation::Create(CreateOp::Edge(edge_pattern, start_var, end_var)));
+            self.operations.push(QueryOperation::Create(CreateOp::Edge(
+                edge_pattern,
+                start_var,
+                end_var,
+            )));
         }
 
         Ok(self.clone())
@@ -341,17 +376,20 @@ impl Query {
     pub fn set(&mut self, variable: String, properties: Py<PyDict>) -> PyResult<Self> {
         Python::with_gil(|py| {
             let props_cloned = properties.clone_ref(py);
-            self.operations.push(QueryOperation::Set(variable, props_cloned));
+            self.operations
+                .push(QueryOperation::Set(variable, props_cloned));
             Ok(self.clone())
         })
     }
 
     #[pyo3(signature = (*variables, detach=false))]
     pub fn delete(&mut self, variables: Vec<String>, detach: bool) -> PyResult<Self> {
-        self.operations.push(QueryOperation::Delete(variables, detach));
+        self.operations
+            .push(QueryOperation::Delete(variables, detach));
         Ok(self.clone())
     }
 
+    #[allow(clippy::too_many_arguments)]
     #[pyo3(signature = (pattern=None, *, node=None, edge=None, r#type=None, type_schema=None, term=None, term_type_schema=None, start=None, end=None, properties=None))]
     #[allow(unused_variables)]
     pub fn merge(
@@ -369,12 +407,23 @@ impl Query {
     ) -> PyResult<Self> {
         if node.is_some() {
             let node_pattern = NodePattern::new(node, r#type, type_schema, properties)?;
-            self.operations.push(QueryOperation::Merge(MergeOp::Node(node_pattern)));
+            self.operations
+                .push(QueryOperation::Merge(MergeOp::Node(node_pattern)));
         } else if edge.is_some() {
-            let edge_pattern = EdgePattern::new(edge.clone(), term, term_type_schema, properties, "forward".to_string())?;
+            let edge_pattern = EdgePattern::new(
+                edge.clone(),
+                term,
+                term_type_schema,
+                properties,
+                "forward".to_string(),
+            )?;
             let start_var = Self::extract_var(start)?;
             let end_var = Self::extract_var(end)?;
-            self.operations.push(QueryOperation::Merge(MergeOp::Edge(edge_pattern, start_var, end_var)));
+            self.operations.push(QueryOperation::Merge(MergeOp::Edge(
+                edge_pattern,
+                start_var,
+                end_var,
+            )));
         }
 
         Ok(self.clone())
@@ -388,7 +437,8 @@ impl Query {
 
     #[pyo3(signature = (variable, key, ascending=true))]
     pub fn order_by(&mut self, variable: String, key: String, ascending: bool) -> PyResult<Self> {
-        self.operations.push(QueryOperation::OrderBy(variable, key, ascending));
+        self.operations
+            .push(QueryOperation::OrderBy(variable, key, ascending));
         Ok(self.clone())
     }
 
@@ -419,7 +469,8 @@ impl Query {
                     Err(ImplicaError::InvalidQuery {
                         message: "Expected string variable name".to_string(),
                         context: Some("variable extraction".to_string()),
-                    }.into())
+                    }
+                    .into())
                 }
             } else {
                 Err(ImplicaError::invalid_query("Variable name required").into())
@@ -478,7 +529,7 @@ impl Query {
                 if let Some(ref type_obj) = node_pattern.type_obj {
                     let type_uid = type_obj.uid();
                     let type_nodes = self.graph.get_nodes_by_type(&type_uid, py)?;
-                    
+
                     for node in type_nodes {
                         if node_pattern.matches(&node, py)? {
                             matches.push(QueryResult::Node(node));
@@ -524,7 +575,7 @@ impl Query {
 
             for (_uid, edge_obj) in edges_dict.iter() {
                 let edge: Edge = edge_obj.extract()?;
-                
+
                 // Check if edge matches pattern
                 let edge_ok = if let Some(ref schema) = edge_pattern.term_type_schema {
                     schema.matches_type(&edge.term.r#type)
@@ -566,13 +617,13 @@ impl Query {
                     for (k, v) in node_pattern.properties {
                         props.set_item(k, v)?;
                     }
-                    
-                    let node = Node::new(type_py.into(), Some(props.into()))?;
+
+                    let node = Node::new(type_py, Some(props.into()))?;
                     let uid = node.uid();
-                    
+
                     let nodes_dict = self.graph.nodes.bind(py);
                     nodes_dict.set_item(uid, Py::new(py, node.clone())?)?;
-                    
+
                     if let Some(var) = node_pattern.variable {
                         self.matched_vars.insert(var, vec![QueryResult::Node(node)]);
                     }
@@ -601,12 +652,12 @@ impl Query {
                 if let Some(ref type_obj) = node_pattern.type_obj {
                     let type_uid = type_obj.uid();
                     let type_nodes = self.graph.get_nodes_by_type(&type_uid, py)?;
-                    
+
                     for node in type_nodes {
                         if node_pattern.matches(&node, py)? {
                             // Node exists, add to matched_vars
                             if let Some(ref var) = node_pattern.variable {
-                                let matches = self.matched_vars.entry(var.clone()).or_insert_with(Vec::new);
+                                let matches = self.matched_vars.entry(var.clone()).or_default();
                                 matches.push(QueryResult::Node(node));
                             }
                             found = true;
@@ -621,7 +672,7 @@ impl Query {
                         if node_pattern.matches(&node, py)? {
                             // Node exists, add to matched_vars
                             if let Some(ref var) = node_pattern.variable {
-                                let matches = self.matched_vars.entry(var.clone()).or_insert_with(Vec::new);
+                                let matches = self.matched_vars.entry(var.clone()).or_default();
                                 matches.push(QueryResult::Node(node));
                             }
                             found = true;
@@ -638,13 +689,13 @@ impl Query {
                         for (k, v) in node_pattern.properties {
                             props.set_item(k, v)?;
                         }
-                        
-                        let node = Node::new(type_py.into(), Some(props.into()))?;
+
+                        let node = Node::new(type_py, Some(props.into()))?;
                         let uid = node.uid();
-                        
+
                         let nodes_dict = self.graph.nodes.bind(py);
                         nodes_dict.set_item(uid, Py::new(py, node.clone())?)?;
-                        
+
                         if let Some(var) = node_pattern.variable {
                             self.matched_vars.insert(var, vec![QueryResult::Node(node)]);
                         }
@@ -655,29 +706,28 @@ impl Query {
                 // Edge merge: match or create edge
                 // This is a simplified implementation
                 // In practice, would need to check if edge already exists
-                if let (Some(start_matches), Some(end_matches)) = 
-                    (self.matched_vars.get(&start_var), self.matched_vars.get(&end_var)) {
-                    
-                    if let (Some(QueryResult::Node(start)), Some(QueryResult::Node(end))) = 
-                        (start_matches.first(), end_matches.first()) {
-                        
+                if let (Some(start_matches), Some(end_matches)) = (
+                    self.matched_vars.get(&start_var),
+                    self.matched_vars.get(&end_var),
+                ) {
+                    if let (Some(QueryResult::Node(start)), Some(QueryResult::Node(end))) =
+                        (start_matches.first(), end_matches.first())
+                    {
                         // Check if edge already exists
                         let edges_dict = self.graph.edges.bind(py);
-                        let mut edge_found = false;
-                        
+
                         for (_uid, edge_obj) in edges_dict.iter() {
                             let edge: Edge = edge_obj.extract()?;
                             if edge.start.uid() == start.uid() && edge.end.uid() == end.uid() {
                                 // Edge exists
                                 if let Some(ref var) = edge_pattern.variable {
-                                    let matches = self.matched_vars.entry(var.clone()).or_insert_with(Vec::new);
+                                    let matches = self.matched_vars.entry(var.clone()).or_default();
                                     matches.push(QueryResult::Edge(edge));
                                 }
-                                edge_found = true;
                                 break;
                             }
                         }
-                        
+
                         // If edge not found, would create it here
                         // For now, we skip edge creation in merge
                     }
@@ -691,7 +741,7 @@ impl Query {
         // Delete nodes/edges that were matched
         let nodes_dict = self.graph.nodes.bind(py);
         let edges_dict = self.graph.edges.bind(py);
-        
+
         for var in vars {
             if let Some(results) = self.matched_vars.get(&var) {
                 for result in results {
@@ -710,7 +760,7 @@ impl Query {
                 }
             }
         }
-        
+
         Ok(())
     }
 
@@ -718,16 +768,13 @@ impl Query {
         // Set properties on matched nodes
         if let Some(results) = self.matched_vars.get_mut(&var) {
             for result in results {
-                match result {
-                    QueryResult::Node(node) => {
-                        // Update node properties by merging new props into existing
-                        let node_props = node.properties.bind(py);
-                        let new_props = props.bind(py);
-                        for (key, value) in new_props.iter() {
-                            node_props.set_item(key, value)?;
-                        }
+                if let QueryResult::Node(node) = result {
+                    // Update node properties by merging new props into existing
+                    let node_props = node.properties.bind(py);
+                    let new_props = props.bind(py);
+                    for (key, value) in new_props.iter() {
+                        node_props.set_item(key, value)?;
                     }
-                    _ => {}
                 }
             }
         }

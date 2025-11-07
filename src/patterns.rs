@@ -4,14 +4,14 @@
 //! in the graph. These patterns are used by the Query system to find matching
 //! elements in the graph.
 
+use crate::errors::ImplicaError;
+use crate::graph::Node;
+use crate::term::Term;
+use crate::type_schema::TypeSchema;
+use crate::types::{python_to_type, Type};
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
 use std::collections::HashMap;
-use crate::types::{Type, python_to_type};
-use crate::term::Term;
-use crate::type_schema::TypeSchema;
-use crate::graph::Node;
-use crate::errors::ImplicaError;
 
 /// Represents a node pattern in a Cypher-like query.
 ///
@@ -236,7 +236,7 @@ pub struct EdgePattern {
     pub term_type_schema: Option<TypeSchema>,
     pub properties: HashMap<String, PyObject>,
     #[pyo3(get)]
-    pub direction: String,  // "forward", "backward", "any"
+    pub direction: String, // "forward", "backward", "any"
 }
 
 impl Clone for EdgePattern {
@@ -333,7 +333,10 @@ impl EdgePattern {
     }
 
     fn __repr__(&self) -> String {
-        format!("EdgePattern(variable={:?}, direction={})", self.variable, self.direction)
+        format!(
+            "EdgePattern(variable={:?}, direction={})",
+            self.variable, self.direction
+        )
     }
 }
 
@@ -347,7 +350,7 @@ impl EdgePattern {
 ///
 /// - Nodes: `(variable)`, `(variable:Type)`, `(:Type)`, `()`
 /// - Edges: `-[variable]->` (forward), `<-[variable]-` (backward), `-[variable]-` (any)
-/// - Typed edges: `-[var:schema]->` 
+/// - Typed edges: `-[var:schema]->`
 ///
 /// # Examples
 ///
@@ -490,26 +493,23 @@ impl PathPattern {
     pub fn parse(pattern: String) -> PyResult<Self> {
         // Enhanced parser for Cypher-like path patterns
         // Supports: (n)-[e]->(m), (n:A)-[e:term]->(m:B), etc.
-        
+
         let pattern = pattern.trim();
         if pattern.is_empty() {
-            return Err(ImplicaError::invalid_pattern(
-                pattern,
-                "Pattern cannot be empty"
-            ).into());
+            return Err(ImplicaError::invalid_pattern(pattern, "Pattern cannot be empty").into());
         }
 
         let mut nodes = Vec::new();
         let mut edges = Vec::new();
-        
+
         // Split pattern into components
         let components = tokenize_pattern(pattern)?;
-        
+
         // Parse components in sequence
         let mut i = 0;
         while i < components.len() {
             let comp = &components[i];
-            
+
             match comp.kind {
                 TokenKind::Node => {
                     nodes.push(parse_node_pattern(&comp.text)?);
@@ -518,7 +518,7 @@ impl PathPattern {
                     edges.push(parse_edge_pattern(&comp.text)?);
                 }
             }
-            
+
             i += 1;
         }
 
@@ -526,23 +526,29 @@ impl PathPattern {
         if nodes.is_empty() {
             return Err(ImplicaError::invalid_pattern(
                 pattern,
-                "Pattern must contain at least one node"
-            ).into());
+                "Pattern must contain at least one node",
+            )
+            .into());
         }
 
         // Validate: edges should be between nodes
         if edges.len() >= nodes.len() {
             return Err(ImplicaError::invalid_pattern(
                 pattern,
-                "Invalid pattern: too many edges for the number of nodes"
-            ).into());
+                "Invalid pattern: too many edges for the number of nodes",
+            )
+            .into());
         }
 
         Ok(PathPattern { nodes, edges })
     }
 
     fn __repr__(&self) -> String {
-        format!("PathPattern({} nodes, {} edges)", self.nodes.len(), self.edges.len())
+        format!(
+            "PathPattern({} nodes, {} edges)",
+            self.nodes.len(),
+            self.edges.len()
+        )
     }
 }
 
@@ -587,13 +593,13 @@ fn tokenize_pattern(pattern: &str) -> PyResult<Vec<Token>> {
     let mut in_parens = 0;
     let mut in_brackets = 0;
     let mut edge_buffer = String::new();
-    
+
     let chars: Vec<char> = pattern.chars().collect();
     let mut i = 0;
-    
+
     while i < chars.len() {
         let c = chars[i];
-        
+
         match c {
             '(' => {
                 if in_brackets == 0 && in_parens == 0 {
@@ -665,37 +671,36 @@ fn tokenize_pattern(pattern: &str) -> PyResult<Vec<Token>> {
                 } else {
                     return Err(ImplicaError::invalid_pattern(
                         pattern,
-                        format!("Unexpected character '{}' outside of node or edge pattern", c)
-                    ).into());
+                        format!(
+                            "Unexpected character '{}' outside of node or edge pattern",
+                            c
+                        ),
+                    )
+                    .into());
                 }
             }
         }
-        
+
         i += 1;
     }
-    
+
     // Check for unclosed patterns
     if in_parens != 0 {
-        return Err(ImplicaError::invalid_pattern(
-            pattern,
-            "Unmatched parentheses in pattern"
-        ).into());
+        return Err(
+            ImplicaError::invalid_pattern(pattern, "Unmatched parentheses in pattern").into(),
+        );
     }
     if in_brackets != 0 {
-        return Err(ImplicaError::invalid_pattern(
-            pattern,
-            "Unmatched brackets in pattern"
-        ).into());
+        return Err(ImplicaError::invalid_pattern(pattern, "Unmatched brackets in pattern").into());
     }
-    
+
     // Add remaining edge if any
     if !edge_buffer.is_empty() {
-        return Err(ImplicaError::invalid_pattern(
-            pattern,
-            "Pattern cannot end with an edge"
-        ).into());
+        return Err(
+            ImplicaError::invalid_pattern(pattern, "Pattern cannot end with an edge").into(),
+        );
     }
-    
+
     Ok(tokens)
 }
 
@@ -720,17 +725,18 @@ fn parse_node_pattern(s: &str) -> PyResult<NodePattern> {
     if !s.starts_with('(') || !s.ends_with(')') {
         return Err(ImplicaError::invalid_pattern(
             s,
-            "Node pattern must be enclosed in parentheses"
-        ).into());
+            "Node pattern must be enclosed in parentheses",
+        )
+        .into());
     }
 
     let inner = &s[1..s.len() - 1].trim();
-    
+
     // Parse: (var:type {props}) or (var:type) or (var) or (:type)
     let mut variable = None;
     let mut type_schema = None;
     let properties = HashMap::new(); // Properties parsing could be added later
-    
+
     if inner.is_empty() {
         return Ok(NodePattern {
             variable: None,
@@ -754,7 +760,7 @@ fn parse_node_pattern(s: &str) -> PyResult<NodePattern> {
         if !var_part.is_empty() {
             variable = Some(var_part.to_string());
         }
-        
+
         let type_part = content[colon_idx + 1..].trim();
         if !type_part.is_empty() {
             // Check if it's already a schema pattern (contains $)
@@ -800,14 +806,13 @@ fn parse_node_pattern(s: &str) -> PyResult<NodePattern> {
 /// * `ValueError` if both <- and -> appear (invalid direction)
 fn parse_edge_pattern(s: &str) -> PyResult<EdgePattern> {
     let s = s.trim();
-    
+
     // Determine direction based on arrows
     // Patterns: -[e]-> (forward), <-[e]- (backward), -[e]- (any)
     let direction = if s.starts_with('<') && s.contains("->") {
-        return Err(ImplicaError::invalid_pattern(
-            s,
-            "Cannot have both <- and -> in same edge"
-        ).into());
+        return Err(
+            ImplicaError::invalid_pattern(s, "Cannot have both <- and -> in same edge").into(),
+        );
     } else if s.starts_with("<-") || (s.starts_with('<') && s.contains('-')) {
         "backward"
     } else if s.contains("->") || s.ends_with('>') {
@@ -817,28 +822,19 @@ fn parse_edge_pattern(s: &str) -> PyResult<EdgePattern> {
     };
 
     // Extract the part inside brackets
-    let bracket_start = s.find('[').ok_or_else(|| {
-        ImplicaError::invalid_pattern(
-            s,
-            "Edge pattern must contain brackets"
-        )
-    })?;
+    let bracket_start = s
+        .find('[')
+        .ok_or_else(|| ImplicaError::invalid_pattern(s, "Edge pattern must contain brackets"))?;
     let bracket_end = s.rfind(']').ok_or_else(|| {
-        ImplicaError::invalid_pattern(
-            s,
-            "Edge pattern must contain closing bracket"
-        )
+        ImplicaError::invalid_pattern(s, "Edge pattern must contain closing bracket")
     })?;
 
     if bracket_end <= bracket_start {
-        return Err(ImplicaError::invalid_pattern(
-            s,
-            "Brackets are mismatched"
-        ).into());
+        return Err(ImplicaError::invalid_pattern(s, "Brackets are mismatched").into());
     }
 
     let inner = &s[bracket_start + 1..bracket_end].trim();
-    
+
     let mut variable = None;
     let mut term_type_schema = None;
     let properties = HashMap::new(); // Properties parsing for future expansion
@@ -857,7 +853,7 @@ fn parse_edge_pattern(s: &str) -> PyResult<EdgePattern> {
             if !var_part.is_empty() {
                 variable = Some(var_part.to_string());
             }
-            
+
             let term_part = content[colon_idx + 1..].trim();
             if !term_part.is_empty() {
                 // Check if already a schema pattern

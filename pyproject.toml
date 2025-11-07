@@ -16,8 +16,28 @@ dynamic = ["version"]
 dev = [
     "pytest>=8.4.2",
     "pytest-cov>=7.0.0",
+    "black>=25.9.0",
 ]
 
 [tool.maturin]
 features = ["pyo3/extension-module"]
 python-source = "python"
+
+[tool.black]
+line-length = 100
+target-version = ["py38", "py39", "py310", "py311", "py312"]
+include = '\.pyi?$'
+extend-exclude = '''
+/(
+  # directories
+  \.eggs
+  | \.git
+  | \.hg
+  | \.mypy_cache
+  | \.tox
+  | \.venv
+  | build
+  | dist
+  | target
+)/
+'''

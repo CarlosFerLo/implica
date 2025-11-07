@@ -20,8 +20,11 @@ tags: []
 git clone <repository-url>
 cd implica
 
-# Instalar maturin
-pip install maturin
+# Instalar dependencias de desarrollo
+pip install -e ".[dev]"
+
+# Configurar Git hooks (recomendado)
+./setup-hooks.sh
 
 # Construir e instalar en modo desarrollo
 maturin develop
@@ -29,6 +32,19 @@ maturin develop
 # Verificar la instalación
 python -c "import implica; print('✓ Implica instalado correctamente')"
 ```
+
+### Git Hooks
+
+El proyecto incluye hooks de Git que automáticamente:
+
+- Formatean código Rust con `cargo fmt`
+- Verifican código Rust con `cargo clippy`
+- Formatean código Python con `black`
+- Previenen commits si hay errores de linting que no pueden auto-corregirse
+
+**Configuración**: Ejecuta `./setup-hooks.sh` después de clonar el repositorio.
+
+**Bypass temporal** (no recomendado): `git commit --no-verify`
 
 ## Estructura del Proyecto
 

@@ -3,11 +3,11 @@
 //! This module provides the `Term` structure representing typed terms in the type theory.
 //! Terms have a name and an associated type, and support application operations.
 
-use pyo3::prelude::*;
-use std::sync::Arc;
-use crate::types::{Type, python_to_type, type_to_python};
 use crate::errors::ImplicaError;
-use sha2::{Sha256, Digest};
+use crate::types::{python_to_type, type_to_python, Type};
+use pyo3::prelude::*;
+use sha2::{Digest, Sha256};
+use std::sync::Arc;
 
 /// Represents a typed term in the type theory.
 ///
@@ -150,24 +150,26 @@ impl Term {
         // Check if self has an application type
         if let Type::Application(app) = &*self.r#type {
             // Check if other has the correct type (should match app.left)
-            if &*other.r#type == &*app.left {
+            if *other.r#type == *app.left {
                 // Return a term with type app.right and name (self.name other.name)
                 let new_name = format!("({} {})", self.name, other.name);
                 let new_type_py = type_to_python(py, &app.right)?;
-                Term::new(new_name, new_type_py.into())
+                Term::new(new_name, new_type_py)
             } else {
                 Err(ImplicaError::type_mismatch_with_context(
                     app.left.to_string(),
                     other.r#type.to_string(),
-                    "function application"
-                ).into())
+                    "function application",
+                )
+                .into())
             }
         } else {
             Err(ImplicaError::TypeMismatch {
                 expected: "application type (A -> B)".to_string(),
                 got: self.r#type.to_string(),
                 context: Some("term application".to_string()),
-            }.into())
+            }
+            .into())
         }
     }
 
@@ -188,7 +190,7 @@ impl Term {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::{Variable, Application};
+    use crate::types::{Application, Variable};
 
     #[test]
     fn test_term_creation() {
@@ -196,7 +198,7 @@ mod tests {
         Python::with_gil(|py| {
             let var_a = Py::new(py, Variable::new("A".to_string())).unwrap();
             let term = Term::new("x".to_string(), var_a.into()).unwrap();
-            
+
             assert_eq!(term.name, "x");
             assert_eq!(term.__str__(), "x:A");
             assert!(term.uid().starts_with("term_x_"));
@@ -209,15 +211,16 @@ mod tests {
         Python::with_gil(|py| {
             let var_a = Py::new(py, Variable::new("A".to_string())).unwrap();
             let var_b = Py::new(py, Variable::new("B".to_string())).unwrap();
-            
-            let app = Py::new(py, Application::new(
-                var_a.clone_ref(py).into(),
-                var_b.into(),
-            ).unwrap()).unwrap();
-            
+
+            let app = Py::new(
+                py,
+                Application::new(var_a.clone_ref(py).into(), var_b.into()).unwrap(),
+            )
+            .unwrap();
+
             let f = Term::new("f".to_string(), app.into()).unwrap();
             let x = Term::new("x".to_string(), var_a.into()).unwrap();
-            
+
             let result = f.__call__(&x, py).unwrap();
             assert_eq!(result.name, "(f x)");
         });

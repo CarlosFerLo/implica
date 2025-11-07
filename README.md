@@ -234,6 +234,28 @@ person_nodes = graph.get_nodes_by_type(type_uid)
 
 ## Development
 
+### Setup
+
+1. Clone the repository
+2. Install development dependencies:
+
+```bash
+# Install Python dependencies
+pip install -e ".[dev]"
+
+# Set up Git hooks (recommended)
+./setup-hooks.sh
+```
+
+The Git hooks will automatically:
+
+- Format Rust code with `cargo fmt`
+- Check Rust code with `cargo clippy`
+- Format Python code with `black`
+- Prevent commits if linting issues can't be auto-fixed
+
+This ensures all code follows the project's style guidelines before committing.
+
 ### Build
 
 ```bash
@@ -251,7 +273,26 @@ maturin build --release
 cargo test
 
 # Python tests
+pytest tests/
+
+# Run all tests
 python test_api.py
+```
+
+### Linting
+
+```bash
+# Format Rust code
+cargo fmt --all
+
+# Check Rust code
+cargo clippy --all-targets --all-features -- -D warnings
+
+# Format Python code
+black .
+
+# Check Python formatting
+black --check .
 ```
 
 ## License
