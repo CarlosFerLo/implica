@@ -71,7 +71,7 @@ impl Term {
     /// ```
     #[new]
     pub fn new(name: String, r#type: Py<PyAny>) -> PyResult<Self> {
-        Python::with_gil(|py| {
+        Python::attach(|py| {
             let type_obj = python_to_type(r#type.bind(py))?;
             Ok(Term {
                 name,
@@ -87,7 +87,7 @@ impl Term {
     ///
     /// The type as a Python object (Variable or Application)
     #[getter]
-    pub fn get_type(&self, py: Python) -> PyResult<PyObject> {
+    pub fn get_type(&self, py: Python) -> PyResult<Py<PyAny>> {
         type_to_python(py, &self.r#type)
     }
 
@@ -194,8 +194,8 @@ mod tests {
 
     #[test]
     fn test_term_creation() {
-        pyo3::prepare_freethreaded_python();
-        Python::with_gil(|py| {
+        Python::initialize();
+        Python::attach(|py| {
             let var_a = Py::new(py, Variable::new("A".to_string())).unwrap();
             let term = Term::new("x".to_string(), var_a.into()).unwrap();
 
@@ -207,8 +207,8 @@ mod tests {
 
     #[test]
     fn test_term_application() {
-        pyo3::prepare_freethreaded_python();
-        Python::with_gil(|py| {
+        Python::initialize();
+        Python::attach(|py| {
             let var_a = Py::new(py, Variable::new("A".to_string())).unwrap();
             let var_b = Py::new(py, Variable::new("B".to_string())).unwrap();
 

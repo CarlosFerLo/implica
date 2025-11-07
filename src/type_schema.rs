@@ -95,7 +95,7 @@ impl TypeSchema {
     /// assert schema.matches(person_type) == True
     /// ```
     pub fn matches(&self, r#type: Py<PyAny>) -> PyResult<bool> {
-        Python::with_gil(|py| {
+        Python::attach(|py| {
             let type_obj = crate::types::python_to_type(r#type.bind(py))?;
             Ok(self.matches_internal(&type_obj).is_some())
         })
@@ -127,7 +127,7 @@ impl TypeSchema {
     /// captures = schema.capture(func_type)
     /// # captures = {"input": Variable("A"), "output": Variable("B")}
     /// ```
-    pub fn capture(&self, r#type: Py<PyAny>, py: Python) -> PyResult<PyObject> {
+    pub fn capture(&self, r#type: Py<PyAny>, py: Python) -> PyResult<Py<PyAny>> {
         let type_obj = crate::types::python_to_type(r#type.bind(py))?;
         if let Some(captures) = self.matches_internal(&type_obj) {
             let dict = pyo3::types::PyDict::new(py);
@@ -320,8 +320,8 @@ mod tests {
 
     #[test]
     fn test_application_schema() {
-        pyo3::prepare_freethreaded_python();
-        Python::with_gil(|py| {
+        Python::initialize();
+        Python::attach(|py| {
             let var_a = Py::new(py, Variable::new("A".to_string())).unwrap();
             let var_b = Py::new(py, Variable::new("B".to_string())).unwrap();
             let app = Application::new(var_a.into(), var_b.into()).unwrap();

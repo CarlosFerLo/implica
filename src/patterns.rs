@@ -54,12 +54,12 @@ pub struct NodePattern {
     pub variable: Option<String>,
     pub type_obj: Option<Type>,
     pub type_schema: Option<TypeSchema>,
-    pub properties: HashMap<String, PyObject>,
+    pub properties: HashMap<String, Py<PyAny>>,
 }
 
 impl Clone for NodePattern {
     fn clone(&self) -> Self {
-        Python::with_gil(|py| {
+        Python::attach(|py| {
             let mut props = HashMap::new();
             for (k, v) in &self.properties {
                 props.insert(k.clone(), v.clone_ref(py));
@@ -109,7 +109,7 @@ impl NodePattern {
         type_schema: Option<Py<PyAny>>,
         properties: Option<Py<PyDict>>,
     ) -> PyResult<Self> {
-        Python::with_gil(|py| {
+        Python::attach(|py| {
             let type_obj = if let Some(t) = r#type {
                 Some(python_to_type(t.bind(py))?)
             } else {
@@ -232,14 +232,14 @@ pub struct EdgePattern {
     pub variable: Option<String>,
     pub term: Option<Term>,
     pub term_type_schema: Option<TypeSchema>,
-    pub properties: HashMap<String, PyObject>,
+    pub properties: HashMap<String, Py<PyAny>>,
     #[pyo3(get)]
     pub direction: String, // "forward", "backward", "any"
 }
 
 impl Clone for EdgePattern {
     fn clone(&self) -> Self {
-        Python::with_gil(|py| {
+        Python::attach(|py| {
             let mut props = HashMap::new();
             for (k, v) in &self.properties {
                 props.insert(k.clone(), v.clone_ref(py));
@@ -293,7 +293,7 @@ impl EdgePattern {
         properties: Option<Py<PyDict>>,
         direction: String,
     ) -> PyResult<Self> {
-        Python::with_gil(|py| {
+        Python::attach(|py| {
             let term_obj = if let Some(t) = term {
                 Some(t.bind(py).extract::<Term>()?)
             } else {

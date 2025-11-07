@@ -46,7 +46,7 @@ pub struct Node {
 
 impl Clone for Node {
     fn clone(&self) -> Self {
-        Python::with_gil(|py| Node {
+        Python::attach(|py| Node {
             r#type: self.r#type.clone(),
             properties: self.properties.clone_ref(py),
             uid_cache: self.uid_cache.clone(),
@@ -82,7 +82,7 @@ impl Node {
     #[new]
     #[pyo3(signature = (r#type, properties=None))]
     pub fn new(r#type: Py<PyAny>, properties: Option<Py<PyDict>>) -> PyResult<Self> {
-        Python::with_gil(|py| {
+        Python::attach(|py| {
             let type_obj = python_to_type(r#type.bind(py))?;
             let props = properties.unwrap_or_else(|| PyDict::new(py).into());
             Ok(Node {
@@ -99,7 +99,7 @@ impl Node {
     ///
     /// The type as a Python object (Variable or Application)
     #[getter]
-    pub fn get_type(&self, py: Python) -> PyResult<PyObject> {
+    pub fn get_type(&self, py: Python) -> PyResult<Py<PyAny>> {
         type_to_python(py, &self.r#type)
     }
 
@@ -177,7 +177,7 @@ pub struct Edge {
 
 impl Clone for Edge {
     fn clone(&self) -> Self {
-        Python::with_gil(|py| Edge {
+        Python::attach(|py| Edge {
             term: self.term.clone(),
             start: self.start.clone(),
             end: self.end.clone(),
@@ -221,7 +221,7 @@ impl Edge {
         end: Py<PyAny>,
         properties: Option<Py<PyDict>>,
     ) -> PyResult<Self> {
-        Python::with_gil(|py| {
+        Python::attach(|py| {
             let term_obj = term.bind(py).extract::<Term>()?;
             let start_obj = start.bind(py).extract::<Node>()?;
             let end_obj = end.bind(py).extract::<Node>()?;
@@ -339,7 +339,7 @@ pub struct Graph {
 
 impl Clone for Graph {
     fn clone(&self) -> Self {
-        Python::with_gil(|py| Graph {
+        Python::attach(|py| Graph {
             nodes: self.nodes.clone_ref(py),
             edges: self.edges.clone_ref(py),
         })
@@ -361,7 +361,7 @@ impl Graph {
     /// ```
     #[new]
     pub fn new() -> PyResult<Self> {
-        Python::with_gil(|py| {
+        Python::attach(|py| {
             Ok(Graph {
                 nodes: PyDict::new(py).into(),
                 edges: PyDict::new(py).into(),
@@ -503,7 +503,7 @@ impl Graph {
 
 impl Default for Graph {
     fn default() -> Self {
-        Python::with_gil(|py| Graph {
+        Python::attach(|py| Graph {
             nodes: PyDict::new(py).into(),
             edges: PyDict::new(py).into(),
         })
@@ -517,8 +517,8 @@ mod tests {
 
     #[test]
     fn test_node_creation() {
-        pyo3::prepare_freethreaded_python();
-        Python::with_gil(|py| {
+        Python::initialize();
+        Python::attach(|py| {
             let var_a = Py::new(py, Variable::new("A".to_string())).unwrap();
             let node = Node::new(var_a.into(), None).unwrap();
 
@@ -529,8 +529,8 @@ mod tests {
 
     #[test]
     fn test_graph_creation() {
-        pyo3::prepare_freethreaded_python();
-        Python::with_gil(|py| {
+        Python::initialize();
+        Python::attach(|py| {
             let graph = Graph::new().unwrap();
             assert_eq!(graph.__str__(py), "Graph(0 nodes, 0 edges)");
         });

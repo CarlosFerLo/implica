@@ -243,7 +243,7 @@ impl Application {
     /// ```
     #[new]
     pub fn new(left: Py<PyAny>, right: Py<PyAny>) -> PyResult<Self> {
-        Python::with_gil(|py| {
+        Python::attach(|py| {
             let left_type = python_to_type(left.bind(py))?;
             let right_type = python_to_type(right.bind(py))?;
             Ok(Application {
@@ -260,7 +260,7 @@ impl Application {
     ///
     /// The input type as a Python object
     #[getter]
-    pub fn left(&self, py: Python) -> PyResult<PyObject> {
+    pub fn left(&self, py: Python) -> PyResult<Py<PyAny>> {
         type_to_python(py, &self.left)
     }
 
@@ -270,7 +270,7 @@ impl Application {
     ///
     /// The output type as a Python object
     #[getter]
-    pub fn right(&self, py: Python) -> PyResult<PyObject> {
+    pub fn right(&self, py: Python) -> PyResult<Py<PyAny>> {
         type_to_python(py, &self.right)
     }
 
@@ -364,7 +364,7 @@ pub fn python_to_type(obj: &Bound<'_, PyAny>) -> PyResult<Type> {
 /// # Errors
 ///
 /// Returns an error if the Python object creation fails
-pub fn type_to_python(py: Python, typ: &Type) -> PyResult<PyObject> {
+pub fn type_to_python(py: Python, typ: &Type) -> PyResult<Py<PyAny>> {
     match typ {
         Type::Variable(v) => Ok(Py::new(py, v.clone())?.into()),
         Type::Application(a) => Ok(Py::new(py, a.clone())?.into()),

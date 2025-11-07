@@ -82,7 +82,7 @@ pub enum QueryOperation {
 
 impl Clone for QueryOperation {
     fn clone(&self) -> Self {
-        Python::with_gil(|py| match self {
+        Python::attach(|py| match self {
             QueryOperation::Match(m) => QueryOperation::Match(m.clone()),
             QueryOperation::Where(w) => QueryOperation::Where(w.clone()),
             QueryOperation::Create(c) => QueryOperation::Create(c.clone()),
@@ -269,7 +269,7 @@ impl Query {
     ///     print(row["n"])
     /// ```
     #[pyo3(signature = (*variables))]
-    pub fn return_(&mut self, py: Python, variables: Vec<String>) -> PyResult<Vec<PyObject>> {
+    pub fn return_(&mut self, py: Python, variables: Vec<String>) -> PyResult<Vec<Py<PyAny>>> {
         // Execute all operations to build matched_vars
         self.execute_operations(py)?;
 
@@ -332,7 +332,7 @@ impl Query {
         &mut self,
         py: Python,
         variables: Vec<String>,
-    ) -> PyResult<Vec<PyObject>> {
+    ) -> PyResult<Vec<Py<PyAny>>> {
         // For now, just return regular results (would need proper deduplication)
         self.return_(py, variables)
     }
@@ -374,7 +374,7 @@ impl Query {
     }
 
     pub fn set(&mut self, variable: String, properties: Py<PyDict>) -> PyResult<Self> {
-        Python::with_gil(|py| {
+        Python::attach(|py| {
             let props_cloned = properties.clone_ref(py);
             self.operations
                 .push(QueryOperation::Set(variable, props_cloned));
@@ -461,7 +461,7 @@ impl Query {
 impl Query {
     #[allow(unused_variables)]
     fn extract_var(obj: Option<Py<PyAny>>) -> PyResult<String> {
-        Python::with_gil(|py| {
+        Python::attach(|py| {
             if let Some(o) = obj {
                 if let Ok(s) = o.bind(py).extract::<String>() {
                     Ok(s)
@@ -479,7 +479,7 @@ impl Query {
     }
 
     fn extract_var_or_none(obj: Option<Py<PyAny>>) -> PyResult<Option<String>> {
-        Python::with_gil(|py| {
+        Python::attach(|py| {
             if let Some(o) = obj {
                 if let Ok(s) = o.bind(py).extract::<String>() {
                     Ok(Some(s))
@@ -788,8 +788,8 @@ mod tests {
 
     #[test]
     fn test_query_creation() {
-        pyo3::prepare_freethreaded_python();
-        Python::with_gil(|py| {
+        Python::initialize();
+        Python::attach(|py| {
             let graph = Graph::new().unwrap();
             let query = Query::new(graph);
             assert_eq!(query.operations.len(), 0);
