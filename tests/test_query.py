@@ -118,9 +118,7 @@ def test_query_merge_no_properties(graph, var_a):
 def test_query_delete_basic(graph, var_a):
     """Test basic delete operation"""
     # Create a node
-    graph.query().create(
-        node="n", type=var_a, properties={"name": "ToDelete"}
-    ).execute()
+    graph.query().create(node="n", type=var_a, properties={"name": "ToDelete"}).execute()
 
     # Verify node exists
     results_before = graph.query().match(node="n", type=var_a).return_("n")
@@ -203,9 +201,7 @@ def test_query_delete_after_create(graph, var_a):
 def test_query_merge_then_delete(graph, var_a):
     """Test merge followed by delete"""
     # Merge a node
-    graph.query().merge(
-        node="n", type=var_a, properties={"status": "temporary"}
-    ).execute()
+    graph.query().merge(node="n", type=var_a, properties={"status": "temporary"}).execute()
 
     # Verify it exists
     results_before = graph.query().match(node="n", type=var_a).return_("n")
@@ -220,9 +216,7 @@ def test_query_merge_then_delete(graph, var_a):
 def test_query_complex_workflow(graph, var_a, var_b):
     """Test complex query with multiple operations"""
     # Create initial node
-    graph.query().create(
-        node="start", type=var_a, properties={"name": "Start"}
-    ).execute()
+    graph.query().create(node="start", type=var_a, properties={"name": "Start"}).execute()
 
     # Merge second node (create if not exists)
     graph.query().merge(node="end", type=var_b, properties={"name": "End"}).execute()

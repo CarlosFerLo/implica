@@ -59,19 +59,36 @@ if [ -n "$STAGED_PYTHON_FILES" ]; then
     # Check if black is installed
     if ! command -v black &> /dev/null; then
         echo -e "${YELLOW}⚠️  black is not installed. Installing...${NC}"
-        pip install black > /dev/null 2>&1
+        if ! pip install black > /dev/null 2>&1; then
+            echo -e "${RED}❌ Failed to install black${NC}"
+            LINT_FAILED=1
+        fi
     fi
     
-    # Run black on staged Python files
-    if ! echo "$STAGED_PYTHON_FILES" | xargs black --check > /dev/null 2>&1; then
-        echo -e "${YELLOW}⚠️  Python code was not formatted. Running black...${NC}"
-        echo "$STAGED_PYTHON_FILES" | xargs black
-        
-        # Stage the formatted files
-        echo "$STAGED_PYTHON_FILES" | xargs git add
-        echo -e "${GREEN}✅ Python code formatted successfully${NC}"
-    else
-        echo -e "${GREEN}✅ Python code is already properly formatted${NC}"
+    # Only proceed if black is available
+    if command -v black &> /dev/null; then
+        # Run black on staged Python files
+        if ! echo "$STAGED_PYTHON_FILES" | xargs black --check > /dev/null 2>&1; then
+            echo -e "${YELLOW}⚠️  Python code was not formatted. Running black...${NC}"
+            
+            # Try to format with black
+            if echo "$STAGED_PYTHON_FILES" | xargs black; then
+                # Verify formatting was successful
+                if echo "$STAGED_PYTHON_FILES" | xargs black --check > /dev/null 2>&1; then
+                    # Stage the formatted files
+                    echo "$STAGED_PYTHON_FILES" | xargs git add
+                    echo -e "${GREEN}✅ Python code formatted successfully${NC}"
+                else
+                    echo -e "${RED}❌ Black formatting verification failed${NC}"
+                    LINT_FAILED=1
+                fi
+            else
+                echo -e "${RED}❌ Black failed to format Python files${NC}"
+                LINT_FAILED=1
+            fi
+        else
+            echo -e "${GREEN}✅ Python code is already properly formatted${NC}"
+        fi
     fi
 fi
 

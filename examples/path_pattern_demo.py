@@ -52,9 +52,7 @@ def main():
     print(f"   Nodos: {len(pattern5.nodes)}, Aristas: {len(pattern5.edges)}")
     print(f"   Nodo 1: {pattern5.nodes[0].variable}")
     print(f"   Nodo 2: {pattern5.nodes[1].variable}")
-    print(
-        f"   Arista: {pattern5.edges[0].variable}, Dirección: {pattern5.edges[0].direction}"
-    )
+    print(f"   Arista: {pattern5.edges[0].variable}, Dirección: {pattern5.edges[0].direction}")
     print()
 
     # 6. Múltiples aristas

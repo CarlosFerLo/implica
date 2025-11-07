@@ -266,9 +266,7 @@ class TestErrorMessageQuality:
 
         error_msg = str(exc_info.value)
         # Error should reference the pattern somehow
-        assert (
-            "invalid pattern" in error_msg.lower() or "unmatched" in error_msg.lower()
-        )
+        assert "invalid pattern" in error_msg.lower() or "unmatched" in error_msg.lower()
 
 
 class TestErrorExceptionTypes:
@@ -387,9 +385,7 @@ class TestRegressionTests:
         for pattern_str in valid_patterns:
             try:
                 pattern = implica.PathPattern.parse(pattern_str)
-                assert (
-                    pattern is not None
-                ), f"Pattern '{pattern_str}' should parse successfully"
+                assert pattern is not None, f"Pattern '{pattern_str}' should parse successfully"
             except Exception as e:
                 pytest.fail(f"Pattern '{pattern_str}' should be valid but raised: {e}")
 
