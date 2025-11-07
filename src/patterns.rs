@@ -119,10 +119,8 @@ impl NodePattern {
             let schema = if let Some(s) = type_schema {
                 if let Ok(schema_str) = s.bind(py).extract::<String>() {
                     Some(TypeSchema::new(schema_str))
-                } else if let Ok(schema_obj) = s.bind(py).extract::<TypeSchema>() {
-                    Some(schema_obj)
                 } else {
-                    None
+                    s.bind(py).extract::<TypeSchema>().ok()
                 }
             } else {
                 None
@@ -305,10 +303,8 @@ impl EdgePattern {
             let schema = if let Some(s) = term_type_schema {
                 if let Ok(schema_str) = s.bind(py).extract::<String>() {
                     Some(TypeSchema::new(schema_str))
-                } else if let Ok(schema_obj) = s.bind(py).extract::<TypeSchema>() {
-                    Some(schema_obj)
                 } else {
-                    None
+                    s.bind(py).extract::<TypeSchema>().ok()
                 }
             } else {
                 None
