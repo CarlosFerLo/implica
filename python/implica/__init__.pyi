@@ -7,16 +7,24 @@ class BaseType:
     """
 
     # Methods to be implemented in subclasses
-    def uid(_self_) -> str: ...  # cached_
-    def __str__(_self_) -> str: ...
-    def __repr__(_self_) -> str: ...
+    def uid(self) -> str: ...  # cached_
+    def __str__(self) -> str: ...
+    def __repr__(self) -> str: ...
 
 class Variable(BaseType):
     name: str
 
+    def __init__(self, name: str) -> None: ...
+    def __hash__(self) -> int: ...
+    def __eq__(self, other: object) -> bool: ...
+
 class Application(BaseType):
     left: "Type"
     right: "Type"
+
+    def __init__(self, left: "Type", right: "Type") -> None: ...
+    def __hash__(self) -> int: ...
+    def __eq__(self, other: object) -> bool: ...
 
 Type = Variable | Application
 
@@ -30,14 +38,16 @@ class Term:
     name: str
     type: Type
 
-    def uid(_self_) -> str: ...  # Only depends on name + type + cached_
-    def __str__(_self_) -> str: ...
-    def __repr__(_self_) -> str: ...
-    def __call__(_self_, _other_: Term) -> Term:
+    def __init__(self, name: str, type: Type) -> None: ...
+    def uid(self) -> str: ...  # Only depends on name + type + cached_
+    def __str__(self) -> str: ...
+    def __repr__(self) -> str: ...
+    def __call__(self, other: "Term") -> "Term":
         """
         If the self has an application type and other has the corresponding self.type.left type,
         then return a term of type self.type.right and with name (self.name other.name).
         """
+        ...
 
 ## Graph_
 
@@ -49,11 +59,12 @@ class Node:
     """
 
     type: Type  # Immutable_
-    properties: Dict[str, Any] = {}  # Mutable_
+    properties: Dict[str, Any]  # Mutable_
 
-    def uid(_self_) -> str: ...  # Only depends on type + cached_
-    def __str__(_self_) -> str: ...
-    def __repr__(_self_) -> str: ...
+    def __init__(self, type: Type, properties: Dict[str, Any] = {}) -> None: ...
+    def uid(self) -> str: ...  # Only depends on type + cached_
+    def __str__(self) -> str: ...
+    def __repr__(self) -> str: ...
 
 ### Edge_
 
@@ -66,11 +77,18 @@ class Edge:
     start: Node  # Immutable_
     end: Node  # Immutable_
 
-    properties: Dict[str, Any] = {}  # Mutable_
+    properties: Dict[str, Any]  # Mutable_
 
-    def uid(_self_) -> str: ...  # Only depends on term + cached_
-    def __str__(_self_) -> str: ...
-    def __repr__(_self_) -> str: ...
+    def __init__(
+        self,
+        term: Term,
+        start: Node,
+        end: Node,
+        properties: Dict[str, Any] = {},
+    ) -> None: ...
+    def uid(self) -> str: ...  # Only depends on term + cached_
+    def __str__(self) -> str: ...
+    def __repr__(self) -> str: ...
 
 ### Graph_
 
@@ -82,7 +100,8 @@ class Graph:
     nodes: dict[str, Node]  # uid -> Node_
     edges: dict[str, Edge]  # uid -> Edge_
 
-    def query(_self_) -> "Query": ...
+    def __init__(self) -> None: ...
+    def query(self) -> "Query": ...
 
 ## Cypher Like querying_
 
@@ -108,11 +127,11 @@ class TypeSchema:
 
     pattern: str
 
-    def __init__(_self_, _pattern_: str): ...
-    def matches(_self_, _type_: Type) -> bool: ...
-    def capture(_self_, _type_: Type) -> Dict[str, Type]: ...
-    def __str__(_self_) -> str: ...
-    def __repr__(_self_) -> str: ...
+    def __init__(self, pattern: str) -> None: ...
+    def matches(self, type: Type) -> bool: ...
+    def capture(self, type: Type) -> Dict[str, Type]: ...
+    def __str__(self) -> str: ...
+    def __repr__(self) -> str: ...
 
 ### Query Components_
 
@@ -133,12 +152,12 @@ class NodePattern:
     properties: Dict[str, Any]  # Properties to match_
 
     def __init__(
-        _self_,
-        _variable_: str | None = None,
-        _type_: Type | None = None,
-        _type_schema_: str | TypeSchema | None = None,
-        _properties_: Dict[str, Any] = {},
-    ): ...
+        self,
+        variable: str | None = None,
+        type: Type | None = None,
+        type_schema: str | TypeSchema | None = None,
+        properties: Dict[str, Any] = {},
+    ) -> None: ...
 
 class EdgePattern:
     """
@@ -160,13 +179,13 @@ class EdgePattern:
     direction: str  # "forward" (->), "backward" (<-), or "any" (-)_
 
     def __init__(
-        _self_,
-        _variable_: str | None = None,
-        _term_: Term | None = None,
-        _term_type_schema_: str | TypeSchema | None = None,
-        _properties_: Dict[str, Any] = {},
-        _direction_: str = "forward",
-    ): ...
+        self,
+        variable: str | None = None,
+        term: Term | None = None,
+        term_type_schema: str | TypeSchema | None = None,
+        properties: Dict[str, Any] = {},
+        direction: str = "forward",
+    ) -> None: ...
 
 class PathPattern:
     """
@@ -191,11 +210,11 @@ class PathPattern:
     nodes: list[NodePattern]
     edges: list[EdgePattern]
 
-    def __init__(_self_, _pattern_: str | None = None): ...
-    def add_node(_self_, _pattern_: NodePattern) -> "PathPattern": ...
-    def add_edge(_self_, _pattern_: EdgePattern) -> "PathPattern": ...
+    def __init__(self, pattern: str | None = None) -> None: ...
+    def add_node(self, pattern: NodePattern) -> "PathPattern": ...
+    def add_edge(self, pattern: EdgePattern) -> "PathPattern": ...
     @staticmethod
-    def parse(_pattern_: str) -> "PathPattern":
+    def parse(pattern: str) -> "PathPattern":
         """
         Parse a Cypher-like path pattern string.
 
@@ -249,22 +268,22 @@ class Query:
 
     graph: Graph
 
-    def __init__(_self_, _graph_: Graph): ...
+    def __init__(self, graph: Graph) -> None: ...
 
     # MATCH clause - for reading patterns_
     def match(
-        _self_,
-        _pattern_: str | PathPattern | None = None,
+        self,
+        pattern: str | PathPattern | None = None,
         *,
-        _node_: str | None = None,
-        _edge_: str | None = None,
-        _start_: str | Node | None = None,
-        _end_: str | Node | None = None,
-        _type_: Type | None = None,
-        _type_schema_: str | TypeSchema | None = None,
-        _term_: Term | None = None,
-        _term_type_schema_: str | TypeSchema | None = None,
-        _properties_: Dict[str, Any] = {},
+        node: str | None = None,
+        edge: str | None = None,
+        start: str | Node | None = None,
+        end: str | Node | None = None,
+        type: Type | None = None,
+        type_schema: str | TypeSchema | None = None,
+        term: Term | None = None,
+        term_type_schema: str | TypeSchema | None = None,
+        properties: Dict[str, Any] = {},
     ) -> "Query":
         """
         Match nodes, edges, or paths in the graph.
@@ -301,7 +320,7 @@ class Query:
         """
         ...
     # WHERE clause - for filtering_
-    def where(_self_, _condition_: str) -> "Query":
+    def where(self, condition: str) -> "Query":
         """
         Add filtering conditions.
 
@@ -314,7 +333,7 @@ class Query:
         """
         ...
     # RETURN clause - for projecting results_
-    def return_(_self_, *_variables_: str) -> list[Dict[str, Node | Edge]]:
+    def return_(self, *variables: str) -> list[Dict[str, Node | Edge]]:
         """
         Return matched variables.
 
@@ -326,29 +345,29 @@ class Query:
         """
         ...
 
-    def return_count(_self_) -> int:
+    def return_count(self) -> int:
         """
         Return count of matches.
         """
         ...
 
-    def return_distinct(_self_, *_variables_: str) -> list[Dict[str, Node | Edge]]:
+    def return_distinct(self, *variables: str) -> list[Dict[str, Node | Edge]]:
         """
         Return distinct matched variables.
         """
         ...
     # CREATE clause - for creating nodes/edges_
     def create(
-        _self_,
-        _pattern_: str | PathPattern | None = None,
+        self,
+        pattern: str | PathPattern | None = None,
         *,
-        _node_: str | None = None,
-        _edge_: str | None = None,
-        _type_: Type | None = None,
-        _term_: Term | None = None,
-        _start_: str | Node | None = None,
-        _end_: str | Node | None = None,
-        _properties_: Dict[str, Any] = {},
+        node: str | None = None,
+        edge: str | None = None,
+        type: Type | None = None,
+        term: Term | None = None,
+        start: str | Node | None = None,
+        end: str | Node | None = None,
+        properties: Dict[str, Any] = {},
     ) -> "Query":
         """
         Create nodes or edges.
@@ -380,7 +399,7 @@ class Query:
         """
         ...
     # SET clause - for updating properties_
-    def set(_self_, _variable_: str, _properties_: Dict[str, Any]) -> "Query":
+    def set(self, variable: str, properties: Dict[str, Any]) -> "Query":
         """
         Set properties on matched nodes or edges.
 
@@ -390,7 +409,7 @@ class Query:
         """
         ...
     # DELETE clause - for removing nodes/edges_
-    def delete(_self_, *_variables_: str, _detach_: bool = False) -> "Query":
+    def delete(self, *variables: str, detach: bool = False) -> "Query":
         """
         Delete matched nodes or edges.
 
@@ -404,18 +423,18 @@ class Query:
         ...
     # MERGE clause - create if not exists_
     def merge(
-        _self_,
-        _pattern_: str | PathPattern | None = None,
+        self,
+        pattern: str | PathPattern | None = None,
         *,
-        _node_: str | None = None,
-        _edge_: str | None = None,
-        _type_: Type | None = None,
-        _type_schema_: str | TypeSchema | None = None,
-        _term_: Term | None = None,
-        _term_type_schema_: str | TypeSchema | None = None,
-        _start_: str | Node | None = None,
-        _end_: str | Node | None = None,
-        _properties_: Dict[str, Any] = {},
+        node: str | None = None,
+        edge: str | None = None,
+        type: Type | None = None,
+        type_schema: str | TypeSchema | None = None,
+        term: Term | None = None,
+        term_type_schema: str | TypeSchema | None = None,
+        start: str | Node | None = None,
+        end: str | Node | None = None,
+        properties: Dict[str, Any] = {},
     ) -> "Query":
         """
         Match or create node/edge if it doesn't exist.
@@ -432,7 +451,7 @@ class Query:
         """
         ...
     # WITH clause - for passing results to next part of query_
-    def with_(_self_, *_variables_: str) -> "Query":
+    def with_(self, *variables: str) -> "Query":
         """
         Pass specific variables to the next part of the query.
 
@@ -441,9 +460,7 @@ class Query:
         """
         ...
     # ORDER BY clause_
-    def order_by(
-        _self_, _variable_: str, _key_: str, _ascending_: bool = True
-    ) -> "Query":
+    def order_by(self, variable: str, key: str, ascending: bool = True) -> "Query":
         """
         Order results by a property or attribute.
 
@@ -453,7 +470,7 @@ class Query:
         """
         ...
     # LIMIT clause_
-    def limit(_self_, _count_: int) -> "Query":
+    def limit(self, count: int) -> "Query":
         """
         Limit the number of results.
 
@@ -462,7 +479,7 @@ class Query:
         """
         ...
     # SKIP clause_
-    def skip(_self_, _count_: int) -> "Query":
+    def skip(self, count: int) -> "Query":
         """
         Skip the first n results.
 
@@ -471,7 +488,7 @@ class Query:
         """
         ...
     # Execute mutations_
-    def execute(_self_) -> "Query":
+    def execute(self) -> "Query":
         """
         Execute the query and return self for chaining.
         Mainly used for mutations (CREATE, SET, DELETE).

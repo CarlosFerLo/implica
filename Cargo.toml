@@ -9,4 +9,5 @@ name = "implica"
 crate-type = ["cdylib"]
 
 [dependencies]
-pyo3 = "0.25.0"
+pyo3 = { version = "0.25.0", features = ["extension-module"] }
+sha2 = "0.10"
