@@ -5,12 +5,12 @@
 //! serves as the main data structure for modeling type theoretical theories.
 
 use crate::term::Term;
+use crate::type_index::TypeIndex;
 use crate::types::{python_to_type, type_to_python, Type};
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
 use sha2::{Digest, Sha256};
-use std::collections::HashMap;
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 
 /// Represents a node in the graph (a type in the model).
 ///
@@ -40,8 +40,8 @@ pub struct Node {
     pub r#type: Arc<Type>,
     #[pyo3(get, set)]
     pub properties: Py<PyDict>,
-    // Cached uid
-    uid_cache: Option<String>,
+    /// Cached UID for performance - computed once and reused
+    uid_cache: Arc<RwLock<Option<String>>>,
 }
 
 impl Clone for Node {
@@ -88,7 +88,7 @@ impl Node {
             Ok(Node {
                 r#type: Arc::new(type_obj),
                 properties: props,
-                uid_cache: None,
+                uid_cache: Arc::new(RwLock::new(None)),
             })
         })
     }
@@ -106,15 +106,31 @@ impl Node {
     /// Returns a unique identifier for this node.
     ///
     /// The UID is based on the node's type UID using SHA256.
+    /// This result is cached to avoid recalculating for complex recursive types.
     ///
     /// # Returns
     ///
     /// A SHA256 hash representing this node uniquely
     pub fn uid(&self) -> String {
+        // Check if we have a cached value
+        if let Ok(cache) = self.uid_cache.read() {
+            if let Some(cached) = cache.as_ref() {
+                return cached.clone();
+            }
+        }
+
+        // Calculate the UID
         let mut hasher = Sha256::new();
         hasher.update(b"node:");
         hasher.update(self.r#type.uid().as_bytes());
-        format!("{:x}", hasher.finalize())
+        let uid = format!("{:x}", hasher.finalize());
+
+        // Cache it for future use
+        if let Ok(mut cache) = self.uid_cache.write() {
+            *cache = Some(uid.clone());
+        }
+
+        uid
     }
 
     /// Returns a string representation of the node.
@@ -171,8 +187,8 @@ pub struct Edge {
     pub end: Arc<Node>,
     #[pyo3(get, set)]
     pub properties: Py<PyDict>,
-    // Cached uid
-    uid_cache: Option<String>,
+    /// Cached UID for performance - computed once and reused
+    uid_cache: Arc<RwLock<Option<String>>>,
 }
 
 impl Clone for Edge {
@@ -232,7 +248,7 @@ impl Edge {
                 start: Arc::new(start_obj),
                 end: Arc::new(end_obj),
                 properties: props,
-                uid_cache: None,
+                uid_cache: Arc::new(RwLock::new(None)),
             })
         })
     }
@@ -270,15 +286,31 @@ impl Edge {
     /// Returns a unique identifier for this edge.
     ///
     /// The UID is based on the edge's term UID using SHA256.
+    /// This result is cached to avoid recalculating for complex recursive types.
     ///
     /// # Returns
     ///
     /// A SHA256 hash representing this edge uniquely
     pub fn uid(&self) -> String {
+        // Check if we have a cached value
+        if let Ok(cache) = self.uid_cache.read() {
+            if let Some(cached) = cache.as_ref() {
+                return cached.clone();
+            }
+        }
+
+        // Calculate the UID
         let mut hasher = Sha256::new();
         hasher.update(b"edge:");
         hasher.update(self.term.uid().as_bytes());
-        format!("{:x}", hasher.finalize())
+        let uid = format!("{:x}", hasher.finalize());
+
+        // Cache it for future use
+        if let Ok(mut cache) = self.uid_cache.write() {
+            *cache = Some(uid.clone());
+        }
+
+        uid
     }
 
     /// Returns a string representation of the edge.
@@ -328,6 +360,8 @@ impl Edge {
 ///
 /// * `nodes` - Dictionary mapping node UIDs to Node objects
 /// * `edges` - Dictionary mapping edge UIDs to Edge objects
+/// * `node_type_index` - Tree-based index for fast node type lookups (internal)
+/// * `edge_type_index` - Tree-based index for fast edge term type lookups (internal)
 #[pyclass]
 #[derive(Debug)]
 pub struct Graph {
@@ -335,6 +369,10 @@ pub struct Graph {
     pub nodes: Py<PyDict>, // uid -> Node
     #[pyo3(get)]
     pub edges: Py<PyDict>, // uid -> Edge
+
+    // Type indices for O(log n) lookups (not exposed to Python)
+    pub node_type_index: Arc<std::sync::Mutex<TypeIndex<String>>>, // type -> node UIDs
+    pub edge_type_index: Arc<std::sync::Mutex<TypeIndex<String>>>, // term type -> edge UIDs
 }
 
 impl Clone for Graph {
@@ -342,6 +380,8 @@ impl Clone for Graph {
         Python::attach(|py| Graph {
             nodes: self.nodes.clone_ref(py),
             edges: self.edges.clone_ref(py),
+            node_type_index: self.node_type_index.clone(),
+            edge_type_index: self.edge_type_index.clone(),
         })
     }
 }
@@ -365,6 +405,8 @@ impl Graph {
             Ok(Graph {
                 nodes: PyDict::new(py).into(),
                 edges: PyDict::new(py).into(),
+                node_type_index: Arc::new(std::sync::Mutex::new(TypeIndex::new())),
+                edge_type_index: Arc::new(std::sync::Mutex::new(TypeIndex::new())),
             })
         })
     }
@@ -409,55 +451,254 @@ impl Graph {
 }
 
 impl Graph {
-    /// Builds an index mapping type UIDs to node UIDs.
+    /// Finds nodes that match a given type using the tree-based index.
     ///
-    /// This enables O(1) lookups for nodes by type instead of O(n) iteration.
-    ///
-    /// # Returns
-    ///
-    /// A HashMap where keys are type UIDs and values are vectors of node UIDs
-    pub fn build_type_index(&self, py: Python) -> PyResult<HashMap<String, Vec<String>>> {
-        let mut index: HashMap<String, Vec<String>> = HashMap::new();
-        let nodes_dict = self.nodes.bind(py);
-
-        for (uid_obj, node_obj) in nodes_dict.iter() {
-            let uid: String = uid_obj.extract()?;
-            let node: Node = node_obj.extract()?;
-            let type_uid = node.r#type.uid();
-
-            index.entry(type_uid).or_default().push(uid);
-        }
-
-        Ok(index)
-    }
-
-    /// Gets nodes by type UID using the type index.
-    ///
-    /// This is an optimized lookup that avoids iterating over all nodes.
+    /// This provides O(log n) lookup for nodes by their type structure.
     ///
     /// # Arguments
     ///
-    /// * `type_uid` - The UID of the type to search for
+    /// * `typ` - The type to match against
     /// * `py` - Python context
     ///
     /// # Returns
     ///
     /// A vector of nodes matching the type
-    pub fn get_nodes_by_type(&self, type_uid: &str, py: Python) -> PyResult<Vec<Node>> {
-        let index = self.build_type_index(py)?;
+    pub fn find_nodes_by_type(&self, typ: &Type, py: Python) -> PyResult<Vec<Node>> {
         let nodes_dict = self.nodes.bind(py);
         let mut result = Vec::new();
 
-        if let Some(node_uids) = index.get(type_uid) {
-            for uid in node_uids {
-                if let Some(node_obj) = nodes_dict.get_item(uid)? {
-                    let node: Node = node_obj.extract()?;
-                    result.push(node);
-                }
+        // Lock the index for reading
+        let index = self.node_type_index.lock().unwrap();
+
+        // Use the type index to find candidate node UIDs
+        let node_uids = match typ {
+            Type::Variable(var) => index.find_variable(&var.name),
+            Type::Application(app) => index.find_application(&app.left, &app.right),
+        };
+
+        // Retrieve the actual nodes
+        for uid in node_uids {
+            if let Some(node_obj) = nodes_dict.get_item(uid)? {
+                let node: Node = node_obj.extract()?;
+                result.push(node);
             }
         }
 
         Ok(result)
+    }
+
+    /// Finds nodes that match a wildcard (any type).
+    ///
+    /// # Arguments
+    ///
+    /// * `py` - Python context
+    ///
+    /// # Returns
+    ///
+    /// A vector of all nodes
+    pub fn find_all_nodes(&self, py: Python) -> PyResult<Vec<Node>> {
+        let nodes_dict = self.nodes.bind(py);
+        let mut result = Vec::new();
+
+        let index = self.node_type_index.lock().unwrap();
+        let node_uids = index.find_all();
+
+        for uid in node_uids {
+            if let Some(node_obj) = nodes_dict.get_item(uid)? {
+                let node: Node = node_obj.extract()?;
+                result.push(node);
+            }
+        }
+
+        Ok(result)
+    }
+
+    /// Finds edges by the type of their term using the tree-based index.
+    ///
+    /// This provides O(log n) lookup for edges by their term's type structure.
+    ///
+    /// # Arguments
+    ///
+    /// * `typ` - The term type to match against
+    /// * `py` - Python context
+    ///
+    /// # Returns
+    ///
+    /// A vector of edges whose term has the matching type
+    pub fn find_edges_by_term_type(&self, typ: &Type, py: Python) -> PyResult<Vec<Edge>> {
+        let edges_dict = self.edges.bind(py);
+        let mut result = Vec::new();
+
+        // Lock the index for reading
+        let index = self.edge_type_index.lock().unwrap();
+
+        // Use the type index to find candidate edge UIDs
+        let edge_uids = match typ {
+            Type::Variable(var) => index.find_variable(&var.name),
+            Type::Application(app) => index.find_application(&app.left, &app.right),
+        };
+
+        // Retrieve the actual edges
+        for uid in edge_uids {
+            if let Some(edge_obj) = edges_dict.get_item(uid)? {
+                let edge: Edge = edge_obj.extract()?;
+                result.push(edge);
+            }
+        }
+
+        Ok(result)
+    }
+
+    /// Finds all edges (for wildcard matching).
+    ///
+    /// # Arguments
+    ///
+    /// * `py` - Python context
+    ///
+    /// # Returns
+    ///
+    /// A vector of all edges
+    pub fn find_all_edges(&self, py: Python) -> PyResult<Vec<Edge>> {
+        let edges_dict = self.edges.bind(py);
+        let mut result = Vec::new();
+
+        let index = self.edge_type_index.lock().unwrap();
+        let edge_uids = index.find_all();
+
+        for uid in edge_uids {
+            if let Some(edge_obj) = edges_dict.get_item(uid)? {
+                let edge: Edge = edge_obj.extract()?;
+                result.push(edge);
+            }
+        }
+
+        Ok(result)
+    }
+
+    /// Adds a node to the graph and updates the type index.
+    ///
+    /// # Arguments
+    ///
+    /// * `node` - The node to add
+    /// * `py` - Python context
+    pub fn add_node(&self, node: &Node, py: Python) -> PyResult<()> {
+        let uid = node.uid();
+        let nodes_dict = self.nodes.bind(py);
+        nodes_dict.set_item(&uid, Py::new(py, node.clone())?)?;
+
+        // Update the type index
+        let mut index = self.node_type_index.lock().unwrap();
+        index.insert(&node.r#type, uid);
+
+        Ok(())
+    }
+
+    /// Removes a node from the graph and updates the type index.
+    ///
+    /// # Arguments
+    ///
+    /// * `node_uid` - The UID of the node to remove
+    /// * `py` - Python context
+    pub fn remove_node(&self, node_uid: &str, py: Python) -> PyResult<()> {
+        let nodes_dict = self.nodes.bind(py);
+
+        // Get the node first to know its type
+        if let Some(node_obj) = nodes_dict.get_item(node_uid)? {
+            let node: Node = node_obj.extract()?;
+
+            // Remove from dictionary
+            nodes_dict.del_item(node_uid)?;
+
+            // Update the type index
+            let mut index = self.node_type_index.lock().unwrap();
+            index.remove(&node.r#type, |uid| uid == node_uid);
+        }
+
+        Ok(())
+    }
+
+    /// Adds an edge to the graph and updates the type index.
+    ///
+    /// # Arguments
+    ///
+    /// * `edge` - The edge to add
+    /// * `py` - Python context
+    pub fn add_edge(&self, edge: &Edge, py: Python) -> PyResult<()> {
+        let uid = edge.uid();
+        let edges_dict = self.edges.bind(py);
+        edges_dict.set_item(&uid, Py::new(py, edge.clone())?)?;
+
+        // Update the type index
+        let mut index = self.edge_type_index.lock().unwrap();
+        index.insert(&edge.term.r#type, uid);
+
+        Ok(())
+    }
+
+    /// Removes an edge from the graph and updates the type index.
+    ///
+    /// # Arguments
+    ///
+    /// * `edge_uid` - The UID of the edge to remove
+    /// * `py` - Python context
+    pub fn remove_edge(&self, edge_uid: &str, py: Python) -> PyResult<()> {
+        let edges_dict = self.edges.bind(py);
+
+        // Get the edge first to know its term type
+        if let Some(edge_obj) = edges_dict.get_item(edge_uid)? {
+            let edge: Edge = edge_obj.extract()?;
+
+            // Remove from dictionary
+            edges_dict.del_item(edge_uid)?;
+
+            // Update the type index
+            let mut index = self.edge_type_index.lock().unwrap();
+            index.remove(&edge.term.r#type, |uid| uid == edge_uid);
+        }
+
+        Ok(())
+    }
+
+    /// Rebuilds the type indices from scratch.
+    ///
+    /// This can be useful if the indices get out of sync, though
+    /// it should not be necessary in normal usage.
+    ///
+    /// # Arguments
+    ///
+    /// * `py` - Python context
+    pub fn rebuild_indices(&self, py: Python) -> PyResult<()> {
+        // Clear existing indices
+        {
+            let mut node_index = self.node_type_index.lock().unwrap();
+            node_index.clear();
+        }
+        {
+            let mut edge_index = self.edge_type_index.lock().unwrap();
+            edge_index.clear();
+        }
+
+        // Rebuild node index
+        let nodes_dict = self.nodes.bind(py);
+        for (uid_obj, node_obj) in nodes_dict.iter() {
+            let uid: String = uid_obj.extract()?;
+            let node: Node = node_obj.extract()?;
+
+            let mut index = self.node_type_index.lock().unwrap();
+            index.insert(&node.r#type, uid);
+        }
+
+        // Rebuild edge index
+        let edges_dict = self.edges.bind(py);
+        for (uid_obj, edge_obj) in edges_dict.iter() {
+            let uid: String = uid_obj.extract()?;
+            let edge: Edge = edge_obj.extract()?;
+
+            let mut index = self.edge_type_index.lock().unwrap();
+            index.insert(&edge.term.r#type, uid);
+        }
+
+        Ok(())
     }
 
     /// Gets a node by its UID using O(1) dictionary lookup.
@@ -506,6 +747,8 @@ impl Default for Graph {
         Python::attach(|py| Graph {
             nodes: PyDict::new(py).into(),
             edges: PyDict::new(py).into(),
+            node_type_index: Arc::new(std::sync::Mutex::new(TypeIndex::new())),
+            edge_type_index: Arc::new(std::sync::Mutex::new(TypeIndex::new())),
         })
     }
 }

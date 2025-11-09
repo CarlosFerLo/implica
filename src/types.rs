@@ -6,7 +6,7 @@
 use pyo3::prelude::*;
 use sha2::{Digest, Sha256};
 use std::fmt;
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 
 /// Represents a type in the type theory.
 ///
@@ -108,12 +108,11 @@ impl fmt::Display for Type {
 ///
 /// * `name` - The name of the type variable
 #[pyclass]
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug)]
 pub struct Variable {
-    #[pyo3(get, set)]
     pub name: String,
-    // Cached uid
-    uid_cache: Option<String>,
+    /// Cached UID for performance - computed once and reused
+    uid_cache: Arc<RwLock<Option<String>>>,
 }
 
 #[pymethods]
@@ -137,25 +136,52 @@ impl Variable {
     pub fn new(name: String) -> Self {
         Variable {
             name,
-            uid_cache: None,
+            uid_cache: Arc::new(RwLock::new(None)),
         }
     }
 
+    /// Gets the name of this variable.
+    ///
+    /// # Returns
+    ///
+    /// The name as a Python object
+    #[getter]
+    pub fn name(&self) -> String {
+        self.name.clone()
+    }
+
     /// Returns a unique identifier for this variable.
+    ///
+    /// This result is cached to maintain consistent performance.
     ///
     /// # Returns
     ///
     /// A SHA256 hash based on the variable name
     pub fn uid(&self) -> String {
+        // Check if we have a cached value
+        if let Ok(cache) = self.uid_cache.read() {
+            if let Some(cached) = cache.as_ref() {
+                return cached.clone();
+            }
+        }
+
+        // Calculate the UID
         let mut hasher = Sha256::new();
         hasher.update(b"var:");
         hasher.update(self.name.as_bytes());
-        format!("{:x}", hasher.finalize())
+        let uid = format!("{:x}", hasher.finalize());
+
+        // Cache it for future use
+        if let Ok(mut cache) = self.uid_cache.write() {
+            *cache = Some(uid.clone());
+        }
+
+        uid
     }
 
     /// Returns the name of the variable for string representation.
     fn __str__(&self) -> String {
-        self.name.clone()
+        self.name.to_string()
     }
 
     /// Returns a detailed representation for debugging.
@@ -169,12 +195,14 @@ impl Variable {
         use std::collections::hash_map::DefaultHasher;
         use std::hash::{Hash, Hasher};
         let mut hasher = DefaultHasher::new();
+        // Hash based on name (not the cache)
         self.name.hash(&mut hasher);
         hasher.finish()
     }
 
     fn __eq__(&self, other: &Self) -> bool {
-        self.name == other.name
+        // Equality based on uid
+        self.uid() == other.uid()
     }
 }
 
@@ -182,6 +210,20 @@ impl fmt::Display for Variable {
     /// Formats the variable for display (shows the name).
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.name)
+    }
+}
+
+impl PartialEq for Variable {
+    fn eq(&self, other: &Self) -> bool {
+        self.uid() == other.uid()
+    }
+}
+
+impl Eq for Variable {}
+
+impl std::hash::Hash for Variable {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.name.hash(state);
     }
 }
 
@@ -213,12 +255,12 @@ impl fmt::Display for Variable {
 /// * `left` - The input type of the function
 /// * `right` - The output type of the function
 #[pyclass]
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug)]
 pub struct Application {
     pub left: Arc<Type>,
     pub right: Arc<Type>,
-    // Cached uid
-    uid_cache: Option<String>,
+    /// Cached UID for performance - computed once and reused
+    uid_cache: Arc<RwLock<Option<String>>>,
 }
 
 #[pymethods]
@@ -249,7 +291,7 @@ impl Application {
             Ok(Application {
                 left: Arc::new(left_type),
                 right: Arc::new(right_type),
-                uid_cache: None,
+                uid_cache: Arc::new(RwLock::new(None)),
             })
         })
     }
@@ -276,16 +318,33 @@ impl Application {
 
     /// Returns a unique identifier for this application.
     ///
+    /// This result is cached to avoid recalculating for complex recursive types.
+    ///
     /// # Returns
     ///
     /// A SHA256 hash based on the left and right types
     pub fn uid(&self) -> String {
+        // Check if we have a cached value
+        if let Ok(cache) = self.uid_cache.read() {
+            if let Some(cached) = cache.as_ref() {
+                return cached.clone();
+            }
+        }
+
+        // Calculate the UID (may recursively compute UIDs of nested types)
         let mut hasher = Sha256::new();
         hasher.update(b"app:");
         hasher.update(self.left.uid().as_bytes());
         hasher.update(b":");
         hasher.update(self.right.uid().as_bytes());
-        format!("{:x}", hasher.finalize())
+        let uid = format!("{:x}", hasher.finalize());
+
+        // Cache it for future use
+        if let Ok(mut cache) = self.uid_cache.write() {
+            *cache = Some(uid.clone());
+        }
+
+        uid
     }
 
     /// Returns a string representation of the application.
@@ -306,13 +365,15 @@ impl Application {
         use std::collections::hash_map::DefaultHasher;
         use std::hash::{Hash, Hasher};
         let mut hasher = DefaultHasher::new();
+        // Hash based on left and right (not the cache)
         self.left.hash(&mut hasher);
         self.right.hash(&mut hasher);
         hasher.finish()
     }
 
     fn __eq__(&self, other: &Self) -> bool {
-        self.left == other.left && self.right == other.right
+        // Equality based on uid
+        self.uid() == other.uid()
     }
 }
 
@@ -322,6 +383,21 @@ impl fmt::Display for Application {
     /// Shows as "(left -> right)".
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "({} -> {})", self.left, self.right)
+    }
+}
+
+impl PartialEq for Application {
+    fn eq(&self, other: &Self) -> bool {
+        self.uid() == other.uid()
+    }
+}
+
+impl Eq for Application {}
+
+impl std::hash::Hash for Application {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.left.hash(state);
+        self.right.hash(state);
     }
 }
 

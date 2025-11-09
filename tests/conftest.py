@@ -16,9 +16,21 @@ def var_b():
 
 
 @pytest.fixture
+def var_c():
+    """Fixture for Variable C"""
+    return implica.Variable("C")
+
+
+@pytest.fixture
 def app_ab(var_a, var_b):
     """Fixture for Application(A -> B)"""
     return implica.Application(var_a, var_b)
+
+
+@pytest.fixture
+def app_ac(var_a, var_c):
+    """Fixture for Application (A -> C)"""
+    return implica.Application(var_a, var_c)
 
 
 @pytest.fixture

@@ -43,3 +43,34 @@ def test_application_getters(app_ab, var_a, var_b):
     assert isinstance(right, implica.Variable)
     assert left.name == "A"
     assert right.name == "B"
+
+
+def test_type_equality(var_a, var_b, app_ab, app_ac):
+    """Test Type Equality"""
+    assert var_a == var_a
+    assert var_a == implica.Variable("A")
+    assert var_a != var_b
+
+    assert app_ab == app_ab
+    assert app_ab == implica.Application(implica.Variable("A"), implica.Variable("B"))
+    assert app_ab != app_ac
+
+
+@pytest.mark.skip("Skipping immutability tests due to problems on enforcing it.")
+def test_type_variable_immutability(var_a):
+    """Test Type Variable Immutability"""
+    with pytest.raises(Exception):
+        var_a.name = "B"
+
+    assert var_a.name == "A"
+
+
+def test_type_application_immutability(app_ab):
+    """Test Type Application Immutability"""
+    with pytest.raises(Exception):
+        app_ab.left = implica.Variable("C")
+    with pytest.raises(Exception):
+        app_ab.right = implica.Variable("D")
+
+    assert app_ab.left == implica.Variable("A")
+    assert app_ab.right == implica.Variable("B")

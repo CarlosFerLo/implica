@@ -7,7 +7,7 @@ use crate::errors::ImplicaError;
 use crate::types::{python_to_type, type_to_python, Type};
 use pyo3::prelude::*;
 use sha2::{Digest, Sha256};
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 
 /// Represents a typed term in the type theory.
 ///
@@ -41,13 +41,13 @@ use std::sync::Arc;
 /// * `name` - The name of the term
 /// * `type` - The type of the term (accessible via get_type())
 #[pyclass]
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug)]
 pub struct Term {
-    #[pyo3(get, set)]
+    #[pyo3(get)]
     pub name: String,
     pub r#type: Arc<Type>,
-    // Cached uid
-    uid_cache: Option<String>,
+    /// Cached UID for performance - computed once and reused
+    uid_cache: Arc<RwLock<Option<String>>>,
 }
 
 #[pymethods]
@@ -76,7 +76,7 @@ impl Term {
             Ok(Term {
                 name,
                 r#type: Arc::new(type_obj),
-                uid_cache: None,
+                uid_cache: Arc::new(RwLock::new(None)),
             })
         })
     }
@@ -94,17 +94,33 @@ impl Term {
     /// Returns a unique identifier for this term.
     ///
     /// The UID is constructed using SHA256 hash based on the term's name and type UID.
+    /// This result is cached to avoid recalculating for complex recursive types.
     ///
     /// # Returns
     ///
     /// A SHA256 hash representing this term uniquely
     pub fn uid(&self) -> String {
+        // Check if we have a cached value
+        if let Ok(cache) = self.uid_cache.read() {
+            if let Some(cached) = cache.as_ref() {
+                return cached.clone();
+            }
+        }
+
+        // Calculate the UID
         let mut hasher = Sha256::new();
         hasher.update(b"term:");
         hasher.update(self.name.as_bytes());
         hasher.update(b":");
         hasher.update(self.r#type.uid().as_bytes());
-        format!("{:x}", hasher.finalize())
+        let uid = format!("{:x}", hasher.finalize());
+
+        // Cache it for future use
+        if let Ok(mut cache) = self.uid_cache.write() {
+            *cache = Some(uid.clone());
+        }
+
+        uid
     }
 
     /// Returns a string representation of the term.
@@ -177,13 +193,30 @@ impl Term {
         use std::collections::hash_map::DefaultHasher;
         use std::hash::{Hash, Hasher};
         let mut hasher = DefaultHasher::new();
+        // Hash based on name and type (not the cache)
         self.name.hash(&mut hasher);
         self.r#type.hash(&mut hasher);
         hasher.finish()
     }
 
     fn __eq__(&self, other: &Self) -> bool {
+        // Equality based on name and type (not the cache)
         self.name == other.name && self.r#type == other.r#type
+    }
+}
+
+impl PartialEq for Term {
+    fn eq(&self, other: &Self) -> bool {
+        self.name == other.name && self.r#type == other.r#type
+    }
+}
+
+impl Eq for Term {}
+
+impl std::hash::Hash for Term {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.name.hash(state);
+        self.r#type.hash(state);
     }
 }
 

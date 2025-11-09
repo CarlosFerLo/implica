@@ -42,6 +42,7 @@ pub mod graph;
 pub mod patterns;
 pub mod query;
 pub mod term;
+pub mod type_index;
 pub mod type_schema;
 pub mod types;
 

@@ -512,8 +512,20 @@ impl Query {
                 QueryOperation::Set(var, props) => {
                     self.execute_set(py, var, props)?;
                 }
-                _ => {
-                    // Other operations not fully implemented yet
+                QueryOperation::Where(condition) => {
+                    self.execute_where(py, condition)?;
+                }
+                QueryOperation::With(vars) => {
+                    self.execute_with(vars)?;
+                }
+                QueryOperation::OrderBy(var, key, ascending) => {
+                    self.execute_order_by(py, var, key, ascending)?;
+                }
+                QueryOperation::Limit(count) => {
+                    self.execute_limit(count)?;
+                }
+                QueryOperation::Skip(count) => {
+                    self.execute_skip(count)?;
                 }
             }
         }
@@ -525,21 +537,40 @@ impl Query {
             MatchOp::Node(node_pattern) => {
                 let mut matches = Vec::new();
 
-                // Optimization: If we have a specific type, use type index
+                // Optimized: Use tree-based type index for O(log n) lookup
                 if let Some(ref type_obj) = node_pattern.type_obj {
-                    let type_uid = type_obj.uid();
-                    let type_nodes = self.graph.get_nodes_by_type(&type_uid, py)?;
+                    // Direct type match - use the tree index
+                    let type_nodes = self.graph.find_nodes_by_type(type_obj, py)?;
 
                     for node in type_nodes {
                         if node_pattern.matches(&node, py)? {
                             matches.push(QueryResult::Node(node));
                         }
                     }
+                } else if let Some(ref schema) = node_pattern.type_schema {
+                    // Type schema match - need to check all nodes but use the schema
+                    // For wildcard schemas, use find_all_nodes
+                    if schema.pattern == "$*$" {
+                        let all_nodes = self.graph.find_all_nodes(py)?;
+                        for node in all_nodes {
+                            if node_pattern.matches(&node, py)? {
+                                matches.push(QueryResult::Node(node));
+                            }
+                        }
+                    } else {
+                        // For specific schema patterns, we still need to iterate
+                        // but we can optimize based on the pattern structure
+                        let all_nodes = self.graph.find_all_nodes(py)?;
+                        for node in all_nodes {
+                            if node_pattern.matches(&node, py)? {
+                                matches.push(QueryResult::Node(node));
+                            }
+                        }
+                    }
                 } else {
-                    // Fallback: iterate all nodes (when no type filter)
-                    let nodes_dict = self.graph.nodes.bind(py);
-                    for (_uid, node_obj) in nodes_dict.iter() {
-                        let node: Node = node_obj.extract()?;
+                    // No type filter - get all nodes efficiently
+                    let all_nodes = self.graph.find_all_nodes(py)?;
+                    for node in all_nodes {
                         if node_pattern.matches(&node, py)? {
                             matches.push(QueryResult::Node(node));
                         }
@@ -568,14 +599,29 @@ impl Query {
             let edge_pattern = &path.edges[0];
             let end_pattern = &path.nodes[1];
 
-            let edges_dict = self.graph.edges.bind(py);
             let mut start_matches = Vec::new();
             let mut edge_matches = Vec::new();
             let mut end_matches = Vec::new();
 
-            for (_uid, edge_obj) in edges_dict.iter() {
-                let edge: Edge = edge_obj.extract()?;
+            // Optimized: Use tree-based index to find edges by term type
+            let candidate_edges = if let Some(ref schema) = edge_pattern.term_type_schema {
+                // Try to extract the type from the schema if it's a simple pattern
+                // For now, we need to iterate but we can optimize specific cases
+                if schema.pattern == "$*$" {
+                    // Wildcard - get all edges
+                    self.graph.find_all_edges(py)?
+                } else {
+                    // For complex schemas, we still need to check all edges
+                    // but we retrieve them efficiently from the index
+                    self.graph.find_all_edges(py)?
+                }
+            } else {
+                // No schema - get all edges
+                self.graph.find_all_edges(py)?
+            };
 
+            // Now filter the candidate edges
+            for edge in candidate_edges {
                 // Check if edge matches pattern
                 let edge_ok = if let Some(ref schema) = edge_pattern.term_type_schema {
                     schema.matches_type(&edge.term.r#type)
@@ -587,7 +633,7 @@ impl Query {
                     continue;
                 }
 
-                // Check start node
+                // Check start and end nodes
                 if start_pattern.matches(&edge.start, py)? && end_pattern.matches(&edge.end, py)? {
                     start_matches.push(QueryResult::Node((*edge.start).clone()));
                     edge_matches.push(QueryResult::Edge(edge.clone()));
@@ -619,10 +665,9 @@ impl Query {
                     }
 
                     let node = Node::new(type_py, Some(props.into()))?;
-                    let uid = node.uid();
 
-                    let nodes_dict = self.graph.nodes.bind(py);
-                    nodes_dict.set_item(uid, Py::new(py, node.clone())?)?;
+                    // Use the optimized add_node method which updates the index
+                    self.graph.add_node(&node, py)?;
 
                     if let Some(var) = node_pattern.variable {
                         self.matched_vars.insert(var, vec![QueryResult::Node(node)]);
@@ -648,10 +693,9 @@ impl Query {
             MergeOp::Node(node_pattern) => {
                 let mut found = false;
 
-                // Optimization: If we have a specific type, use type index
+                // Optimized: Use tree-based type index for O(log n) lookup
                 if let Some(ref type_obj) = node_pattern.type_obj {
-                    let type_uid = type_obj.uid();
-                    let type_nodes = self.graph.get_nodes_by_type(&type_uid, py)?;
+                    let type_nodes = self.graph.find_nodes_by_type(type_obj, py)?;
 
                     for node in type_nodes {
                         if node_pattern.matches(&node, py)? {
@@ -665,10 +709,9 @@ impl Query {
                         }
                     }
                 } else {
-                    // Fallback: iterate all nodes
-                    let nodes_dict = self.graph.nodes.bind(py);
-                    for (_uid, node_obj) in nodes_dict.iter() {
-                        let node: Node = node_obj.extract()?;
+                    // No specific type - get all nodes efficiently
+                    let all_nodes = self.graph.find_all_nodes(py)?;
+                    for node in all_nodes {
                         if node_pattern.matches(&node, py)? {
                             // Node exists, add to matched_vars
                             if let Some(ref var) = node_pattern.variable {
@@ -691,10 +734,9 @@ impl Query {
                         }
 
                         let node = Node::new(type_py, Some(props.into()))?;
-                        let uid = node.uid();
 
-                        let nodes_dict = self.graph.nodes.bind(py);
-                        nodes_dict.set_item(uid, Py::new(py, node.clone())?)?;
+                        // Use the optimized add_node method which updates the index
+                        self.graph.add_node(&node, py)?;
 
                         if let Some(var) = node_pattern.variable {
                             self.matched_vars.insert(var, vec![QueryResult::Node(node)]);
@@ -739,22 +781,19 @@ impl Query {
 
     fn execute_delete(&mut self, py: Python, vars: Vec<String>, _detach: bool) -> PyResult<()> {
         // Delete nodes/edges that were matched
-        let nodes_dict = self.graph.nodes.bind(py);
-        let edges_dict = self.graph.edges.bind(py);
-
         for var in vars {
             if let Some(results) = self.matched_vars.get(&var) {
                 for result in results {
                     match result {
                         QueryResult::Node(node) => {
                             let uid = node.uid();
-                            // Remove node from graph
-                            let _ = nodes_dict.del_item(uid);
+                            // Use the optimized remove_node method which updates the index
+                            let _ = self.graph.remove_node(&uid, py);
                         }
                         QueryResult::Edge(edge) => {
                             let uid = edge.uid();
-                            // Remove edge from graph
-                            let _ = edges_dict.del_item(uid);
+                            // Use the optimized remove_edge method which updates the index
+                            let _ = self.graph.remove_edge(&uid, py);
                         }
                     }
                 }
@@ -776,6 +815,524 @@ impl Query {
                         node_props.set_item(key, value)?;
                     }
                 }
+            }
+        }
+        Ok(())
+    }
+
+    fn execute_where(&mut self, py: Python, condition: String) -> PyResult<()> {
+        // Parse and evaluate WHERE conditions with logical expressions
+        // Supports: AND, OR, NOT, and parentheses
+        // Examples: "n.age > 25 AND n.name = 'Alice'"
+        //           "n.age < 18 OR n.age > 65"
+        //           "NOT n.active = true"
+        //           "(n.age > 20 AND n.age < 30) OR n.status = 'VIP'"
+
+        let condition = condition.trim().to_string();
+
+        // Collect all variables referenced in the condition
+        let var_names = Self::extract_variables_from_condition(&condition);
+
+        // For each variable, filter its results
+        for var_name in var_names {
+            if let Some(results) = self.matched_vars.get_mut(&var_name) {
+                let cond_clone = condition.clone();
+                let var_clone = var_name.clone();
+                results.retain(|result| {
+                    if let QueryResult::Node(node) = result {
+                        Self::evaluate_logical_expression(py, &cond_clone, &var_clone, node)
+                    } else {
+                        false
+                    }
+                });
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Extract all variable names referenced in a condition string
+    fn extract_variables_from_condition(condition: &str) -> Vec<String> {
+        let mut vars = std::collections::HashSet::new();
+        let mut current = String::new();
+        let mut chars = condition.chars().peekable();
+
+        while let Some(ch) = chars.next() {
+            if ch.is_alphanumeric() || ch == '_' {
+                current.push(ch);
+            } else if ch == '.' && !current.is_empty() {
+                // This is a variable reference
+                vars.insert(current.clone());
+                current.clear();
+                // Skip the property name
+                while let Some(&next_ch) = chars.peek() {
+                    if next_ch.is_alphanumeric() || next_ch == '_' {
+                        chars.next();
+                    } else {
+                        break;
+                    }
+                }
+            } else {
+                current.clear();
+            }
+        }
+
+        vars.into_iter().collect()
+    }
+
+    /// Evaluate a logical expression for a given node
+    fn evaluate_logical_expression(py: Python, expr: &str, var_name: &str, node: &Node) -> bool {
+        Self::parse_or_expression(py, expr, var_name, node)
+    }
+
+    /// Parse OR expression (lowest precedence, right-associative)
+    fn parse_or_expression(py: Python, expr: &str, var_name: &str, node: &Node) -> bool {
+        let parts = Self::split_by_operator(expr, " OR ");
+        if parts.len() > 1 {
+            // Right-associative: evaluate from right to left
+            let last_idx = parts.len() - 1;
+            let left = parts[..last_idx].join(" OR ");
+            let right = parts[last_idx];
+
+            let left_result = Self::parse_or_expression(py, &left, var_name, node);
+            let right_result = Self::parse_and_expression(py, right, var_name, node);
+
+            return left_result || right_result;
+        }
+
+        Self::parse_and_expression(py, expr, var_name, node)
+    }
+
+    /// Parse AND expression (higher precedence than OR, right-associative)
+    fn parse_and_expression(py: Python, expr: &str, var_name: &str, node: &Node) -> bool {
+        let parts = Self::split_by_operator(expr, " AND ");
+        if parts.len() > 1 {
+            // Right-associative: evaluate from right to left
+            let last_idx = parts.len() - 1;
+            let left = parts[..last_idx].join(" AND ");
+            let right = parts[last_idx];
+
+            let left_result = Self::parse_and_expression(py, &left, var_name, node);
+            let right_result = Self::parse_not_expression(py, right, var_name, node);
+
+            return left_result && right_result;
+        }
+
+        Self::parse_not_expression(py, expr, var_name, node)
+    }
+
+    /// Parse NOT expression (highest precedence)
+    fn parse_not_expression(py: Python, expr: &str, var_name: &str, node: &Node) -> bool {
+        let expr = expr.trim();
+
+        if expr.starts_with("NOT ") {
+            let inner = expr[4..].trim();
+            return !Self::parse_primary_expression(py, inner, var_name, node);
+        }
+
+        Self::parse_primary_expression(py, expr, var_name, node)
+    }
+
+    /// Parse primary expression (comparison or parenthesized expression)
+    fn parse_primary_expression(py: Python, expr: &str, var_name: &str, node: &Node) -> bool {
+        let expr = expr.trim();
+
+        // Handle parentheses
+        if expr.starts_with('(') && expr.ends_with(')') {
+            let inner = &expr[1..expr.len() - 1];
+            return Self::evaluate_logical_expression(py, inner, var_name, node);
+        }
+
+        // Parse simple comparison: var.property op value
+        Self::evaluate_simple_condition(py, expr, var_name, node)
+    }
+
+    /// Split expression by operator, respecting parentheses
+    fn split_by_operator<'a>(expr: &'a str, op: &str) -> Vec<&'a str> {
+        let mut parts = Vec::new();
+        let mut current_start = 0;
+        let mut paren_depth = 0;
+        let mut i = 0;
+        let bytes = expr.as_bytes();
+
+        while i < expr.len() {
+            if bytes[i] == b'(' {
+                paren_depth += 1;
+                i += 1;
+            } else if bytes[i] == b')' {
+                paren_depth -= 1;
+                i += 1;
+            } else if paren_depth == 0 && i + op.len() <= expr.len() && &expr[i..i + op.len()] == op
+            {
+                parts.push(&expr[current_start..i]);
+                i += op.len();
+                current_start = i;
+            } else {
+                i += 1;
+            }
+        }
+
+        if current_start < expr.len() {
+            parts.push(&expr[current_start..]);
+        }
+
+        if parts.is_empty() {
+            vec![expr]
+        } else {
+            parts
+        }
+    }
+
+    /// Evaluate a simple comparison condition
+    ///
+    /// Supports:
+    /// - Basic comparisons: =, !=, <, >, <=, >=
+    /// - IN operator: n.status IN ['active', 'pending']
+    /// - String operators: STARTS WITH, CONTAINS, ENDS WITH
+    /// - Null checks: IS NULL, IS NOT NULL
+    fn evaluate_simple_condition(py: Python, condition: &str, var_name: &str, node: &Node) -> bool {
+        let condition = condition.trim();
+
+        // Check for IS NULL / IS NOT NULL
+        if condition.contains(" IS NOT NULL") {
+            let parts: Vec<&str> = condition.split(" IS NOT NULL").collect();
+            if parts.len() == 2 && parts[1].trim().is_empty() {
+                let left = parts[0].trim();
+                let left_parts: Vec<&str> = left.split('.').collect();
+                if left_parts.len() == 2 && left_parts[0] == var_name {
+                    let prop_name = left_parts[1];
+                    let props = node.properties.bind(py);
+                    return props.get_item(prop_name).ok().flatten().is_some();
+                }
+            }
+            return false;
+        }
+
+        if condition.contains(" IS NULL") {
+            let parts: Vec<&str> = condition.split(" IS NULL").collect();
+            if parts.len() == 2 && parts[1].trim().is_empty() {
+                let left = parts[0].trim();
+                let left_parts: Vec<&str> = left.split('.').collect();
+                if left_parts.len() == 2 && left_parts[0] == var_name {
+                    let prop_name = left_parts[1];
+                    let props = node.properties.bind(py);
+                    return props.get_item(prop_name).ok().flatten().is_none();
+                }
+            }
+            return false;
+        }
+
+        // Check for IN operator
+        if condition.contains(" IN ") {
+            return Self::evaluate_in_condition(py, condition, var_name, node);
+        }
+
+        // Check for string operators
+        if condition.contains(" STARTS WITH ") {
+            return Self::evaluate_string_operator(py, condition, var_name, node, "STARTS WITH");
+        }
+        if condition.contains(" ENDS WITH ") {
+            return Self::evaluate_string_operator(py, condition, var_name, node, "ENDS WITH");
+        }
+        if condition.contains(" CONTAINS ") {
+            return Self::evaluate_string_operator(py, condition, var_name, node, "CONTAINS");
+        }
+
+        // Standard comparison operators
+        let (left, op, right) = if let Some(pos) = condition.find(">=") {
+            (&condition[..pos], ">=", &condition[pos + 2..])
+        } else if let Some(pos) = condition.find("<=") {
+            (&condition[..pos], "<=", &condition[pos + 2..])
+        } else if let Some(pos) = condition.find("!=") {
+            (&condition[..pos], "!=", &condition[pos + 2..])
+        } else if let Some(pos) = condition.find('=') {
+            (&condition[..pos], "=", &condition[pos + 1..])
+        } else if let Some(pos) = condition.find('>') {
+            (&condition[..pos], ">", &condition[pos + 1..])
+        } else if let Some(pos) = condition.find('<') {
+            (&condition[..pos], "<", &condition[pos + 1..])
+        } else {
+            return false;
+        };
+
+        let left = left.trim();
+        let right = right.trim().trim_matches(|c| c == '\'' || c == '"');
+
+        // Extract variable and property from left side (e.g., "n.age")
+        let left_parts: Vec<&str> = left.split('.').collect();
+        if left_parts.len() != 2 {
+            return false;
+        }
+
+        let cond_var_name = left_parts[0];
+        if cond_var_name != var_name {
+            return false;
+        }
+
+        let prop_name = left_parts[1];
+
+        // Get property value from node
+        let props = node.properties.bind(py);
+        let value = match props.get_item(prop_name) {
+            Ok(Some(v)) => v,
+            _ => return false,
+        };
+
+        // Evaluate the comparison
+        match op {
+            "=" => {
+                // Try string comparison first
+                if let Ok(val_str) = value.extract::<String>() {
+                    return val_str == right;
+                }
+                // Try numeric comparison
+                if let (Ok(val_num), Ok(right_num)) = (value.extract::<f64>(), right.parse::<f64>())
+                {
+                    return (val_num - right_num).abs() < f64::EPSILON;
+                }
+                // Try boolean comparison
+                if let (Ok(val_bool), Ok(right_bool)) =
+                    (value.extract::<bool>(), right.parse::<bool>())
+                {
+                    return val_bool == right_bool;
+                }
+            }
+            "!=" => {
+                if let Ok(val_str) = value.extract::<String>() {
+                    return val_str != right;
+                }
+                if let (Ok(val_num), Ok(right_num)) = (value.extract::<f64>(), right.parse::<f64>())
+                {
+                    return (val_num - right_num).abs() >= f64::EPSILON;
+                }
+                if let (Ok(val_bool), Ok(right_bool)) =
+                    (value.extract::<bool>(), right.parse::<bool>())
+                {
+                    return val_bool != right_bool;
+                }
+            }
+            ">" | ">=" | "<" | "<=" => {
+                if let (Ok(val_num), Ok(right_num)) = (value.extract::<f64>(), right.parse::<f64>())
+                {
+                    return match op {
+                        ">" => val_num > right_num,
+                        ">=" => val_num >= right_num,
+                        "<" => val_num < right_num,
+                        "<=" => val_num <= right_num,
+                        _ => false,
+                    };
+                }
+            }
+            _ => {}
+        }
+
+        false
+    }
+
+    /// Evaluate IN operator: n.property IN ['value1', 'value2', 'value3']
+    fn evaluate_in_condition(py: Python, condition: &str, var_name: &str, node: &Node) -> bool {
+        let parts: Vec<&str> = condition.split(" IN ").collect();
+        if parts.len() != 2 {
+            return false;
+        }
+
+        let left = parts[0].trim();
+        let right = parts[1].trim();
+
+        // Extract variable and property from left side
+        let left_parts: Vec<&str> = left.split('.').collect();
+        if left_parts.len() != 2 || left_parts[0] != var_name {
+            return false;
+        }
+
+        let prop_name = left_parts[1];
+
+        // Get property value from node
+        let props = node.properties.bind(py);
+        let value = match props.get_item(prop_name) {
+            Ok(Some(v)) => v,
+            _ => return false,
+        };
+
+        // Parse the list: ['value1', 'value2'] or ["value1", "value2"]
+        let list_str = right.trim_matches(|c| c == '[' || c == ']').trim();
+        if list_str.is_empty() {
+            return false;
+        }
+
+        // Split by comma and check each value
+        for item in list_str.split(',') {
+            let item = item.trim().trim_matches(|c| c == '\'' || c == '"');
+
+            // Try string comparison
+            if let Ok(val_str) = value.extract::<String>() {
+                if val_str == item {
+                    return true;
+                }
+            }
+            // Try numeric comparison
+            if let (Ok(val_num), Ok(item_num)) = (value.extract::<f64>(), item.parse::<f64>()) {
+                if (val_num - item_num).abs() < f64::EPSILON {
+                    return true;
+                }
+            }
+            // Try boolean comparison
+            if let (Ok(val_bool), Ok(item_bool)) = (value.extract::<bool>(), item.parse::<bool>()) {
+                if val_bool == item_bool {
+                    return true;
+                }
+            }
+        }
+
+        false
+    }
+
+    /// Evaluate string operators: STARTS WITH, ENDS WITH, CONTAINS
+    fn evaluate_string_operator(
+        py: Python,
+        condition: &str,
+        var_name: &str,
+        node: &Node,
+        operator: &str,
+    ) -> bool {
+        let sep = format!(" {} ", operator);
+        let parts: Vec<&str> = condition.split(&sep).collect();
+        if parts.len() != 2 {
+            return false;
+        }
+
+        let left = parts[0].trim();
+        let right = parts[1].trim().trim_matches(|c| c == '\'' || c == '"');
+
+        // Extract variable and property from left side
+        let left_parts: Vec<&str> = left.split('.').collect();
+        if left_parts.len() != 2 || left_parts[0] != var_name {
+            return false;
+        }
+
+        let prop_name = left_parts[1];
+
+        // Get property value from node
+        let props = node.properties.bind(py);
+        let value = match props.get_item(prop_name) {
+            Ok(Some(v)) => v,
+            _ => return false,
+        };
+
+        // Only works with strings
+        if let Ok(val_str) = value.extract::<String>() {
+            return match operator {
+                "STARTS WITH" => val_str.starts_with(right),
+                "ENDS WITH" => val_str.ends_with(right),
+                "CONTAINS" => val_str.contains(right),
+                _ => false,
+            };
+        }
+
+        false
+    }
+
+    fn execute_with(&mut self, vars: Vec<String>) -> PyResult<()> {
+        // WITH passes through only the specified variables
+        // Remove all other variables from matched_vars
+        let keys: Vec<String> = self.matched_vars.keys().cloned().collect();
+        for key in keys {
+            if !vars.contains(&key) {
+                self.matched_vars.remove(&key);
+            }
+        }
+        Ok(())
+    }
+
+    fn execute_order_by(
+        &mut self,
+        py: Python,
+        var: String,
+        key: String,
+        ascending: bool,
+    ) -> PyResult<()> {
+        // Sort matched variables by a property
+        if let Some(results) = self.matched_vars.get_mut(&var) {
+            results.sort_by(|a, b| {
+                let val_a = match a {
+                    QueryResult::Node(node) => {
+                        let props = node.properties.bind(py);
+                        props.get_item(&key).ok().flatten()
+                    }
+                    _ => None,
+                };
+
+                let val_b = match b {
+                    QueryResult::Node(node) => {
+                        let props = node.properties.bind(py);
+                        props.get_item(&key).ok().flatten()
+                    }
+                    _ => None,
+                };
+
+                match (val_a, val_b) {
+                    (Some(a), Some(b)) => {
+                        // Try numeric comparison first
+                        if let (Ok(a_num), Ok(b_num)) = (a.extract::<f64>(), b.extract::<f64>()) {
+                            let cmp = a_num
+                                .partial_cmp(&b_num)
+                                .unwrap_or(std::cmp::Ordering::Equal);
+                            if ascending {
+                                cmp
+                            } else {
+                                cmp.reverse()
+                            }
+                        }
+                        // Try string comparison
+                        else if let (Ok(a_str), Ok(b_str)) =
+                            (a.extract::<String>(), b.extract::<String>())
+                        {
+                            let cmp = a_str.cmp(&b_str);
+                            if ascending {
+                                cmp
+                            } else {
+                                cmp.reverse()
+                            }
+                        } else {
+                            std::cmp::Ordering::Equal
+                        }
+                    }
+                    (Some(_), None) => {
+                        if ascending {
+                            std::cmp::Ordering::Less
+                        } else {
+                            std::cmp::Ordering::Greater
+                        }
+                    }
+                    (None, Some(_)) => {
+                        if ascending {
+                            std::cmp::Ordering::Greater
+                        } else {
+                            std::cmp::Ordering::Less
+                        }
+                    }
+                    (None, None) => std::cmp::Ordering::Equal,
+                }
+            });
+        }
+        Ok(())
+    }
+
+    fn execute_limit(&mut self, count: usize) -> PyResult<()> {
+        // Limit the number of results for each variable
+        for results in self.matched_vars.values_mut() {
+            results.truncate(count);
+        }
+        Ok(())
+    }
+
+    fn execute_skip(&mut self, count: usize) -> PyResult<()> {
+        // Skip the first N results for each variable
+        for results in self.matched_vars.values_mut() {
+            if count < results.len() {
+                *results = results.split_off(count);
+            } else {
+                results.clear();
             }
         }
         Ok(())
