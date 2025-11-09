@@ -925,8 +925,7 @@ impl Query {
     fn parse_not_expression(py: Python, expr: &str, var_name: &str, node: &Node) -> bool {
         let expr = expr.trim();
 
-        if expr.starts_with("NOT ") {
-            let inner = expr[4..].trim();
+        if let Some(inner) = expr.strip_prefix("NOT ") {
             return !Self::parse_primary_expression(py, inner, var_name, node);
         }
 
