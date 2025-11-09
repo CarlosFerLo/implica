@@ -34,6 +34,12 @@ def app_ac(var_a, var_c):
 
 
 @pytest.fixture
+def app_ba(var_a, var_b):
+    """Fixture for Application (B -> A)"""
+    return implica.Application(var_b, var_a)
+
+
+@pytest.fixture
 def graph():
     """Fixture for a fresh Graph instance"""
     return implica.Graph()

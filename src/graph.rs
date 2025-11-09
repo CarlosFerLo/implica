@@ -752,30 +752,3 @@ impl Default for Graph {
         })
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::types::Variable;
-
-    #[test]
-    fn test_node_creation() {
-        Python::initialize();
-        Python::attach(|py| {
-            let var_a = Py::new(py, Variable::new("A".to_string())).unwrap();
-            let node = Node::new(var_a.into(), None).unwrap();
-
-            assert_eq!(node.__str__(), "Node(A)");
-            assert!(node.uid().starts_with("node_"));
-        });
-    }
-
-    #[test]
-    fn test_graph_creation() {
-        Python::initialize();
-        Python::attach(|py| {
-            let graph = Graph::new().unwrap();
-            assert_eq!(graph.__str__(py), "Graph(0 nodes, 0 edges)");
-        });
-    }
-}

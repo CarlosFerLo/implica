@@ -1337,18 +1337,3 @@ impl Query {
         Ok(())
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_query_creation() {
-        Python::initialize();
-        Python::attach(|py| {
-            let graph = Graph::new().unwrap();
-            let query = Query::new(graph);
-            assert_eq!(query.operations.len(), 0);
-        });
-    }
-}

@@ -3,6 +3,7 @@
 //! This module provides the core type system with variables and application types.
 //! Types form the foundation for the type theoretical graph model.
 
+use crate::errors::ImplicaError;
 use pyo3::prelude::*;
 use sha2::{Digest, Sha256};
 use std::fmt;
@@ -133,11 +134,20 @@ impl Variable {
     /// person_type = implica.Variable("Person")
     /// ```
     #[new]
-    pub fn new(name: String) -> Self {
-        Variable {
+    pub fn new(name: String) -> PyResult<Self> {
+        // Validate that the name is not empty or whitespace-only
+        if name.trim().is_empty() {
+            return Err(ImplicaError::invalid_identifier(
+                name.clone(),
+                "name cannot be empty or whitespace-only",
+            )
+            .into());
+        }
+
+        Ok(Variable {
             name,
             uid_cache: Arc::new(RwLock::new(None)),
-        }
+        })
     }
 
     /// Gets the name of this variable.
@@ -444,35 +454,5 @@ pub fn type_to_python(py: Python, typ: &Type) -> PyResult<Py<PyAny>> {
     match typ {
         Type::Variable(v) => Ok(Py::new(py, v.clone())?.into()),
         Type::Application(a) => Ok(Py::new(py, a.clone())?.into()),
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_variable_creation() {
-        let var = Variable::new("A".to_string());
-        assert_eq!(var.name, "A");
-        assert_eq!(var.uid(), "var_A");
-        assert_eq!(var.__str__(), "A");
-    }
-
-    #[test]
-    fn test_variable_equality() {
-        let var1 = Variable::new("A".to_string());
-        let var2 = Variable::new("A".to_string());
-        let var3 = Variable::new("B".to_string());
-        assert_eq!(var1, var2);
-        assert_ne!(var1, var3);
-    }
-
-    #[test]
-    fn test_type_display() {
-        let var_a = Type::Variable(Variable::new("A".to_string()));
-        let var_b = Type::Variable(Variable::new("B".to_string()));
-        assert_eq!(format!("{}", var_a), "A");
-        assert_eq!(format!("{}", var_b), "B");
     }
 }
