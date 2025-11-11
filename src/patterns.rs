@@ -118,7 +118,7 @@ impl NodePattern {
 
             let schema = if let Some(s) = type_schema {
                 if let Ok(schema_str) = s.bind(py).extract::<String>() {
-                    Some(TypeSchema::new(schema_str))
+                    TypeSchema::new(schema_str).ok()
                 } else {
                     s.bind(py).extract::<TypeSchema>().ok()
                 }
@@ -302,7 +302,7 @@ impl EdgePattern {
 
             let schema = if let Some(s) = term_type_schema {
                 if let Ok(schema_str) = s.bind(py).extract::<String>() {
-                    Some(TypeSchema::new(schema_str))
+                    TypeSchema::new(schema_str).ok()
                 } else {
                     s.bind(py).extract::<TypeSchema>().ok()
                 }
@@ -759,13 +759,8 @@ fn parse_node_pattern(s: &str) -> PyResult<NodePattern> {
 
         let type_part = content[colon_idx + 1..].trim();
         if !type_part.is_empty() {
-            // Check if it's already a schema pattern (contains $)
-            if type_part.contains('$') {
-                type_schema = Some(TypeSchema::new(type_part.to_string()));
-            } else {
-                // Wrap in $..$ for schema
-                type_schema = Some(TypeSchema::new(format!("${}$", type_part)));
-            }
+            // Try to create the type schema directly (no need for $ delimiters anymore)
+            type_schema = TypeSchema::new(type_part.to_string()).ok();
         }
     } else {
         // No colon, just variable name
@@ -852,13 +847,8 @@ fn parse_edge_pattern(s: &str) -> PyResult<EdgePattern> {
 
             let term_part = content[colon_idx + 1..].trim();
             if !term_part.is_empty() {
-                // Check if already a schema pattern
-                if term_part.contains('$') {
-                    term_type_schema = Some(TypeSchema::new(term_part.to_string()));
-                } else {
-                    // Wrap in $..$ for schema
-                    term_type_schema = Some(TypeSchema::new(format!("${}$", term_part)));
-                }
+                // Try to create the type schema directly (no need for $ delimiters anymore)
+                term_type_schema = TypeSchema::new(term_part.to_string()).ok();
             }
         } else {
             // No colon, just variable
