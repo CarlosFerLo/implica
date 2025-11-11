@@ -136,6 +136,20 @@ class TestNodeProperties:
         assert node.properties["dict"]["nested"] == "value"
         assert node.properties["none"] is None
 
+    def test_node_uid_remains_cached_after_property_mutation(self, var_a):
+        """UID remains the same even if node properties change (cached UID)."""
+        node = implica.Node(var_a, {"name": "Alice", "age": 30})
+
+        uid_before = node.uid()
+
+        # Modify properties
+        node.properties["age"] = 31
+        node.properties["city"] = "New York"
+
+        uid_after = node.uid()
+
+        assert uid_before == uid_after
+
 
 class TestNodeType:
     """Test suite for Node type attribute"""
@@ -406,6 +420,20 @@ class TestEdgeAttributes:
 
         with pytest.raises(AttributeError):
             edge.end = node_c
+
+
+class TestTermUID:
+    """Test suite for Term UID generation and consistency"""
+
+    def test_term_uid_consistency(self, app_ab):
+        """Test that calling uid() multiple times on a Term returns the same value"""
+        term = implica.Term("x", app_ab)
+
+        uid1 = term.uid()
+        uid2 = term.uid()
+        uid3 = term.uid()
+
+        assert uid1 == uid2 == uid3
 
 
 class TestEdgeStringRepresentations:
