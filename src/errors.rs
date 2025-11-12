@@ -179,6 +179,38 @@ pub enum ImplicaError {
         /// Reason for validation failure
         reason: String,
     },
+
+    /// Invalid configuration error - occurs when configuration parameters are invalid.
+    ///
+    /// Maps to Python's `ValueError`.
+    ///
+    /// # Examples
+    ///
+    /// ```python
+    /// # Python example
+    /// import implica
+    ///
+    /// # Invalid bloom filter false positive rate
+    /// # config = implica.IndexConfig(bloom_filter_fpr=1.5)  # ValueError: Invalid configuration
+    /// ```
+    InvalidConfiguration {
+        /// The configuration parameter that is invalid
+        parameter: String,
+        /// The invalid value
+        value: String,
+        /// Reason why it's invalid
+        reason: String,
+    },
+
+    /// Index operation error - occurs during index operations.
+    ///
+    /// Maps to Python's `RuntimeError`.
+    IndexOperation {
+        /// Description of the operation that failed
+        operation: String,
+        /// Reason for failure
+        reason: String,
+    },
 }
 
 impl fmt::Display for ImplicaError {
@@ -235,6 +267,20 @@ impl fmt::Display for ImplicaError {
             ImplicaError::SchemaValidation { schema, reason } => {
                 write!(f, "Schema validation failed for '{}': {}", schema, reason)
             }
+            ImplicaError::InvalidConfiguration {
+                parameter,
+                value,
+                reason,
+            } => {
+                write!(
+                    f,
+                    "Invalid configuration for '{}' = '{}': {}",
+                    parameter, value, reason
+                )
+            }
+            ImplicaError::IndexOperation { operation, reason } => {
+                write!(f, "Index operation '{}' failed: {}", operation, reason)
+            }
         }
     }
 }
@@ -261,7 +307,8 @@ impl From<ImplicaError> for PyErr {
             ImplicaError::InvalidPattern { .. }
             | ImplicaError::InvalidQuery { .. }
             | ImplicaError::InvalidIdentifier { .. }
-            | ImplicaError::SchemaValidation { .. } => {
+            | ImplicaError::SchemaValidation { .. }
+            | ImplicaError::InvalidConfiguration { .. } => {
                 exceptions::PyValueError::new_err(err.to_string())
             }
             ImplicaError::PropertyError { .. } => {
@@ -269,6 +316,9 @@ impl From<ImplicaError> for PyErr {
             }
             ImplicaError::VariableNotFound { .. } => {
                 exceptions::PyNameError::new_err(err.to_string())
+            }
+            ImplicaError::IndexOperation { .. } => {
+                exceptions::PyRuntimeError::new_err(err.to_string())
             }
         }
     }
@@ -367,6 +417,27 @@ impl ImplicaError {
     pub fn schema_validation(schema: impl Into<String>, reason: impl Into<String>) -> Self {
         ImplicaError::SchemaValidation {
             schema: schema.into(),
+            reason: reason.into(),
+        }
+    }
+
+    /// Creates an invalid configuration error.
+    pub fn invalid_configuration(
+        parameter: impl Into<String>,
+        value: impl Into<String>,
+        reason: impl Into<String>,
+    ) -> Self {
+        ImplicaError::InvalidConfiguration {
+            parameter: parameter.into(),
+            value: value.into(),
+            reason: reason.into(),
+        }
+    }
+
+    /// Creates an index operation error.
+    pub fn index_operation(operation: impl Into<String>, reason: impl Into<String>) -> Self {
+        ImplicaError::IndexOperation {
+            operation: operation.into(),
             reason: reason.into(),
         }
     }

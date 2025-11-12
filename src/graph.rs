@@ -340,17 +340,28 @@ impl Edge {
 /// type theoretical model. It stores nodes (types) and edges (terms) and provides
 /// querying capabilities through the Query interface.
 ///
+/// For large graphs (>100K types), Bloom Filters can be enabled via IndexConfig
+/// for O(1) pre-filtering and faster queries.
+///
 /// # Examples
 ///
 /// ```python
 /// import implica
 ///
-/// # Create a graph
+/// # Small graph (default, no bloom filters)
 /// graph = implica.Graph()
+///
+/// # Large graph with bloom filters enabled
+/// config = implica.IndexConfig(bloom_filter_fpr=0.01, estimated_size=1_000_000)
+/// graph = implica.Graph(config)
+///
+/// # Auto-configure for expected size
+/// config = implica.IndexConfig.for_graph_size(500_000)
+/// graph = implica.Graph(config)
 ///
 /// # Query the graph
 /// q = graph.query()
-/// q.match(node="n", type_schema="$Person$")
+/// q.match(node="n", type_schema="Person")
 /// results = q.return_(["n"])
 ///
 /// print(graph)  # Graph(X nodes, Y edges)
@@ -388,7 +399,11 @@ impl Clone for Graph {
 
 #[pymethods]
 impl Graph {
-    /// Creates a new empty graph.
+    /// Creates a new empty graph with optional index configuration.
+    ///
+    /// # Arguments
+    ///
+    /// * `config` - Optional IndexConfig for optimization settings (bloom filters)
     ///
     /// # Returns
     ///
@@ -397,16 +412,35 @@ impl Graph {
     /// # Examples
     ///
     /// ```python
+    /// # Small graph: bloom filters disabled (default)
     /// graph = implica.Graph()
+    ///
+    /// # Large graph: enable bloom filters
+    /// config = implica.IndexConfig(bloom_filter_fpr=0.01, estimated_size=1_000_000)
+    /// graph = implica.Graph(config)
+    ///
+    /// # Auto-configure for graph size
+    /// config = implica.IndexConfig.for_graph_size(500_000)
+    /// graph = implica.Graph(config)
+    ///
+    /// # Check if bloom filters are enabled
+    /// print(f"Bloom filters: {config.has_bloom_filters()}")
     /// ```
     #[new]
-    pub fn new() -> PyResult<Self> {
+    #[pyo3(signature = (config=None))]
+    pub fn new(config: Option<crate::type_index::IndexConfig>) -> PyResult<Self> {
         Python::attach(|py| {
+            let index_config = config.unwrap_or_default();
+
             Ok(Graph {
                 nodes: PyDict::new(py).into(),
                 edges: PyDict::new(py).into(),
-                node_type_index: Arc::new(std::sync::Mutex::new(TypeIndex::new())),
-                edge_type_index: Arc::new(std::sync::Mutex::new(TypeIndex::new())),
+                node_type_index: Arc::new(std::sync::Mutex::new(TypeIndex::with_config(
+                    index_config.clone(),
+                ))),
+                edge_type_index: Arc::new(std::sync::Mutex::new(TypeIndex::with_config(
+                    index_config,
+                ))),
             })
         })
     }

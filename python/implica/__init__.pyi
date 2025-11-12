@@ -90,17 +90,129 @@ class Edge:
     def __str__(self) -> str: ...
     def __repr__(self) -> str: ...
 
+### Index Configuration_
+
+class IndexConfig:
+    """
+    Configuration for graph indexing optimization features.
+
+    Enables Bloom Filters for O(1) pre-filtering in very large graphs (>100K types).
+
+    Configuration Guidelines:
+    - Small graphs (<10K types): No bloom filters needed (default)
+    - Medium graphs (10K-100K): Optional, 0.1% FPR
+    - Large graphs (100K-1M): Recommended, 1% FPR
+    - Very large graphs (>1M): Essential, 5% FPR for memory efficiency
+
+    Examples:
+        # Default: bloom filters disabled
+        config = IndexConfig()
+        graph = Graph(config)
+
+        # Enable with 1% false positive rate
+        config = IndexConfig(bloom_filter_fpr=0.01, estimated_size=1_000_000)
+        graph = Graph(config)
+
+        # Auto-configure based on expected size
+        config = IndexConfig.for_graph_size(500_000)
+        graph = Graph(config)
+
+        # Check if bloom filters are enabled
+        if config.has_bloom_filters():
+            print(f"Bloom FPR: {config.bloom_filter_fpr * 100}%")
+    """
+
+    bloom_filter_fpr: float | None
+    """False positive rate for bloom filters (0.0 to 1.0). None = disabled."""
+
+    estimated_size: int | None
+    """Estimated number of types for optimal bloom filter sizing."""
+
+    def __init__(
+        self,
+        bloom_filter_fpr: float | None = None,
+        estimated_size: int | None = None,
+    ) -> None:
+        """
+        Create index configuration.
+
+        Args:
+            bloom_filter_fpr: False positive rate (0.0-1.0). None disables bloom filters.
+                - 0.001 (0.1%): High accuracy, more memory
+                - 0.01 (1%): Recommended for large graphs
+                - 0.05 (5%): Memory efficient for very large graphs
+            estimated_size: Expected number of types for optimal sizing
+
+        Raises:
+            ValueError: If bloom_filter_fpr is not in range (0.0, 1.0)
+        """
+        ...
+
+    @staticmethod
+    def for_graph_size(num_types: int) -> "IndexConfig":
+        """
+        Returns recommended configuration for the given graph size.
+
+        Auto-selects optimal bloom filter settings:
+        - 0-10K types: No bloom filters
+        - 10K-100K types: 0.1% FPR
+        - 100K-1M types: 1% FPR
+        - >1M types: 5% FPR
+
+        Args:
+            num_types: Expected number of types in the graph
+
+        Returns:
+            Optimally configured IndexConfig
+
+        Examples:
+            config = IndexConfig.for_graph_size(500_000)
+            graph = Graph(config)
+        """
+        ...
+
+    def has_bloom_filters(self) -> bool:
+        """Returns True if bloom filters are enabled."""
+        ...
+
+    def __str__(self) -> str: ...
+    def __repr__(self) -> str: ...
+
 ### Graph_
 
 class Graph:
     """
     Represents the model of a type theoretical theory as a graph.
+
+    For large graphs (>100K types), Bloom Filters can be enabled via IndexConfig
+    for O(1) pre-filtering and significantly faster queries.
+
+    Examples:
+        # Small graph: no optimization needed
+        graph = Graph()
+
+        # Large graph: enable bloom filters
+        config = IndexConfig(bloom_filter_fpr=0.01, estimated_size=1_000_000)
+        graph = Graph(config)
+
+        # Auto-configure
+        config = IndexConfig.for_graph_size(500_000)
+        graph = Graph(config)
     """
 
     nodes: dict[str, Node]  # uid -> Node_
     edges: dict[str, Edge]  # uid -> Edge_
 
-    def __init__(self) -> None: ...
+    def __init__(self, config: IndexConfig | None = None) -> None:
+        """
+        Create a new graph.
+
+        Args:
+            config: Optional IndexConfig for optimization settings.
+                   If None, uses default (no bloom filters).
+        """
+        ...
+
     def query(self) -> "Query": ...
 
 ## Cypher Like querying_

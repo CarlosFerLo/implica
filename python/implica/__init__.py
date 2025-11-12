@@ -14,6 +14,8 @@ from .implica import (
     Node,
     Edge,
     Graph,
+    # Graph configuration
+    IndexConfig,
     # Query system
     TypeSchema,
     NodePattern,
@@ -29,6 +31,7 @@ __all__ = [
     "Node",
     "Edge",
     "Graph",
+    "IndexConfig",
     "TypeSchema",
     "NodePattern",
     "EdgePattern",

@@ -50,6 +50,7 @@ use graph::{Edge, Graph, Node};
 use patterns::{EdgePattern, NodePattern, PathPattern};
 use query::Query;
 use term::Term;
+use type_index::IndexConfig;
 use type_schema::TypeSchema;
 use types::{Application, Variable};
 
@@ -66,6 +67,7 @@ use types::{Application, Variable};
 /// - `Node`: Graph nodes with types
 /// - `Edge`: Graph edges with terms
 /// - `Graph`: The main graph structure
+/// - `IndexConfig`: Configuration for graph optimization (bloom filters)
 /// - `TypeSchema`: Type pattern matching
 /// - `NodePattern`, `EdgePattern`, `PathPattern`: Query patterns
 /// - `Query`: Cypher-like query builder
@@ -82,6 +84,9 @@ fn implica(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<Node>()?;
     m.add_class::<Edge>()?;
     m.add_class::<Graph>()?;
+
+    // Graph configuration
+    m.add_class::<IndexConfig>()?;
 
     // Query system
     m.add_class::<TypeSchema>()?;

@@ -3,6 +3,9 @@
 //! This module provides pattern structures for matching nodes, edges, and paths
 //! in the graph. These patterns are used by the Query system to find matching
 //! elements in the graph.
+//!
+//! All patterns are compiled and validated at creation time for optimal performance
+//! and early error detection.
 
 use crate::errors::ImplicaError;
 use crate::graph::Node;
@@ -13,10 +16,25 @@ use pyo3::prelude::*;
 use pyo3::types::PyDict;
 use std::collections::HashMap;
 
+/// Internal compiled representation for efficient matching.
+///
+/// This enum represents the compiled/optimized form of a pattern,
+/// allowing for efficient matching without re-parsing or re-validation.
+#[derive(Clone, Debug)]
+enum CompiledNodeMatcher {
+    /// Match any node (no type constraint)
+    Any,
+    /// Match nodes with a specific type
+    ExactType(Type),
+    /// Match nodes with a type schema pattern
+    SchemaType(TypeSchema),
+}
+
 /// Represents a node pattern in a Cypher-like query.
 ///
 /// Node patterns are used to match nodes in the graph based on variable names,
-/// types, type schemas, and properties.
+/// types, type schemas, and properties. Patterns are compiled and validated
+/// at creation time for optimal performance.
 ///
 /// # Examples
 ///
@@ -31,12 +49,12 @@ use std::collections::HashMap;
 /// pattern = implica.NodePattern(variable="n", type=person_type)
 ///
 /// # Match nodes using a type schema
-/// pattern = implica.NodePattern(variable="n", type_schema="$Person$")
+/// pattern = implica.NodePattern(variable="n", type_schema="Person")
 ///
 /// # Match with properties
 /// pattern = implica.NodePattern(
 ///     variable="n",
-///     type_schema="$Person$",
+///     type_schema="Person",
 ///     properties={"age": 25}
 /// )
 /// ```
@@ -44,17 +62,19 @@ use std::collections::HashMap;
 /// # Fields
 ///
 /// * `variable` - Optional variable name to bind matched nodes
-/// * `type_obj` - Optional specific type to match (internal)
-/// * `type_schema` - Optional type schema pattern to match
+/// * `compiled_matcher` - Compiled type matcher for efficient matching
 /// * `properties` - Dictionary of required property values
 #[pyclass]
 #[derive(Debug)]
 pub struct NodePattern {
     #[pyo3(get)]
     pub variable: Option<String>,
+    /// Compiled matcher for efficient type checking
+    compiled_matcher: CompiledNodeMatcher,
+    pub properties: HashMap<String, Py<PyAny>>,
+    // Keep these for backward compatibility and introspection
     pub type_obj: Option<Type>,
     pub type_schema: Option<TypeSchema>,
-    pub properties: HashMap<String, Py<PyAny>>,
 }
 
 impl Clone for NodePattern {
@@ -66,9 +86,10 @@ impl Clone for NodePattern {
             }
             NodePattern {
                 variable: self.variable.clone(),
+                compiled_matcher: self.compiled_matcher.clone(),
+                properties: props,
                 type_obj: self.type_obj.clone(),
                 type_schema: self.type_schema.clone(),
-                properties: props,
             }
         })
     }
@@ -77,6 +98,9 @@ impl Clone for NodePattern {
 #[pymethods]
 impl NodePattern {
     /// Creates a new node pattern.
+    ///
+    /// The pattern is compiled and validated at creation time for optimal performance.
+    /// Invalid type schemas or conflicting constraints will cause immediate errors.
     ///
     /// # Arguments
     ///
@@ -87,7 +111,13 @@ impl NodePattern {
     ///
     /// # Returns
     ///
-    /// A new `NodePattern` instance
+    /// A new `NodePattern` instance, compiled and ready for matching
+    ///
+    /// # Errors
+    ///
+    /// * `ValueError` if both `type` and `type_schema` are provided (conflicting constraints)
+    /// * `ValueError` if `type_schema` string is invalid
+    /// * `ValueError` if variable name is invalid (empty or whitespace-only)
     ///
     /// # Examples
     ///
@@ -98,8 +128,12 @@ impl NodePattern {
     /// # With type schema
     /// pattern = implica.NodePattern(
     ///     variable="person",
-    ///     type_schema="$Person$"
+    ///     type_schema="Person"
     /// )
+    ///
+    /// # With specific type
+    /// person_type = implica.Variable("Person")
+    /// pattern = implica.NodePattern(variable="n", type=person_type)
     /// ```
     #[new]
     #[pyo3(signature = (variable=None, r#type=None, type_schema=None, properties=None))]
@@ -110,47 +144,95 @@ impl NodePattern {
         properties: Option<Py<PyDict>>,
     ) -> PyResult<Self> {
         Python::attach(|py| {
+            // Validate variable name if provided
+            if let Some(ref var) = variable {
+                if var.trim().is_empty() {
+                    return Err(ImplicaError::invalid_identifier(
+                        var.clone(),
+                        "variable name cannot be empty or whitespace-only",
+                    )
+                    .into());
+                }
+            }
+
+            // Parse type if provided
             let type_obj = if let Some(t) = r#type {
                 Some(python_to_type(t.bind(py))?)
             } else {
                 None
             };
 
+            // Parse schema if provided
             let schema = if let Some(s) = type_schema {
                 if let Ok(schema_str) = s.bind(py).extract::<String>() {
-                    TypeSchema::new(schema_str).ok()
+                    Some(TypeSchema::new(schema_str)?) // Fail fast on invalid schema
                 } else {
-                    s.bind(py).extract::<TypeSchema>().ok()
+                    Some(s.bind(py).extract::<TypeSchema>()?)
                 }
             } else {
                 None
             };
 
+            // Validate: cannot have both type and type_schema
+            if type_obj.is_some() && schema.is_some() {
+                return Err(ImplicaError::schema_validation(
+                    "NodePattern",
+                    "Cannot specify both 'type' and 'type_schema' - they are mutually exclusive",
+                )
+                .into());
+            }
+
+            // Build compiled matcher for efficient matching
+            let compiled_matcher = if let Some(ref t) = type_obj {
+                CompiledNodeMatcher::ExactType(t.clone())
+            } else if let Some(ref s) = schema {
+                CompiledNodeMatcher::SchemaType(s.clone())
+            } else {
+                CompiledNodeMatcher::Any
+            };
+
+            // Parse properties
             let mut props = HashMap::new();
             if let Some(p) = properties {
                 for (k, v) in p.bind(py).iter() {
                     let key: String = k.extract()?;
+                    if key.trim().is_empty() {
+                        return Err(ImplicaError::invalid_identifier(
+                            key,
+                            "property key cannot be empty or whitespace-only",
+                        )
+                        .into());
+                    }
                     props.insert(key, v.into());
                 }
             }
 
             Ok(NodePattern {
                 variable,
+                compiled_matcher,
+                properties: props,
                 type_obj,
                 type_schema: schema,
-                properties: props,
             })
         })
     }
 
     fn __repr__(&self) -> String {
-        format!("NodePattern(variable={:?})", self.variable)
+        let type_info = if self.type_obj.is_some() {
+            ", type=<specified>"
+        } else if self.type_schema.is_some() {
+            ", type_schema=<specified>"
+        } else {
+            ""
+        };
+        format!("NodePattern(variable={:?}{})", self.variable, type_info)
     }
 }
 
 impl NodePattern {
     /// Checks if a node matches this pattern.
     ///
+    /// This uses the pre-compiled matcher for optimal performance.
     /// This is an internal method used by the query system.
     ///
     /// # Arguments
@@ -162,17 +244,20 @@ impl NodePattern {
     ///
     /// `Ok(true)` if the node matches, `Ok(false)` otherwise
     pub fn matches(&self, node: &Node, py: Python) -> PyResult<bool> {
-        // Check type if specified
-        if let Some(ref type_obj) = self.type_obj {
-            if &*node.r#type != type_obj {
-                return Ok(false);
+        // Check type using compiled matcher (most efficient path)
+        match &self.compiled_matcher {
+            CompiledNodeMatcher::Any => {
+                // No type constraint, continue to property check
             }
-        }
-
-        // Check type schema if specified
-        if let Some(ref schema) = self.type_schema {
-            if !schema.matches_type(&node.r#type) {
-                return Ok(false);
+            CompiledNodeMatcher::ExactType(type_obj) => {
+                if &*node.r#type != type_obj {
+                    return Ok(false);
+                }
+            }
+            CompiledNodeMatcher::SchemaType(schema) => {
+                if !schema.matches_type(&node.r#type) {
+                    return Ok(false);
+                }
             }
         }
 
@@ -194,10 +279,52 @@ impl NodePattern {
     }
 }
 
+/// Compiled direction for efficient matching.
+#[derive(Clone, Debug, PartialEq)]
+enum CompiledDirection {
+    Forward,
+    Backward,
+    Any,
+}
+
+impl CompiledDirection {
+    fn from_string(s: &str) -> Result<Self, ImplicaError> {
+        match s {
+            "forward" => Ok(CompiledDirection::Forward),
+            "backward" => Ok(CompiledDirection::Backward),
+            "any" => Ok(CompiledDirection::Any),
+            _ => Err(ImplicaError::schema_validation(
+                s,
+                "Direction must be 'forward', 'backward', or 'any'",
+            )),
+        }
+    }
+
+    fn to_string(&self) -> &'static str {
+        match self {
+            CompiledDirection::Forward => "forward",
+            CompiledDirection::Backward => "backward",
+            CompiledDirection::Any => "any",
+        }
+    }
+}
+
+/// Internal compiled representation for efficient edge matching.
+#[derive(Clone, Debug)]
+enum CompiledEdgeMatcher {
+    /// Match any term (no type constraint)
+    Any,
+    /// Match edges with a specific term
+    ExactTerm(Term),
+    /// Match edges with a term matching the schema
+    SchemaTerm(TypeSchema),
+}
+
 /// Represents an edge pattern in a Cypher-like query.
 ///
 /// Edge patterns are used to match edges in the graph based on variable names,
-/// terms, term type schemas, properties, and direction.
+/// terms, term type schemas, properties, and direction. Patterns are compiled
+/// and validated at creation time for optimal performance.
 ///
 /// # Examples
 ///
@@ -210,7 +337,7 @@ impl NodePattern {
 /// # Match edges with a specific term type
 /// pattern = implica.EdgePattern(
 ///     variable="rel",
-///     term_type_schema="$Person -> Address$",
+///     term_type_schema="Person -> Address",
 ///     direction="forward"
 /// )
 ///
@@ -221,20 +348,22 @@ impl NodePattern {
 /// # Fields
 ///
 /// * `variable` - Optional variable name to bind matched edges
-/// * `term` - Optional specific term to match (internal)
-/// * `term_type_schema` - Optional type schema for the term's type
+/// * `compiled_matcher` - Compiled term matcher for efficient matching
+/// * `compiled_direction` - Compiled direction for efficient checking
 /// * `properties` - Dictionary of required property values
-/// * `direction` - Edge direction: "forward", "backward", or "any"
 #[pyclass]
 #[derive(Debug)]
 pub struct EdgePattern {
     #[pyo3(get)]
     pub variable: Option<String>,
+    /// Compiled matcher for efficient term checking
+    compiled_matcher: CompiledEdgeMatcher,
+    /// Compiled direction for efficient checking
+    compiled_direction: CompiledDirection,
+    pub properties: HashMap<String, Py<PyAny>>,
+    // Keep these for backward compatibility and introspection
     pub term: Option<Term>,
     pub term_type_schema: Option<TypeSchema>,
-    pub properties: HashMap<String, Py<PyAny>>,
-    #[pyo3(get)]
-    pub direction: String, // "forward", "backward", "any"
 }
 
 impl Clone for EdgePattern {
@@ -246,10 +375,11 @@ impl Clone for EdgePattern {
             }
             EdgePattern {
                 variable: self.variable.clone(),
+                compiled_matcher: self.compiled_matcher.clone(),
+                compiled_direction: self.compiled_direction.clone(),
+                properties: props,
                 term: self.term.clone(),
                 term_type_schema: self.term_type_schema.clone(),
-                properties: props,
-                direction: self.direction.clone(),
             }
         })
     }
@@ -258,6 +388,9 @@ impl Clone for EdgePattern {
 #[pymethods]
 impl EdgePattern {
     /// Creates a new edge pattern.
+    ///
+    /// The pattern is compiled and validated at creation time for optimal performance.
+    /// Invalid term schemas, directions, or conflicting constraints will cause immediate errors.
     ///
     /// # Arguments
     ///
@@ -269,7 +402,14 @@ impl EdgePattern {
     ///
     /// # Returns
     ///
-    /// A new `EdgePattern` instance
+    /// A new `EdgePattern` instance, compiled and ready for matching
+    ///
+    /// # Errors
+    ///
+    /// * `ValueError` if both `term` and `term_type_schema` are provided (conflicting constraints)
+    /// * `ValueError` if `term_type_schema` string is invalid
+    /// * `ValueError` if `direction` is not one of "forward", "backward", or "any"
+    /// * `ValueError` if variable name is invalid (empty or whitespace-only)
     ///
     /// # Examples
     ///
@@ -280,7 +420,7 @@ impl EdgePattern {
     /// # Backward edge with type schema
     /// pattern = implica.EdgePattern(
     ///     variable="back",
-    ///     term_type_schema="$A -> B$",
+    ///     term_type_schema="A -> B",
     ///     direction="backward"
     /// )
     /// ```
@@ -294,45 +434,180 @@ impl EdgePattern {
         direction: String,
     ) -> PyResult<Self> {
         Python::attach(|py| {
+            // Validate variable name if provided
+            if let Some(ref var) = variable {
+                if var.trim().is_empty() {
+                    return Err(ImplicaError::invalid_identifier(
+                        var.clone(),
+                        "variable name cannot be empty or whitespace-only",
+                    )
+                    .into());
+                }
+            }
+
+            // Validate and compile direction
+            let compiled_direction = CompiledDirection::from_string(&direction)?;
+
+            // Parse term if provided
             let term_obj = if let Some(t) = term {
                 Some(t.bind(py).extract::<Term>()?)
             } else {
                 None
             };
 
+            // Parse schema if provided
             let schema = if let Some(s) = term_type_schema {
                 if let Ok(schema_str) = s.bind(py).extract::<String>() {
-                    TypeSchema::new(schema_str).ok()
+                    Some(TypeSchema::new(schema_str)?) // Fail fast on invalid schema
                 } else {
-                    s.bind(py).extract::<TypeSchema>().ok()
+                    Some(s.bind(py).extract::<TypeSchema>()?)
                 }
             } else {
                 None
             };
 
+            // Validate: cannot have both term and term_type_schema
+            if term_obj.is_some() && schema.is_some() {
+                return Err(ImplicaError::schema_validation(
+                    "EdgePattern",
+                    "Cannot specify both 'term' and 'term_type_schema' - they are mutually exclusive",
+                )
+                .into());
+            }
+
+            // Build compiled matcher for efficient matching
+            let compiled_matcher = if let Some(ref t) = term_obj {
+                CompiledEdgeMatcher::ExactTerm(t.clone())
+            } else if let Some(ref s) = schema {
+                CompiledEdgeMatcher::SchemaTerm(s.clone())
+            } else {
+                CompiledEdgeMatcher::Any
+            };
+
+            // Parse properties
             let mut props = HashMap::new();
             if let Some(p) = properties {
                 for (k, v) in p.bind(py).iter() {
                     let key: String = k.extract()?;
+                    if key.trim().is_empty() {
+                        return Err(ImplicaError::invalid_identifier(
+                            key,
+                            "property key cannot be empty or whitespace-only",
+                        )
+                        .into());
+                    }
                     props.insert(key, v.into());
                 }
             }
 
             Ok(EdgePattern {
                 variable,
+                compiled_matcher,
+                compiled_direction,
+                properties: props,
                 term: term_obj,
                 term_type_schema: schema,
-                properties: props,
-                direction,
             })
         })
     }
 
+    /// Gets the direction of this edge pattern.
+    ///
+    /// # Returns
+    ///
+    /// The direction as a string: "forward", "backward", or "any"
+    #[getter]
+    pub fn direction(&self) -> String {
+        self.compiled_direction.to_string().to_string()
+    }
+
     fn __repr__(&self) -> String {
+        let term_info = if self.term.is_some() {
+            ", term=<specified>"
+        } else if self.term_type_schema.is_some() {
+            ", term_type_schema=<specified>"
+        } else {
+            ""
+        };
         format!(
-            "EdgePattern(variable={:?}, direction={})",
-            self.variable, self.direction
+            "EdgePattern(variable={:?}, direction={}{})",
+            self.variable,
+            self.compiled_direction.to_string(),
+            term_info
         )
+    }
+}
+
+impl EdgePattern {
+    /// Checks if an edge matches this pattern.
+    ///
+    /// This uses the pre-compiled matcher for optimal performance.
+    /// This is an internal method used by the query system.
+    ///
+    /// Note: Direction matching is context-dependent and should be checked
+    /// by the caller based on the traversal direction.
+    ///
+    /// # Arguments
+    ///
+    /// * `edge` - The edge to check
+    /// * `py` - Python context
+    ///
+    /// # Returns
+    ///
+    /// `Ok(true)` if the edge matches, `Ok(false)` otherwise
+    pub fn matches(&self, edge: &crate::graph::Edge, py: Python) -> PyResult<bool> {
+        // Check term using compiled matcher (most efficient path)
+        match &self.compiled_matcher {
+            CompiledEdgeMatcher::Any => {
+                // No term constraint, continue to property check
+            }
+            CompiledEdgeMatcher::ExactTerm(term_obj) => {
+                if &*edge.term != term_obj {
+                    return Ok(false);
+                }
+            }
+            CompiledEdgeMatcher::SchemaTerm(schema) => {
+                if !schema.matches_type(&edge.term.r#type) {
+                    return Ok(false);
+                }
+            }
+        }
+
+        // Check properties if specified
+        if !self.properties.is_empty() {
+            let edge_props = edge.properties.bind(py);
+            for (key, value) in &self.properties {
+                if let Ok(Some(edge_value)) = edge_props.get_item(key) {
+                    if !edge_value.eq(value.bind(py))? {
+                        return Ok(false);
+                    }
+                } else {
+                    return Ok(false);
+                }
+            }
+        }
+
+        Ok(true)
+    }
+
+    /// Checks if the direction matches for traversal.
+    ///
+    /// This is a helper method to check if the edge can be traversed
+    /// in the given direction according to the pattern.
+    ///
+    /// # Arguments
+    ///
+    /// * `forward` - true if traversing forward, false if backward
+    ///
+    /// # Returns
+    ///
+    /// `true` if the direction matches the pattern
+    pub fn matches_direction(&self, forward: bool) -> bool {
+        match self.compiled_direction {
+            CompiledDirection::Any => true,
+            CompiledDirection::Forward => forward,
+            CompiledDirection::Backward => !forward,
+        }
     }
 }
 
@@ -731,15 +1006,10 @@ fn parse_node_pattern(s: &str) -> PyResult<NodePattern> {
     // Parse: (var:type {props}) or (var:type) or (var) or (:type)
     let mut variable = None;
     let mut type_schema = None;
-    let properties = HashMap::new(); // Properties parsing could be added later
 
     if inner.is_empty() {
-        return Ok(NodePattern {
-            variable: None,
-            type_obj: None,
-            type_schema: None,
-            properties,
-        });
+        // Empty node pattern - matches any node
+        return NodePattern::new(None, None, None, None);
     }
 
     // Check for properties (for future expansion)
@@ -759,8 +1029,8 @@ fn parse_node_pattern(s: &str) -> PyResult<NodePattern> {
 
         let type_part = content[colon_idx + 1..].trim();
         if !type_part.is_empty() {
-            // Try to create the type schema directly (no need for $ delimiters anymore)
-            type_schema = TypeSchema::new(type_part.to_string()).ok();
+            // Parse and validate the type schema
+            type_schema = Some(TypeSchema::new(type_part.to_string())?);
         }
     } else {
         // No colon, just variable name
@@ -769,11 +1039,10 @@ fn parse_node_pattern(s: &str) -> PyResult<NodePattern> {
         }
     }
 
-    Ok(NodePattern {
-        variable,
-        type_obj: None,
-        type_schema,
-        properties,
+    // Use the validated NodePattern constructor
+    Python::attach(|py| {
+        let schema_py = type_schema.map(|s| Py::new(py, s).unwrap().into_any());
+        NodePattern::new(variable, None, schema_py, None)
     })
 }
 
@@ -828,7 +1097,6 @@ fn parse_edge_pattern(s: &str) -> PyResult<EdgePattern> {
 
     let mut variable = None;
     let mut term_type_schema = None;
-    let properties = HashMap::new(); // Properties parsing for future expansion
 
     if !inner.is_empty() {
         // Check for properties
@@ -847,8 +1115,8 @@ fn parse_edge_pattern(s: &str) -> PyResult<EdgePattern> {
 
             let term_part = content[colon_idx + 1..].trim();
             if !term_part.is_empty() {
-                // Try to create the type schema directly (no need for $ delimiters anymore)
-                term_type_schema = TypeSchema::new(term_part.to_string()).ok();
+                // Parse and validate the type schema
+                term_type_schema = Some(TypeSchema::new(term_part.to_string())?);
             }
         } else {
             // No colon, just variable
@@ -858,11 +1126,9 @@ fn parse_edge_pattern(s: &str) -> PyResult<EdgePattern> {
         }
     }
 
-    Ok(EdgePattern {
-        variable,
-        term: None,
-        term_type_schema,
-        properties,
-        direction: direction.to_string(),
+    // Use the validated EdgePattern constructor
+    Python::attach(|py| {
+        let schema_py = term_type_schema.map(|s| Py::new(py, s).unwrap().into_any());
+        EdgePattern::new(variable, None, schema_py, None, direction.to_string())
     })
 }
