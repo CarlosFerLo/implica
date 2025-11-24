@@ -191,7 +191,7 @@ impl Term {
     /// # result.function_uid == f.uid()
     /// # result.argument_uid == x.uid()
     /// ```
-    fn __call__(&self, other: &Term) -> PyResult<Term> {
+    pub fn apply(&self, other: &Term) -> PyResult<Term> {
         // Check if self has an Arrow type
         if let Type::Arrow(app) = &*self.r#type {
             // Check if other has the correct type (should match app.left)
@@ -227,6 +227,10 @@ impl Term {
             }
             .into())
         }
+    }
+
+    fn __call__(&self, other: &Term) -> PyResult<Term> {
+        self.apply(other)
     }
 
     fn __hash__(&self) -> u64 {

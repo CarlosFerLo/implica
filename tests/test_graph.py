@@ -7,6 +7,29 @@ import implica
 # ============================================================================
 
 
+class TestKeepTermStrategy:
+    """Test Keep Term Strategy"""
+
+    def test_keep_term_strategy_has_expected_possible_values(self):
+        _keep_existent = implica.KeepTermStrategy.KeepExisting
+        _keep_new = implica.KeepTermStrategy.KeepNew
+        _keep_simplest = implica.KeepTermStrategy.KeepSimplest
+
+    def test_to_string_conversion(self):
+        keep_existent = implica.KeepTermStrategy.KeepExisting
+        keep_new = implica.KeepTermStrategy.KeepNew
+        keep_simplest = implica.KeepTermStrategy.KeepSimplest
+
+        assert str(keep_existent) == "KeepExisting"
+        assert str(keep_new) == "KeepNew"
+        assert str(keep_simplest) == "KeepSimplest"
+
+
+# ============================================================================
+# NODE TESTS
+# ============================================================================
+
+
 class TestNodeCreation:
     """Test suite for Node creation"""
 
@@ -25,7 +48,7 @@ class TestNodeCreation:
 
     def test_node_creation_with_properties(self, var_a):
         """Test creating nodes with properties"""
-        node = implica.Node(var_a, {"value": 1, "name": "test", "flag": True})
+        node = implica.Node(var_a, properties={"value": 1, "name": "test", "flag": True})
         assert node.properties["value"] == 1
         assert node.properties["name"] == "test"
         assert node.properties["flag"] is True
@@ -38,7 +61,7 @@ class TestNodeCreation:
 
     def test_node_creation_with_empty_properties(self, var_a):
         """Test creating a node with empty properties dict"""
-        node = implica.Node(var_a, {})
+        node = implica.Node(var_a, properties={})
         assert isinstance(node.properties, dict)
         assert len(node.properties) == 0
 
@@ -64,8 +87,8 @@ class TestNodeUID:
 
     def test_nodes_same_type_same_uid(self, var_a):
         """Test that nodes with the same type have the same UID"""
-        node1 = implica.Node(var_a, {"prop1": "value1"})
-        node2 = implica.Node(var_a, {"prop2": "value2"})
+        node1 = implica.Node(var_a, properties={"prop1": "value1"})
+        node2 = implica.Node(var_a, properties={"prop2": "value2"})
         assert node1.uid() == node2.uid()
 
     def test_nodes_different_types_different_uids(self, var_a, var_b):
@@ -92,7 +115,7 @@ class TestNodeProperties:
 
     def test_node_properties_are_mutable(self, var_a):
         """Test that node properties can be modified"""
-        node = implica.Node(var_a, {"value": 1})
+        node = implica.Node(var_a, properties={"value": 1})
         assert node.properties["value"] == 1
 
         node.properties["value"] = 2
@@ -100,14 +123,14 @@ class TestNodeProperties:
 
     def test_node_properties_can_be_added(self, var_a):
         """Test that new properties can be added to a node"""
-        node = implica.Node(var_a, {"value": 1})
+        node = implica.Node(var_a, properties={"value": 1})
         node.properties["new_prop"] = "new_value"
         assert node.properties["new_prop"] == "new_value"
         assert node.properties["value"] == 1
 
     def test_node_properties_can_be_deleted(self, var_a):
         """Test that properties can be deleted from a node"""
-        node = implica.Node(var_a, {"value": 1, "name": "test"})
+        node = implica.Node(var_a, properties={"value": 1, "name": "test"})
         del node.properties["value"]
         assert "value" not in node.properties
         assert node.properties["name"] == "test"
@@ -116,7 +139,7 @@ class TestNodeProperties:
         """Test that node properties can hold various Python types"""
         node = implica.Node(
             var_a,
-            {
+            properties={
                 "int": 42,
                 "float": 3.14,
                 "str": "hello",
@@ -136,7 +159,7 @@ class TestNodeProperties:
 
     def test_node_uid_remains_cached_after_property_mutation(self, var_a):
         """UID remains the same even if node properties change (cached UID)."""
-        node = implica.Node(var_a, {"name": "Alice", "age": 30})
+        node = implica.Node(var_a, properties={"name": "Alice", "age": 30})
 
         uid_before = node.uid()
 

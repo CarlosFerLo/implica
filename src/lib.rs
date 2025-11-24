@@ -46,7 +46,7 @@ pub mod type_index;
 pub mod type_schema;
 pub mod types;
 
-use graph::{Edge, Graph, Node};
+use graph::{Edge, Graph, KeepTermStrategy, Node};
 use patterns::{EdgePattern, NodePattern, PathPattern};
 use query::Query;
 use term::Term;
@@ -87,6 +87,7 @@ fn implica(m: &Bound<'_, PyModule>) -> PyResult<()> {
 
     // Graph configuration
     m.add_class::<IndexConfig>()?;
+    m.add_class::<KeepTermStrategy>()?;
 
     // Query system
     m.add_class::<TypeSchema>()?;

@@ -193,8 +193,8 @@ class TestGraphOperationsWithBloom:
         type_a = implica.Variable("A")
         type_b = implica.Variable("B")
 
-        node1 = implica.Node(type_a, {"name": "node1"})
-        node2 = implica.Node(type_b, {"name": "node2"})
+        node1 = implica.Node(type_a, properties={"name": "node1"})
+        node2 = implica.Node(type_b, properties={"name": "node2"})
 
         graph.nodes[node1.uid()] = node1
         graph.nodes[node2.uid()] = node2
@@ -267,7 +267,7 @@ class TestBloomFilterPerformance:
         # Add many nodes
         for i in range(100):
             type_var = implica.Variable(f"Type{i}")
-            node = implica.Node(type_var, {"index": i})
+            node = implica.Node(type_var, properties={"index": i})
             graph.nodes[node.uid()] = node
 
         assert len(graph.nodes) == 100

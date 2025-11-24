@@ -1,4 +1,5 @@
-from typing import Dict, Any
+from typing import Dict, Any, Optional
+from enum import Enum
 
 ## Types
 class BaseType:
@@ -85,6 +86,15 @@ class Term:
 
 ## Graph_
 
+### KeepTermStrategy_
+
+class KeepTermStrategy(Enum):
+    """Strategy for resolving conflicts when a term already exists."""
+
+    KeepExisting = "KeepExisting"
+    KeepNew = "KeepNew"
+    KeepSimplest = "KeepSimplest"
+
 ### Node_
 
 class Node:
@@ -93,9 +103,12 @@ class Node:
     """
 
     type: Type  # Immutable_
+    term: Optional[Term]  # Mutable_
     properties: Dict[str, Any]  # Mutable_
 
-    def __init__(self, type: Type, properties: Dict[str, Any] = {}) -> None: ...
+    def __init__(
+        self, type: Type, term: Optional[Term] = None, properties: Dict[str, Any] = {}
+    ) -> None: ...
     def uid(self) -> str: ...  # Only depends on type + cached_
     def __str__(self) -> str: ...
     def __repr__(self) -> str: ...

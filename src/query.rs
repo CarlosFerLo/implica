@@ -737,7 +737,7 @@ impl Query {
                         props.set_item(k, v)?;
                     }
 
-                    let node = Node::new(type_py, Some(props.into()))?;
+                    let node = Node::new(type_py, None, Some(props.into()))?;
 
                     // Use the optimized add_node method which updates the index
                     self.graph.add_node(&node, py)?;
@@ -877,7 +877,7 @@ impl Query {
                             props.set_item(k, v)?;
                         }
 
-                        let node = Node::new(type_py, Some(props.into()))?;
+                        let node = Node::new(type_py, None, Some(props.into()))?;
 
                         // Use the optimized add_node method which updates the index
                         self.graph.add_node(&node, py)?;

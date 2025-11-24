@@ -11,6 +11,7 @@ from .implica import (
     # Terms
     Term,
     # Graph components
+    KeepTermStrategy,
     Node,
     Edge,
     Graph,
@@ -28,6 +29,7 @@ __all__ = [
     "Variable",
     "Arrow",
     "Term",
+    "KeepTermStrategy",
     "Node",
     "Edge",
     "Graph",
