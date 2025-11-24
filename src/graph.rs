@@ -133,6 +133,12 @@ impl Node {
         uid
     }
 
+    /// Checks if two nodes are equal using UID.
+    fn __eq__(&self, other: &Self) -> bool {
+        // Equality based on uid
+        self.uid() == other.uid()
+    }
+
     /// Returns a string representation of the node.
     ///
     /// Format: "Node(type)"
@@ -331,6 +337,12 @@ impl Edge {
             "Edge({}: {} -> {})",
             self.term.name, self.start.r#type, self.end.r#type
         )
+    }
+
+    /// Checks if two nodes are equal using UID.
+    fn __eq__(&self, other: &Self) -> bool {
+        // Equality based on uid
+        self.uid() == other.uid()
     }
 }
 

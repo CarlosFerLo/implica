@@ -33,19 +33,53 @@ Type = Variable | Arrow
 class Term:
     """
     Represents a type theoretical term.
+
+    Terms can be either:
+    - Regular terms: created directly with a name and type
+    - Application terms: result of applying one term to another, maintaining
+      references (via UIDs) to the function and argument terms used to create them
     """
 
     name: str
     type: Type
+    function_uid: str | None
+    """For Application terms: UID of the function term that was applied. None for regular terms."""
+    argument_uid: str | None
+    """For Application terms: UID of the argument term that was applied to. None for regular terms."""
 
-    def __init__(self, name: str, type: Type) -> None: ...
-    def uid(self) -> str: ...  # Only depends on name + type + cached_
+    def __init__(self, name: str, type: Type) -> None:
+        """
+        Create a new regular term with the given name and type.
+        Regular terms have function_uid and argument_uid set to None.
+        """
+        ...
+
+    def uid(self) -> str:
+        """
+        Returns a unique identifier for this term.
+
+        For regular terms: based on name and type.
+        For Application terms: based on function_uid, argument_uid, and type.
+        Result is cached for performance.
+        """
+        ...
+
     def __str__(self) -> str: ...
     def __repr__(self) -> str: ...
     def __call__(self, other: "Term") -> "Term":
         """
-        If the self has an Arrow type and other has the corresponding self.type.left type,
-        then return a term of type self.type.right and with name (self.name other.name).
+        Apply this term to another term.
+
+        If self has an Arrow type (A -> B) and other has the corresponding type A,
+        then return an Application term of type B with name (self.name other.name).
+
+        The resulting Application term maintains references to both terms:
+        - result.function_uid == self.uid()
+        - result.argument_uid == other.uid()
+
+        Raises:
+            TypeError: If self's type is not an Arrow type
+            TypeError: If other's type doesn't match the expected input type
         """
         ...
 

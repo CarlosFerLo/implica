@@ -59,7 +59,7 @@ class TestTypeMismatchErrors:
             x(y)
 
         assert "Type mismatch" in str(exc_info.value)
-        assert "Arrow type" in str(exc_info.value).lower()
+        assert "arrow type" in str(exc_info.value).lower()
 
     def test_term_Arrow_success_case(self):
         """Test that correct type Arrow works."""

@@ -40,6 +40,8 @@ use std::sync::{Arc, RwLock};
 ///
 /// * `name` - The name of the term
 /// * `type` - The type of the term (accessible via get_type())
+/// * `function_uid` - For application terms, the UID of the function being applied
+/// * `argument_uid` - For application terms, the UID of the argument being applied
 #[pyclass]
 #[derive(Clone, Debug)]
 pub struct Term {
@@ -48,6 +50,12 @@ pub struct Term {
     pub r#type: Arc<Type>,
     /// Cached UID for performance - computed once and reused
     uid_cache: Arc<RwLock<Option<String>>>,
+    /// For application terms: UID of the function being applied
+    #[pyo3(get)]
+    pub function_uid: Option<String>,
+    /// For application terms: UID of the argument being applied
+    #[pyo3(get)]
+    pub argument_uid: Option<String>,
 }
 
 #[pymethods]
@@ -77,6 +85,8 @@ impl Term {
                 name,
                 r#type: Arc::new(type_obj),
                 uid_cache: Arc::new(RwLock::new(None)),
+                function_uid: None,
+                argument_uid: None,
             })
         })
     }
@@ -94,6 +104,7 @@ impl Term {
     /// Returns a unique identifier for this term.
     ///
     /// The UID is constructed using SHA256 hash based on the term's name and type UID.
+    /// For Application terms, it also includes the UIDs of the function and argument terms.
     /// This result is cached to avoid recalculating for complex recursive types.
     ///
     /// # Returns
@@ -109,10 +120,23 @@ impl Term {
 
         // Calculate the UID
         let mut hasher = Sha256::new();
-        hasher.update(b"term:");
-        hasher.update(self.name.as_bytes());
-        hasher.update(b":");
-        hasher.update(self.r#type.uid().as_bytes());
+
+        // For Application terms, include function and argument UIDs
+        if let (Some(func_uid), Some(arg_uid)) = (&self.function_uid, &self.argument_uid) {
+            hasher.update(b"application:");
+            hasher.update(func_uid.as_bytes());
+            hasher.update(b":");
+            hasher.update(arg_uid.as_bytes());
+            hasher.update(b":");
+            hasher.update(self.r#type.uid().as_bytes());
+        } else {
+            // Regular term
+            hasher.update(b"term:");
+            hasher.update(self.name.as_bytes());
+            hasher.update(b":");
+            hasher.update(self.r#type.uid().as_bytes());
+        }
+
         let uid = format!("{:x}", hasher.finalize());
 
         // Cache it for future use
@@ -142,14 +166,17 @@ impl Term {
     /// This implements the type theoretical Arrow operation. If `self` has
     /// type `A -> B` and `other` has type `A`, the result has type `B`.
     ///
+    /// The resulting term is an Application term that maintains references
+    /// (via UIDs) to both the function and argument terms used to create it.
+    ///
     /// # Arguments
     ///
     /// * `other` - The term to apply this term to
-    /// * `py` - Python context
     ///
     /// # Returns
     ///
-    /// A new term representing the Arrow, with name "(self.name other.name)"
+    /// A new Application term with name "(self.name other.name)", storing
+    /// the UIDs of both the function (self) and argument (other) terms.
     ///
     /// # Errors
     ///
@@ -161,16 +188,29 @@ impl Term {
     /// ```python
     /// # f has type A -> B, x has type A
     /// result = f(x)  # result has type B
+    /// # result.function_uid == f.uid()
+    /// # result.argument_uid == x.uid()
     /// ```
-    fn __call__(&self, other: &Term, py: Python) -> PyResult<Term> {
+    fn __call__(&self, other: &Term) -> PyResult<Term> {
         // Check if self has an Arrow type
         if let Type::Arrow(app) = &*self.r#type {
             // Check if other has the correct type (should match app.left)
             if *other.r#type == *app.left {
-                // Return a term with type app.right and name (self.name other.name)
+                // Create an application term with references to the original terms
                 let new_name = format!("({} {})", self.name, other.name);
-                let new_type_py = type_to_python(py, &app.right)?;
-                Term::new(new_name, new_type_py)
+                let type_obj = (*app.right).clone();
+
+                // Get UIDs from both terms
+                let func_uid = self.uid();
+                let arg_uid = other.uid();
+
+                Ok(Term {
+                    name: new_name,
+                    r#type: Arc::new(type_obj),
+                    uid_cache: Arc::new(RwLock::new(None)),
+                    function_uid: Some(func_uid),
+                    argument_uid: Some(arg_uid),
+                })
             } else {
                 Err(ImplicaError::type_mismatch_with_context(
                     app.left.to_string(),
@@ -193,21 +233,29 @@ impl Term {
         use std::collections::hash_map::DefaultHasher;
         use std::hash::{Hash, Hasher};
         let mut hasher = DefaultHasher::new();
-        // Hash based on name and type (not the cache)
+        // Hash based on name, type, and application references (not the cache)
         self.name.hash(&mut hasher);
         self.r#type.hash(&mut hasher);
+        self.function_uid.hash(&mut hasher);
+        self.argument_uid.hash(&mut hasher);
         hasher.finish()
     }
 
     fn __eq__(&self, other: &Self) -> bool {
-        // Equality based on name and type (not the cache)
-        self.name == other.name && self.r#type == other.r#type
+        // Equality based on name, type, and application references (not the cache)
+        self.name == other.name
+            && self.r#type == other.r#type
+            && self.function_uid == other.function_uid
+            && self.argument_uid == other.argument_uid
     }
 }
 
 impl PartialEq for Term {
     fn eq(&self, other: &Self) -> bool {
-        self.name == other.name && self.r#type == other.r#type
+        self.name == other.name
+            && self.r#type == other.r#type
+            && self.function_uid == other.function_uid
+            && self.argument_uid == other.argument_uid
     }
 }
 
@@ -217,5 +265,7 @@ impl std::hash::Hash for Term {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         self.name.hash(state);
         self.r#type.hash(state);
+        self.function_uid.hash(state);
+        self.argument_uid.hash(state);
     }
 }
