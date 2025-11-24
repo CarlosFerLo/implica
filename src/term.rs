@@ -1,7 +1,7 @@
 //! Type theoretical terms with their types.
 //!
 //! This module provides the `Term` structure representing typed terms in the type theory.
-//! Terms have a name and an associated type, and support application operations.
+//! Terms have a name and an associated type, and support Arrow operations.
 
 use crate::errors::ImplicaError;
 use crate::types::{python_to_type, type_to_python, Type};
@@ -25,7 +25,7 @@ use std::sync::{Arc, RwLock};
 /// B = implica.Variable("B")
 ///
 /// # Create function type A -> B
-/// func_type = implica.Application(A, B)
+/// func_type = implica.Arrow(A, B)
 ///
 /// # Create terms
 /// f = implica.Term("f", func_type)
@@ -57,7 +57,7 @@ impl Term {
     /// # Arguments
     ///
     /// * `name` - The name of the term
-    /// * `type` - The type of the term (Variable or Application)
+    /// * `type` - The type of the term (Variable or Arrow)
     ///
     /// # Returns
     ///
@@ -85,7 +85,7 @@ impl Term {
     ///
     /// # Returns
     ///
-    /// The type as a Python object (Variable or Application)
+    /// The type as a Python object (Variable or Arrow)
     #[getter]
     pub fn get_type(&self, py: Python) -> PyResult<Py<PyAny>> {
         type_to_python(py, &self.r#type)
@@ -137,9 +137,9 @@ impl Term {
         format!("Term(\"{}\", {})", self.name, self.r#type)
     }
 
-    /// Applies this term to another term (function application).
+    /// Applies this term to another term (function Arrow).
     ///
-    /// This implements the type theoretical application operation. If `self` has
+    /// This implements the type theoretical Arrow operation. If `self` has
     /// type `A -> B` and `other` has type `A`, the result has type `B`.
     ///
     /// # Arguments
@@ -149,11 +149,11 @@ impl Term {
     ///
     /// # Returns
     ///
-    /// A new term representing the application, with name "(self.name other.name)"
+    /// A new term representing the Arrow, with name "(self.name other.name)"
     ///
     /// # Errors
     ///
-    /// * `TypeError` if self's type is not an application type
+    /// * `TypeError` if self's type is not an Arrow type
     /// * `TypeError` if other's type doesn't match the expected input type
     ///
     /// # Examples
@@ -163,8 +163,8 @@ impl Term {
     /// result = f(x)  # result has type B
     /// ```
     fn __call__(&self, other: &Term, py: Python) -> PyResult<Term> {
-        // Check if self has an application type
-        if let Type::Application(app) = &*self.r#type {
+        // Check if self has an Arrow type
+        if let Type::Arrow(app) = &*self.r#type {
             // Check if other has the correct type (should match app.left)
             if *other.r#type == *app.left {
                 // Return a term with type app.right and name (self.name other.name)
@@ -175,15 +175,15 @@ impl Term {
                 Err(ImplicaError::type_mismatch_with_context(
                     app.left.to_string(),
                     other.r#type.to_string(),
-                    "function application",
+                    "function Arrow",
                 )
                 .into())
             }
         } else {
             Err(ImplicaError::TypeMismatch {
-                expected: "application type (A -> B)".to_string(),
+                expected: "Arrow type (A -> B)".to_string(),
                 got: self.r#type.to_string(),
-                context: Some("term application".to_string()),
+                context: Some("term Arrow".to_string()),
             }
             .into())
         }

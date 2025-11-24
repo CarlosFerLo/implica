@@ -7,7 +7,7 @@ This module provides tools for working with type theory and graph models.
 from .implica import (
     # Type system
     Variable,
-    Application,
+    Arrow,
     # Terms
     Term,
     # Graph components
@@ -26,7 +26,7 @@ from .implica import (
 
 __all__ = [
     "Variable",
-    "Application",
+    "Arrow",
     "Term",
     "Node",
     "Edge",

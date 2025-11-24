@@ -1,7 +1,7 @@
 //! Type indexing structures for fast O(log n) type matching.
 //!
 //! This module provides tree-based indexing structures that allow fast lookup
-//! of types based on their Application structure. Instead of iterating through
+//! of types based on their Arrow structure. Instead of iterating through
 //! all types (O(n)), we can use the tree structure to perform lookups in O(log n).
 //!
 //! For very large graphs (>100K types), optional Bloom Filters can be enabled
@@ -328,7 +328,7 @@ impl BloomFilter {
 
 /// Bloom filters for different type components.
 ///
-/// Maintains separate bloom filters for variables and applications
+/// Maintains separate bloom filters for variables and Arrows
 /// to enable fast pre-filtering of type queries.
 #[derive(Clone, Debug)]
 struct TypeBloomFilters {
@@ -336,20 +336,20 @@ struct TypeBloomFilters {
     /// Answers: "Does any type contain Variable X?"
     variables: BloomFilter,
 
-    /// Bloom filter for application pairs
-    /// Answers: "Does any type contain Application (L, R)?"
-    applications: BloomFilter,
+    /// Bloom filter for Arrow pairs
+    /// Answers: "Does any type contain Arrow (L, R)?"
+    arrows: BloomFilter,
 }
 
 impl TypeBloomFilters {
     fn new(expected_elements: usize, false_positive_rate: f64) -> Self {
-        // Estimate: each type might have ~5 variable components and ~10 application components
+        // Estimate: each type might have ~5 variable components and ~10 Arrow components
         let estimated_vars = expected_elements * 5;
         let estimated_apps = expected_elements * 10;
 
         TypeBloomFilters {
             variables: BloomFilter::new(estimated_vars, false_positive_rate),
-            applications: BloomFilter::new(estimated_apps, false_positive_rate),
+            arrows: BloomFilter::new(estimated_apps, false_positive_rate),
         }
     }
 
@@ -357,31 +357,31 @@ impl TypeBloomFilters {
         self.variables.insert(var_name);
     }
 
-    fn insert_application(&mut self, left_uid: &str, right_uid: &str) {
+    fn insert_arrow(&mut self, left_uid: &str, right_uid: &str) {
         let key = format!("{}|{}", left_uid, right_uid);
-        self.applications.insert(&key);
+        self.arrows.insert(&key);
     }
 
     fn might_contain_variable(&self, var_name: &str) -> bool {
         self.variables.might_contain(var_name)
     }
 
-    fn might_contain_application(&self, left_uid: &str, right_uid: &str) -> bool {
+    fn might_contain_arrow(&self, left_uid: &str, right_uid: &str) -> bool {
         let key = format!("{}|{}", left_uid, right_uid);
-        self.applications.might_contain(&key)
+        self.arrows.might_contain(&key)
     }
 }
 
 /// Component-based index for precise lookups after bloom filtering.
 ///
-/// Maps type components (variables and applications) to the indices
+/// Maps type components (variables and Arrows) to the indices
 /// of items that contain them, enabling fast intersection queries.
 #[derive(Clone, Debug)]
 struct ComponentIndex<T: Clone> {
     /// Maps variable name to item indices that contain it
     contains_var: HashMap<String, HashSet<usize>>,
 
-    /// Maps (left_uid, right_uid) to item indices that contain this application
+    /// Maps (left_uid, right_uid) to item indices that contain this Arrow
     contains_app: HashMap<(String, String), HashSet<usize>>,
 
     /// All items stored by index
@@ -412,8 +412,8 @@ impl<T: Clone> ComponentIndex<T> {
                     .or_default()
                     .insert(item_index);
             }
-            Type::Application(app) => {
-                // Index this application
+            Type::Arrow(app) => {
+                // Index this Arrow
                 let key = (app.left.uid(), app.right.uid());
                 self.contains_app.entry(key).or_default().insert(item_index);
 
@@ -428,7 +428,7 @@ impl<T: Clone> ComponentIndex<T> {
         self.contains_var.get(var_name).cloned().unwrap_or_default()
     }
 
-    fn find_with_application(&self, left_uid: &str, right_uid: &str) -> HashSet<usize> {
+    fn find_with_arrow(&self, left_uid: &str, right_uid: &str) -> HashSet<usize> {
         self.contains_app
             .get(&(left_uid.to_string(), right_uid.to_string()))
             .cloned()
@@ -444,7 +444,7 @@ impl<T: Clone> ComponentIndex<T> {
 ///
 /// The TypeIndex organizes types by their structure:
 /// - Variable types are stored in a simple HashMap by name
-/// - Application types are stored in a tree structure indexed by their left and right types
+/// - Arrow types are stored in a tree structure indexed by their left and right types
 ///
 /// For large graphs, optional Bloom Filters provide O(1) pre-filtering:
 /// - When enabled: Bloom → Component Index → Full Match
@@ -468,9 +468,9 @@ pub struct TypeIndex<T: Clone> {
     /// Index for Variable types: maps variable name to items
     variable_index: HashMap<String, Vec<T>>,
 
-    /// Index for Application types: nested structure
+    /// Index for Arrow types: nested structure
     /// First level: left type UID -> Second level: right type UID -> items
-    application_index: BTreeMap<String, BTreeMap<String, Vec<T>>>,
+    arrow_index: BTreeMap<String, BTreeMap<String, Vec<T>>>,
 
     /// Wildcard index: stores all items for wildcard matching (matches any type)
     all_items: Vec<T>,
@@ -523,7 +523,7 @@ impl<T: Clone> TypeIndex<T> {
 
         TypeIndex {
             variable_index: HashMap::new(),
-            application_index: BTreeMap::new(),
+            arrow_index: BTreeMap::new(),
             all_items: Vec::new(),
             bloom,
             component_index: ComponentIndex::new(),
@@ -564,12 +564,12 @@ impl<T: Clone> TypeIndex<T> {
                     .or_default()
                     .push(item.clone());
             }
-            Type::Application(app) => {
+            Type::Arrow(app) => {
                 // Index by left and right type UIDs
                 let left_uid = app.left.uid();
                 let right_uid = app.right.uid();
 
-                self.application_index
+                self.arrow_index
                     .entry(left_uid)
                     .or_default()
                     .entry(right_uid)
@@ -592,10 +592,10 @@ impl<T: Clone> TypeIndex<T> {
                 Type::Variable(var) => {
                     bloom.insert_variable(&var.name);
                 }
-                Type::Application(app) => {
+                Type::Arrow(app) => {
                     let left_uid = app.left.uid();
                     let right_uid = app.right.uid();
-                    bloom.insert_application(&left_uid, &right_uid);
+                    bloom.insert_arrow(&left_uid, &right_uid);
 
                     // Recursively insert components
                     self.insert_into_bloom(&app.left);
@@ -630,11 +630,11 @@ impl<T: Clone> TypeIndex<T> {
                     }
                 }
             }
-            Type::Application(app) => {
+            Type::Arrow(app) => {
                 let left_uid = app.left.uid();
                 let right_uid = app.right.uid();
 
-                if let Some(right_map) = self.application_index.get_mut(&left_uid) {
+                if let Some(right_map) = self.arrow_index.get_mut(&left_uid) {
                     if let Some(items) = right_map.get_mut(&right_uid) {
                         items.retain(|item| !filter(item));
                         if items.is_empty() {
@@ -642,7 +642,7 @@ impl<T: Clone> TypeIndex<T> {
                         }
                     }
                     if right_map.is_empty() {
-                        self.application_index.remove(&left_uid);
+                        self.arrow_index.remove(&left_uid);
                     }
                 }
             }
@@ -665,31 +665,31 @@ impl<T: Clone> TypeIndex<T> {
             .unwrap_or_default()
     }
 
-    /// Finds items that match a specific application type.
+    /// Finds items that match a specific Arrow type.
     ///
     /// # Arguments
     ///
-    /// * `left_type` - The left type of the application
-    /// * `right_type` - The right type of the application
+    /// * `left_type` - The left type of the Arrow
+    /// * `right_type` - The right type of the Arrow
     ///
     /// # Returns
     ///
     /// A vector of references to matching items
-    pub fn find_application(&self, left_type: &Type, right_type: &Type) -> Vec<&T> {
+    pub fn find_arrow(&self, left_type: &Type, right_type: &Type) -> Vec<&T> {
         let left_uid = left_type.uid();
         let right_uid = right_type.uid();
 
-        self.application_index
+        self.arrow_index
             .get(&left_uid)
             .and_then(|right_map| right_map.get(&right_uid))
             .map(|items| items.iter().collect())
             .unwrap_or_default()
     }
 
-    /// Finds items where the application's left type matches.
+    /// Finds items where the Arrow's left type matches.
     ///
     /// This is useful for partial matching when we only care about the left side
-    /// of an application type.
+    /// of an Arrow type.
     ///
     /// # Arguments
     ///
@@ -698,19 +698,19 @@ impl<T: Clone> TypeIndex<T> {
     /// # Returns
     ///
     /// A vector of references to matching items
-    pub fn find_application_by_left(&self, left_type: &Type) -> Vec<&T> {
+    pub fn find_arrow_by_left(&self, left_type: &Type) -> Vec<&T> {
         let left_uid = left_type.uid();
 
-        self.application_index
+        self.arrow_index
             .get(&left_uid)
             .map(|right_map| right_map.values().flat_map(|items| items.iter()).collect())
             .unwrap_or_default()
     }
 
-    /// Finds items where the application's right type matches.
+    /// Finds items where the Arrow's right type matches.
     ///
     /// This is useful for partial matching when we only care about the right side
-    /// of an application type.
+    /// of an Arrow type.
     ///
     /// # Arguments
     ///
@@ -719,10 +719,10 @@ impl<T: Clone> TypeIndex<T> {
     /// # Returns
     ///
     /// A vector of references to matching items
-    pub fn find_application_by_right(&self, right_type: &Type) -> Vec<&T> {
+    pub fn find_arrow_by_right(&self, right_type: &Type) -> Vec<&T> {
         let right_uid = right_type.uid();
 
-        self.application_index
+        self.arrow_index
             .values()
             .flat_map(|right_map| {
                 right_map
@@ -780,10 +780,10 @@ impl<T: Clone> TypeIndex<T> {
             for component in components {
                 let might_exist = match component {
                     Type::Variable(var) => bloom.might_contain_variable(&var.name),
-                    Type::Application(app) => {
+                    Type::Arrow(app) => {
                         let left_uid = app.left.uid();
                         let right_uid = app.right.uid();
-                        bloom.might_contain_application(&left_uid, &right_uid)
+                        bloom.might_contain_arrow(&left_uid, &right_uid)
                     }
                 };
 
@@ -801,11 +801,10 @@ impl<T: Clone> TypeIndex<T> {
         for component in components {
             let component_indices = match component {
                 Type::Variable(var) => self.component_index.find_with_variable(&var.name),
-                Type::Application(app) => {
+                Type::Arrow(app) => {
                     let left_uid = app.left.uid();
                     let right_uid = app.right.uid();
-                    self.component_index
-                        .find_with_application(&left_uid, &right_uid)
+                    self.component_index.find_with_arrow(&left_uid, &right_uid)
                 }
             };
 
@@ -852,7 +851,7 @@ impl<T: Clone> TypeIndex<T> {
     /// Clears all items from the index.
     pub fn clear(&mut self) {
         self.variable_index.clear();
-        self.application_index.clear();
+        self.arrow_index.clear();
         self.all_items.clear();
 
         // Clear bloom filters and component index if enabled
@@ -921,25 +920,25 @@ impl<T: Clone> TypeWithItemIndex<T> {
             .collect()
     }
 
-    pub fn find_application(&self, left_type: &Type, right_type: &Type) -> Vec<(&Type, &T)> {
+    pub fn find_arrow(&self, left_type: &Type, right_type: &Type) -> Vec<(&Type, &T)> {
         self.inner
-            .find_application(left_type, right_type)
+            .find_arrow(left_type, right_type)
             .into_iter()
             .map(|(typ, item)| (typ.as_ref(), item))
             .collect()
     }
 
-    pub fn find_application_by_left(&self, left_type: &Type) -> Vec<(&Type, &T)> {
+    pub fn find_arrow_by_left(&self, left_type: &Type) -> Vec<(&Type, &T)> {
         self.inner
-            .find_application_by_left(left_type)
+            .find_arrow_by_left(left_type)
             .into_iter()
             .map(|(typ, item)| (typ.as_ref(), item))
             .collect()
     }
 
-    pub fn find_application_by_right(&self, right_type: &Type) -> Vec<(&Type, &T)> {
+    pub fn find_arrow_by_right(&self, right_type: &Type) -> Vec<(&Type, &T)> {
         self.inner
-            .find_application_by_right(right_type)
+            .find_arrow_by_right(right_type)
             .into_iter()
             .map(|(typ, item)| (typ.as_ref(), item))
             .collect()

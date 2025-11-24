@@ -95,7 +95,7 @@ class TestNodePatternMatching:
         # Should match any type
         node1 = implica.Node(implica.Variable("Person"))
         node2 = implica.Node(implica.Variable("Number"))
-        node3 = implica.Node(implica.Application(implica.Variable("A"), implica.Variable("B")))
+        node3 = implica.Node(implica.Arrow(implica.Variable("A"), implica.Variable("B")))
 
         # All should match (matching is internal, tested via query)
         # This is a placeholder - actual matching is used by Query
@@ -119,8 +119,8 @@ class TestNodePatternMatching:
         # Should match any node
         assert pattern.variable == "n"
 
-    def test_match_type_schema_application(self):
-        """Test pattern with application schema."""
+    def test_match_type_schema_Arrow(self):
+        """Test pattern with Arrow schema."""
         pattern = implica.NodePattern(variable="n", type_schema="A -> B")
 
         # Pattern should be compiled with the schema
@@ -360,8 +360,8 @@ class TestPathPatternParsing:
         assert len(p.nodes) == 2
         assert len(p.edges) == 1
 
-    def test_application_types_in_patterns(self):
-        """Test patterns with application types."""
+    def test_Arrow_types_in_patterns(self):
+        """Test patterns with Arrow types."""
         p = implica.PathPattern("(f:(A -> B) -> C)")
         assert len(p.nodes) == 1
         assert p.nodes[0].variable == "f"
@@ -489,7 +489,7 @@ class TestPatternIntegration:
         """Test patterns with actual type objects."""
         person = implica.Variable("Person")
         address = implica.Variable("Address")
-        lives_at_type = implica.Application(person, address)
+        lives_at_type = implica.Arrow(person, address)
 
         # Create patterns
         node_pattern = implica.NodePattern(variable="p", type=person)

@@ -60,7 +60,7 @@ impl Node {
     ///
     /// # Arguments
     ///
-    /// * `type` - The type for this node (Variable or Application)
+    /// * `type` - The type for this node (Variable or Arrow)
     /// * `properties` - Optional dictionary of properties (default: empty dict)
     ///
     /// # Returns
@@ -97,7 +97,7 @@ impl Node {
     ///
     /// # Returns
     ///
-    /// The type as a Python object (Variable or Application)
+    /// The type as a Python object (Variable or Arrow)
     #[getter]
     pub fn get_type(&self, py: Python) -> PyResult<Py<PyAny>> {
         type_to_python(py, &self.r#type)
@@ -166,7 +166,7 @@ impl Node {
 /// node_b = implica.Node(B)
 ///
 /// # Create a term with type A -> B
-/// func_type = implica.Application(A, B)
+/// func_type = implica.Arrow(A, B)
 /// term = implica.Term("f", func_type)
 ///
 /// # Create an edge
@@ -507,7 +507,7 @@ impl Graph {
         // Use the type index to find candidate node UIDs
         let node_uids = match typ {
             Type::Variable(var) => index.find_variable(&var.name),
-            Type::Application(app) => index.find_application(&app.left, &app.right),
+            Type::Arrow(app) => index.find_arrow(&app.left, &app.right),
         };
 
         // Retrieve the actual nodes
@@ -569,7 +569,7 @@ impl Graph {
         // Use the type index to find candidate edge UIDs
         let edge_uids = match typ {
             Type::Variable(var) => index.find_variable(&var.name),
-            Type::Application(app) => index.find_application(&app.left, &app.right),
+            Type::Arrow(app) => index.find_arrow(&app.left, &app.right),
         };
 
         // Retrieve the actual edges

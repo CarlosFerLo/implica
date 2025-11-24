@@ -2,8 +2,8 @@ import implica
 import pytest
 
 
-def test_term_creation_with_application(app_ab):
-    """Test creating a term with an Application type"""
+def test_term_creation_with_Arrow(app_ab):
+    """Test creating a term with an Arrow type"""
     f = implica.Term("f", app_ab)
     assert f.name == "f"
     assert str(f) == "f:(A -> B)"
@@ -22,7 +22,7 @@ def test_term_creation_with_variable(var_a):
     assert all(c in "0123456789abcdef" for c in x.uid())
 
 
-def test_term_application(app_ab, var_a):
+def test_term_Arrow(app_ab, var_a):
     """Test applying one term to another"""
     f = implica.Term("f", app_ab)
     x = implica.Term("x", var_a)
@@ -32,7 +32,7 @@ def test_term_application(app_ab, var_a):
     assert str(result) == "(f x):B"
 
 
-def test_term_application_fails_if_invalid_types(app_ab, var_c):
+def test_term_Arrow_fails_if_invalid_types(app_ab, var_c):
     """Test applying one term to another of invalid type"""
     f = implica.Term("f", app_ab)
     x = implica.Term("x", var_c)

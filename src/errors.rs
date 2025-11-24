@@ -24,7 +24,7 @@
 //! let err: PyErr = ImplicaError::TypeMismatch {
 //!     expected: "Int".to_string(),
 //!     got: "String".to_string(),
-//!     context: Some("function application".to_string()),
+//!     context: Some("function Arrow".to_string()),
 //! }.into();
 //!
 //! // Invalid pattern error
@@ -44,7 +44,7 @@ use std::fmt;
 /// converted to an appropriate Python exception type.
 #[derive(Debug, Clone)]
 pub enum ImplicaError {
-    /// Type mismatch error - occurs when types don't match in operations like application.
+    /// Type mismatch error - occurs when types don't match in operations like Arrow.
     ///
     /// Maps to Python's `TypeError`.
     ///
@@ -57,7 +57,7 @@ pub enum ImplicaError {
     /// # Trying to apply incompatible types raises TypeError
     /// int_type = implica.Variable("Int")
     /// string_type = implica.Variable("String")
-    /// term1 = implica.Term(implica.Application(int_type, string_type), {})
+    /// term1 = implica.Term(implica.Arrow(int_type, string_type), {})
     /// term2 = implica.Term(string_type, {})
     /// # term1.apply(term2)  # TypeError: Type mismatch: expected String, got Int
     /// ```

@@ -8,7 +8,7 @@ import pytest
 
 
 class TestBasicPatterns:
-    """Test basic pattern matching with wildcards, variables, and simple applications."""
+    """Test basic pattern matching with wildcards, variables, and simple Arrows."""
 
     def test_wildcard_matches_all_types(self, var_a, var_b, app_ab):
         """Test that wildcard schema matches all types"""
@@ -17,14 +17,14 @@ class TestBasicPatterns:
         assert schema.matches(var_b)
         assert schema.matches(app_ab)
 
-    def test_wildcard_matches_nested_applications(self):
-        """Test wildcard matches deeply nested applications"""
+    def test_wildcard_matches_nested_Arrows(self):
+        """Test wildcard matches deeply nested Arrows"""
         # Create A -> (B -> C)
         a = implica.Variable("A")
         b = implica.Variable("B")
         c = implica.Variable("C")
-        inner = implica.Application(b, c)
-        outer = implica.Application(a, inner)
+        inner = implica.Arrow(b, c)
+        outer = implica.Arrow(a, inner)
 
         schema = implica.TypeSchema("*")
         assert schema.matches(outer)
@@ -55,55 +55,55 @@ class TestBasicPatterns:
         assert not schema.matches(var_y)
         assert not schema.matches(var_z)
 
-    def test_simple_application_exact_match(self, app_ab):
-        """Test exact application pattern matching"""
+    def test_simple_Arrow_exact_match(self, app_ab):
+        """Test exact Arrow pattern matching"""
         schema = implica.TypeSchema("A -> B")
         assert schema.matches(app_ab)
 
-    def test_simple_application_wrong_order_no_match(self, app_ab, app_ba):
+    def test_simple_Arrow_wrong_order_no_match(self, app_ab, app_ba):
         """Test that A -> B doesn't match B -> A"""
         schema = implica.TypeSchema("A -> B")
         assert schema.matches(app_ab)
         assert not schema.matches(app_ba)
 
-    def test_application_left_wildcard(self, app_ab):
-        """Test application pattern with left wildcard"""
+    def test_Arrow_left_wildcard(self, app_ab):
+        """Test Arrow pattern with left wildcard"""
         schema = implica.TypeSchema("* -> B")
         assert schema.matches(app_ab)
 
-    def test_application_right_wildcard(self, app_ab):
-        """Test application pattern with right wildcard"""
+    def test_Arrow_right_wildcard(self, app_ab):
+        """Test Arrow pattern with right wildcard"""
         schema = implica.TypeSchema("A -> *")
         assert schema.matches(app_ab)
 
-    def test_application_both_wildcards(self):
-        """Test application pattern with wildcards on both sides"""
+    def test_Arrow_both_wildcards(self):
+        """Test Arrow pattern with wildcards on both sides"""
         var_x = implica.Variable("X")
         var_y = implica.Variable("Y")
-        app = implica.Application(var_x, var_y)
+        app = implica.Arrow(var_x, var_y)
 
         schema = implica.TypeSchema("* -> *")
         assert schema.matches(app)
 
-    def test_variable_does_not_match_application(self, var_a, app_ab):
-        """Test that variable pattern doesn't match application"""
+    def test_variable_does_not_match_Arrow(self, var_a, app_ab):
+        """Test that variable pattern doesn't match Arrow"""
         schema = implica.TypeSchema("A")
         assert schema.matches(var_a)
         assert not schema.matches(app_ab)
 
-    def test_application_does_not_match_variable(self, var_a):
-        """Test that application pattern doesn't match variable"""
+    def test_Arrow_does_not_match_variable(self, var_a):
+        """Test that Arrow pattern doesn't match variable"""
         schema = implica.TypeSchema("A -> B")
         assert not schema.matches(var_a)
 
 
 # ============================================================================
-# SECTION 2: NESTED APPLICATION TESTS
+# SECTION 2: NESTED Arrow TESTS
 # ============================================================================
 
 
-class TestNestedApplications:
-    """Test deeply nested applications and right-associativity."""
+class TestNestedArrows:
+    """Test deeply nested Arrows and right-associativity."""
 
     def test_right_associative_parsing_three_types(self):
         """Test that A -> B -> C is parsed as A -> (B -> C)"""
@@ -112,12 +112,12 @@ class TestNestedApplications:
         c = implica.Variable("C")
 
         # Create A -> (B -> C) - right-associative
-        bc = implica.Application(b, c)
-        abc_right = implica.Application(a, bc)
+        bc = implica.Arrow(b, c)
+        abc_right = implica.Arrow(a, bc)
 
         # Create (A -> B) -> C - left-associative
-        ab = implica.Application(a, b)
-        abc_left = implica.Application(ab, c)
+        ab = implica.Arrow(a, b)
+        abc_left = implica.Arrow(ab, c)
 
         # Pattern should match right-associative structure
         schema = implica.TypeSchema("A -> B -> C")
@@ -130,8 +130,8 @@ class TestNestedApplications:
         b = implica.Variable("B")
         c = implica.Variable("C")
 
-        ab = implica.Application(a, b)
-        abc_left = implica.Application(ab, c)
+        ab = implica.Arrow(a, b)
+        abc_left = implica.Arrow(ab, c)
 
         schema = implica.TypeSchema("(A -> B) -> C")
         assert schema.matches(abc_left)
@@ -144,21 +144,21 @@ class TestNestedApplications:
         d = implica.Variable("D")
 
         # Build A -> (B -> (C -> D))
-        cd = implica.Application(c, d)
-        bcd = implica.Application(b, cd)
-        abcd = implica.Application(a, bcd)
+        cd = implica.Arrow(c, d)
+        bcd = implica.Arrow(b, cd)
+        abcd = implica.Arrow(a, bcd)
 
         schema = implica.TypeSchema("A -> B -> C -> D")
         assert schema.matches(abcd)
 
-    def test_nested_applications_with_wildcards(self):
-        """Test nested applications with wildcard patterns"""
+    def test_nested_Arrows_with_wildcards(self):
+        """Test nested Arrows with wildcard patterns"""
         a = implica.Variable("A")
         b = implica.Variable("B")
         c = implica.Variable("C")
 
-        bc = implica.Application(b, c)
-        abc = implica.Application(a, bc)
+        bc = implica.Arrow(b, c)
+        abc = implica.Arrow(a, bc)
 
         # Test various wildcard patterns
         assert implica.TypeSchema("* -> * -> *").matches(abc)
@@ -175,9 +175,9 @@ class TestNestedApplications:
         c = implica.Variable("C")
         d = implica.Variable("D")
 
-        ab = implica.Application(a, b)
-        abc = implica.Application(ab, c)
-        abcd = implica.Application(abc, d)
+        ab = implica.Arrow(a, b)
+        abc = implica.Arrow(ab, c)
+        abcd = implica.Arrow(abc, d)
 
         schema = implica.TypeSchema("((A -> B) -> C) -> D")
         assert schema.matches(abcd)
@@ -189,9 +189,9 @@ class TestNestedApplications:
         c = implica.Variable("C")
         d = implica.Variable("D")
 
-        bc = implica.Application(b, c)
-        abc = implica.Application(a, bc)
-        abcd = implica.Application(abc, d)
+        bc = implica.Arrow(b, c)
+        abc = implica.Arrow(a, bc)
+        abcd = implica.Arrow(abc, d)
 
         schema = implica.TypeSchema("(A -> (B -> C)) -> D")
         assert schema.matches(abcd)
@@ -207,9 +207,9 @@ class TestNestedApplications:
         c = implica.Variable("C")
         d = implica.Variable("D")
 
-        ab = implica.Application(a, b)
-        ab_c = implica.Application(ab, c)
-        result = implica.Application(ab_c, d)
+        ab = implica.Arrow(a, b)
+        ab_c = implica.Arrow(ab, c)
+        result = implica.Arrow(ab_c, d)
 
         schema = implica.TypeSchema("((A -> B) -> C) -> D")
         assert schema.matches(result)
@@ -241,8 +241,8 @@ class TestCaptureMechanism:
         assert "x" in captures
         assert captures["x"] == var_a
 
-    def test_capture_application_parts(self, app_ab):
-        """Test capturing parts of an application: (in:*) -> (out:*)"""
+    def test_capture_Arrow_parts(self, app_ab):
+        """Test capturing parts of an Arrow: (in:*) -> (out:*)"""
         schema = implica.TypeSchema("(in:*) -> (out:*)")
 
         captures = schema.capture(app_ab)
@@ -265,8 +265,8 @@ class TestCaptureMechanism:
         b = implica.Variable("B")
         c = implica.Variable("C")
 
-        bc = implica.Application(b, c)
-        abc = implica.Application(a, bc)
+        bc = implica.Arrow(b, c)
+        abc = implica.Arrow(a, bc)
 
         schema = implica.TypeSchema("A -> (mid:*) -> C")
         captures = schema.capture(abc)
@@ -280,8 +280,8 @@ class TestCaptureMechanism:
         b = implica.Variable("B")
         c = implica.Variable("C")
 
-        inner = implica.Application(a, b)
-        outer = implica.Application(inner, c)
+        inner = implica.Arrow(a, b)
+        outer = implica.Arrow(inner, c)
 
         schema = implica.TypeSchema("((left:A) -> (right:*)) -> (result:C)")
         captures = schema.capture(outer)
@@ -293,11 +293,11 @@ class TestCaptureMechanism:
         assert captures["right"] == b
         assert captures["result"] == c
 
-    def test_capture_entire_application(self):
-        """Test capturing an entire application type"""
+    def test_capture_entire_Arrow(self):
+        """Test capturing an entire Arrow type"""
         a = implica.Variable("A")
         b = implica.Variable("B")
-        app = implica.Application(a, b)
+        app = implica.Arrow(a, b)
 
         schema = implica.TypeSchema("(func:A -> B)")
         captures = schema.capture(app)
@@ -311,8 +311,8 @@ class TestCaptureMechanism:
         b = implica.Variable("B")
         c = implica.Variable("C")
 
-        bc = implica.Application(b, c)
-        abc = implica.Application(a, bc)
+        bc = implica.Arrow(b, c)
+        abc = implica.Arrow(a, bc)
 
         schema = implica.TypeSchema("(outer:(input:*) -> (inner:(x:*) -> (y:*)))")
         captures = schema.capture(abc)
@@ -334,8 +334,8 @@ class TestCaptureMechanism:
         b = implica.Variable("B")
         c = implica.Variable("C")
 
-        ac = implica.Application(a, c)
-        result = implica.Application(ac, b)
+        ac = implica.Arrow(a, c)
+        result = implica.Arrow(ac, b)
 
         schema = implica.TypeSchema("(:* -> *) -> B")
 
@@ -349,8 +349,8 @@ class TestCaptureMechanism:
         b = implica.Variable("B")
         c = implica.Variable("C")
 
-        ab = implica.Application(a, b)
-        result = implica.Application(ab, c)
+        ab = implica.Arrow(a, b)
+        result = implica.Arrow(ab, c)
 
         schema = implica.TypeSchema("(:(captured:A) -> *) -> (result:C)")
         captures = schema.capture(result)
@@ -364,7 +364,7 @@ class TestCaptureMechanism:
         """Test capture with specific type constraint in pattern"""
         a = implica.Variable("A")
         b = implica.Variable("B")
-        app = implica.Application(a, b)
+        app = implica.Arrow(a, b)
 
         schema = implica.TypeSchema("(x:A) -> B")
         captures = schema.capture(app)
@@ -394,7 +394,7 @@ class TestDuplicateCaptureReferences:
         """Test that duplicate captures match when values are equal"""
         a1 = implica.Variable("A")
         a2 = implica.Variable("A")
-        app = implica.Application(a1, a2)
+        app = implica.Arrow(a1, a2)
 
         # Same capture name twice - should check for equality
         schema = implica.TypeSchema("(x:*) -> (x:*)")
@@ -404,7 +404,7 @@ class TestDuplicateCaptureReferences:
         """Test that duplicate captures don't match when values differ"""
         a = implica.Variable("A")
         b = implica.Variable("B")
-        app = implica.Application(a, b)
+        app = implica.Arrow(a, b)
 
         schema = implica.TypeSchema("(x:*) -> (x:*)")
         assert not schema.matches(app)
@@ -416,8 +416,8 @@ class TestDuplicateCaptureReferences:
         b = implica.Variable("B")
 
         # A -> (B -> A)
-        ba = implica.Application(b, a2)
-        aba = implica.Application(a1, ba)
+        ba = implica.Arrow(b, a2)
+        aba = implica.Arrow(a1, ba)
 
         schema = implica.TypeSchema("(x:*) -> B -> (x:*)")
         assert schema.matches(aba)
@@ -429,34 +429,34 @@ class TestDuplicateCaptureReferences:
         c = implica.Variable("C")
 
         # A -> (B -> C)
-        bc = implica.Application(b, c)
-        abc = implica.Application(a, bc)
+        bc = implica.Arrow(b, c)
+        abc = implica.Arrow(a, bc)
 
         schema = implica.TypeSchema("(x:*) -> B -> (x:*)")
         assert not schema.matches(abc)
 
-    def test_duplicate_capture_complex_applications(self):
-        """Test duplicate captures with complex application types"""
+    def test_duplicate_capture_complex_Arrows(self):
+        """Test duplicate captures with complex Arrow types"""
         a = implica.Variable("A")
         b = implica.Variable("B")
 
         # Create (A -> B) on both sides
-        ab1 = implica.Application(a, b)
-        ab2 = implica.Application(a, b)
-        app = implica.Application(ab1, ab2)
+        ab1 = implica.Arrow(a, b)
+        ab2 = implica.Arrow(a, b)
+        app = implica.Arrow(ab1, ab2)
 
         schema = implica.TypeSchema("(func:A -> B) -> (func:A -> B)")
         assert schema.matches(app)
 
-    def test_duplicate_capture_complex_applications_unequal(self):
-        """Test duplicate captures fail with different applications"""
+    def test_duplicate_capture_complex_Arrows_unequal(self):
+        """Test duplicate captures fail with different Arrows"""
         a = implica.Variable("A")
         b = implica.Variable("B")
         c = implica.Variable("C")
 
-        ab = implica.Application(a, b)
-        ac = implica.Application(a, c)
-        app = implica.Application(ab, ac)
+        ab = implica.Arrow(a, b)
+        ac = implica.Arrow(a, c)
+        app = implica.Arrow(ab, ac)
 
         schema = implica.TypeSchema("(func:A -> *) -> (func:A -> *)")
         assert not schema.matches(app)
@@ -468,8 +468,8 @@ class TestDuplicateCaptureReferences:
         a3 = implica.Variable("A")
 
         # A -> (A -> A)
-        aa = implica.Application(a2, a3)
-        aaa = implica.Application(a1, aa)
+        aa = implica.Arrow(a2, a3)
+        aaa = implica.Arrow(a1, aa)
 
         schema = implica.TypeSchema("(x:*) -> (x:*) -> (x:*)")
         assert schema.matches(aaa)
@@ -481,8 +481,8 @@ class TestDuplicateCaptureReferences:
         b = implica.Variable("B")
 
         # A -> (A -> B)
-        ab = implica.Application(a2, b)
-        aab = implica.Application(a1, ab)
+        ab = implica.Arrow(a2, b)
+        aab = implica.Arrow(a1, ab)
 
         schema = implica.TypeSchema("(x:*) -> (x:*) -> (x:*)")
         assert not schema.matches(aab)
@@ -490,7 +490,7 @@ class TestDuplicateCaptureReferences:
     def test_capture_returns_last_occurrence(self):
         """Test that capture dict contains the matched value"""
         a = implica.Variable("A")
-        app = implica.Application(a, a)
+        app = implica.Arrow(a, a)
 
         schema = implica.TypeSchema("(x:A) -> (x:A)")
         captures = schema.capture(app)
@@ -540,7 +540,7 @@ class TestCharacterValidation:
         """Test that whitespace is handled correctly"""
         a = implica.Variable("A")
         b = implica.Variable("B")
-        app = implica.Application(a, b)
+        app = implica.Arrow(a, b)
 
         # All these should work with various whitespace
         assert implica.TypeSchema("A->B").matches(app)
@@ -584,10 +584,10 @@ class TestCharacterValidation:
         schema = implica.TypeSchema("(x:A)")
         assert schema.matches(implica.Variable("A"))
 
-        # Arrow in applications
+        # Arrow in Arrows
         a = implica.Variable("A")
         b = implica.Variable("B")
-        app = implica.Application(a, b)
+        app = implica.Arrow(a, b)
         schema2 = implica.TypeSchema("A -> B")
         assert schema2.matches(app)
 
@@ -651,8 +651,8 @@ class TestErrorHandling:
         a = implica.Variable("A")
         b = implica.Variable("B")
         c = implica.Variable("C")
-        bc = implica.Application(b, c)
-        abc = implica.Application(a, bc)
+        bc = implica.Arrow(b, c)
+        abc = implica.Arrow(a, bc)
 
         schema = implica.TypeSchema("A -> B -> C")
         assert schema.matches(abc)
@@ -697,10 +697,10 @@ class TestEdgeCases:
         d = implica.Variable("D")
         e = implica.Variable("E")
 
-        de = implica.Application(d, e)
-        cde = implica.Application(c, de)
-        bcde = implica.Application(b, cde)
-        abcde = implica.Application(a, bcde)
+        de = implica.Arrow(d, e)
+        cde = implica.Arrow(c, de)
+        bcde = implica.Arrow(b, cde)
+        abcde = implica.Arrow(a, bcde)
 
         schema = implica.TypeSchema("A -> B -> C -> D -> E")
         assert schema.matches(abcde)
@@ -717,8 +717,8 @@ class TestEdgeCases:
         a = implica.Variable("A")
         b = implica.Variable("B")
 
-        ab = implica.Application(a, b)
-        ab_ab = implica.Application(ab, ab)
+        ab = implica.Arrow(a, b)
+        ab_ab = implica.Arrow(ab, ab)
 
         schema = implica.TypeSchema("((a:A) -> (b:B)) -> ((c:A) -> (d:B))")
         captures = schema.capture(ab_ab)
@@ -739,7 +739,7 @@ class TestEdgeCases:
         """Test that redundant parentheses don't break matching"""
         a = implica.Variable("A")
         b = implica.Variable("B")
-        app = implica.Application(a, b)
+        app = implica.Arrow(a, b)
 
         # All should match
         assert implica.TypeSchema("A -> B").matches(app)
@@ -754,8 +754,8 @@ class TestEdgeCases:
         b = implica.Variable("B")
         c = implica.Variable("C")
 
-        ab = implica.Application(a, b)
-        ab_c = implica.Application(ab, c)
+        ab = implica.Arrow(a, b)
+        ab_c = implica.Arrow(ab, c)
 
         # All should match
         assert implica.TypeSchema("* -> *").matches(ab_c)
@@ -771,9 +771,9 @@ class TestEdgeCases:
         c = implica.Variable("C")
         d = implica.Variable("D")
 
-        cd = implica.Application(c, d)
-        bcd = implica.Application(b, cd)
-        abcd = implica.Application(a, bcd)
+        cd = implica.Arrow(c, d)
+        bcd = implica.Arrow(b, cd)
+        abcd = implica.Arrow(a, bcd)
 
         assert implica.TypeSchema("A -> * -> C -> *").matches(abcd)
         assert implica.TypeSchema("* -> B -> * -> D").matches(abcd)
@@ -807,8 +807,8 @@ class TestEdgeCases:
         b = implica.Variable("B")
         c = implica.Variable("C")
 
-        bc = implica.Application(b, c)
-        abc = implica.Application(a, bc)
+        bc = implica.Arrow(b, c)
+        abc = implica.Arrow(a, bc)
 
         schema = implica.TypeSchema("(v1:*) -> ((v2:*) -> (v3:*))")
         captures = schema.capture(abc)
@@ -834,8 +834,8 @@ class TestComprehensiveIntegration:
         string = implica.Variable("String")
 
         # Person -> (Number -> String)
-        num_str = implica.Application(number, string)
-        full_type = implica.Application(person, num_str)
+        num_str = implica.Arrow(number, string)
+        full_type = implica.Arrow(person, num_str)
 
         schema = implica.TypeSchema("(input:*) -> (param:*) -> (output:*)")
         captures = schema.capture(full_type)
@@ -850,8 +850,8 @@ class TestComprehensiveIntegration:
         b = implica.Variable("B")
         c = implica.Variable("C")
 
-        ab = implica.Application(a, b)
-        func_type = implica.Application(ab, c)
+        ab = implica.Arrow(a, b)
+        func_type = implica.Arrow(ab, c)
 
         schema = implica.TypeSchema("((in:*) -> (out:*)) -> (result:*)")
         captures = schema.capture(func_type)
@@ -868,9 +868,9 @@ class TestComprehensiveIntegration:
         fb = implica.Variable("FB")
 
         # (A -> B) -> (FA -> FB)
-        ab = implica.Application(a, b)
-        fa_fb = implica.Application(fa, fb)
-        full = implica.Application(ab, fa_fb)
+        ab = implica.Arrow(a, b)
+        fa_fb = implica.Arrow(fa, fb)
+        full = implica.Arrow(ab, fa_fb)
 
         schema = implica.TypeSchema("((x:*) -> (y:*)) -> (* -> *)")
         captures = schema.capture(full)
@@ -888,11 +888,11 @@ class TestComprehensiveIntegration:
         mb2 = implica.Variable("MB")
 
         # A -> MB
-        a_mb = implica.Application(a, mb1)
+        a_mb = implica.Arrow(a, mb1)
         # MA -> (A -> MB)
-        ma_to_func = implica.Application(ma, a_mb)
+        ma_to_func = implica.Arrow(ma, a_mb)
         # (MA -> (A -> MB)) -> MB
-        full = implica.Application(ma_to_func, mb2)
+        full = implica.Arrow(ma_to_func, mb2)
 
         schema = implica.TypeSchema("(* -> (inp:*) -> *) -> (out:*)")
         captures = schema.capture(full)
@@ -906,9 +906,9 @@ class TestComprehensiveIntegration:
         b = implica.Variable("B")
 
         # (A -> B) -> (A -> B)  # Same function type twice
-        ab1 = implica.Application(a, b)
-        ab2 = implica.Application(a, b)
-        full = implica.Application(ab1, ab2)
+        ab1 = implica.Arrow(a, b)
+        ab2 = implica.Arrow(a, b)
+        full = implica.Arrow(ab1, ab2)
 
         schema = implica.TypeSchema("((x:*) -> (y:*)) -> ((x:*) -> (y:*))")
         assert schema.matches(full)
@@ -918,10 +918,10 @@ class TestComprehensiveIntegration:
         a = implica.Variable("A")
 
         # A -> A
-        aa1 = implica.Application(a, a)
-        aa2 = implica.Application(a, a)
+        aa1 = implica.Arrow(a, a)
+        aa2 = implica.Arrow(a, a)
         # (A -> A) -> (A -> A)
-        full = implica.Application(aa1, aa2)
+        full = implica.Arrow(aa1, aa2)
 
         schema = implica.TypeSchema("((t:*) -> (t:*)) -> ((t:*) -> (t:*))")
         assert schema.matches(full)
@@ -934,28 +934,28 @@ class TestComprehensiveIntegration:
         fb = implica.Variable("FB")
 
         # (B -> A)
-        ba = implica.Application(b, a)
+        ba = implica.Arrow(b, a)
         # FA -> FB
-        fa_fb = implica.Application(fa, fb)
+        fa_fb = implica.Arrow(fa, fb)
         # (B -> A) -> (FA -> FB)
-        full = implica.Application(ba, fa_fb)
+        full = implica.Arrow(ba, fa_fb)
 
         schema = implica.TypeSchema("(* -> *) -> * -> *")
         assert schema.matches(full)
 
     def test_deep_type_constructor_pattern(self):
-        """Test deeply nested type constructor applications"""
+        """Test deeply nested type constructor Arrows"""
         # Build: Maybe (Either A B)
         a = implica.Variable("A")
         b = implica.Variable("B")
         either = implica.Variable("Either")
         maybe = implica.Variable("Maybe")
 
-        # Either A B would be represented as applications
+        # Either A B would be represented as Arrows
         # For this test, let's use simpler nesting
 
-        ab = implica.Application(a, b)
-        result = implica.Application(ab, maybe)
+        ab = implica.Arrow(a, b)
+        result = implica.Arrow(ab, maybe)
 
         schema = implica.TypeSchema("(* -> *) -> *")
         assert schema.matches(result)
@@ -969,11 +969,11 @@ class TestComprehensiveIntegration:
         list_a2 = implica.Variable("List_a")
 
         # a -> List_a
-        a_to_list = implica.Application(a1, list_a1)
+        a_to_list = implica.Arrow(a1, list_a1)
         # (a -> List_a) -> List_a
-        full = implica.Application(a_to_list, list_a2)
+        full = implica.Arrow(a_to_list, list_a2)
 
-        # Schema should capture the inner application
+        # Schema should capture the inner Arrow
         schema = implica.TypeSchema("((elem:*) -> *) -> *")
         captures = schema.capture(full)
 
@@ -987,12 +987,12 @@ class TestComprehensiveIntegration:
         c = implica.Variable("C")
 
         # Build from right: ((A -> (B -> C)) -> ((A -> B) -> (A -> C)))
-        bc = implica.Application(b, c)
-        abc = implica.Application(a, bc)
-        ab = implica.Application(a, b)
-        ac = implica.Application(a, c)
-        ab_ac = implica.Application(ab, ac)
-        full = implica.Application(abc, ab_ac)
+        bc = implica.Arrow(b, c)
+        abc = implica.Arrow(a, bc)
+        ab = implica.Arrow(a, b)
+        ac = implica.Arrow(a, c)
+        ab_ac = implica.Arrow(ab, ac)
+        full = implica.Arrow(abc, ab_ac)
 
         # Test with wildcard pattern
         schema = implica.TypeSchema("(* -> * -> *) -> (* -> *) -> * -> *")
@@ -1006,13 +1006,13 @@ class TestComprehensiveIntegration:
         t = implica.Variable("T")
 
         # S -> A
-        sa = implica.Application(s, a)
+        sa = implica.Arrow(s, a)
         # B -> T
-        bt = implica.Application(b, t)
+        bt = implica.Arrow(b, t)
         # S -> (B -> T)
-        s_bt = implica.Application(s, bt)
+        s_bt = implica.Arrow(s, bt)
         # (S -> A) -> (S -> (B -> T))
-        full = implica.Application(sa, s_bt)
+        full = implica.Arrow(sa, s_bt)
 
         schema = implica.TypeSchema("(* -> (get:*)) -> (* -> * -> *)")
         captures = schema.capture(full)

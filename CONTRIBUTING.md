@@ -52,7 +52,7 @@ El proyecto incluye hooks de Git que automáticamente:
 implica/
 ├── src/                    # Código fuente Rust
 │   ├── lib.rs             # Módulo PyO3 principal
-│   ├── types.rs           # Sistema de tipos (Variable, Application)
+│   ├── types.rs           # Sistema de tipos (Variable, Arrow)
 │   ├── term.rs            # Términos con aplicación
 │   ├── graph.rs           # Grafo (Node, Edge, Graph)
 │   ├── type_schema.rs     # Patrones de tipos
@@ -337,7 +337,7 @@ fn field(&self, py: Python) -> PyResult<PyObject> {
 
 ```
 lib.rs
-  ├─→ types.rs (base: Variable, Application)
+  ├─→ types.rs (base: Variable, Arrow)
   ├─→ term.rs (usa types)
   ├─→ graph.rs (usa types, term)
   ├─→ type_schema.rs (usa types)

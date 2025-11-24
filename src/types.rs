@@ -1,6 +1,6 @@
 //! Type system for type theoretical modeling.
 //!
-//! This module provides the core type system with variables and application types.
+//! This module provides the core type system with variables and Arrow types.
 //! Types form the foundation for the type theoretical graph model.
 
 use crate::errors::ImplicaError;
@@ -11,18 +11,18 @@ use std::sync::{Arc, RwLock};
 
 /// Represents a type in the type theory.
 ///
-/// A type can be either a variable (atomic type) or an application (function type).
+/// A type can be either a variable (atomic type) or an Arrow (function type).
 /// This enum is the core of the type system and is used throughout the library
 /// to represent types of nodes and terms.
 ///
 /// # Variants
 ///
 /// * `Variable` - An atomic type variable (e.g., "A", "Person", "Number")
-/// * `Application` - A function type (e.g., "A -> B", "(Person -> Number) -> String")
+/// * `Arrow` - A function type (e.g., "A -> B", "(Person -> Number) -> String")
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum Type {
     Variable(Variable),
-    Application(Application),
+    Arrow(Arrow),
 }
 
 impl Type {
@@ -40,8 +40,8 @@ impl Type {
                 hasher.update(b"var:");
                 hasher.update(v.name.as_bytes());
             }
-            Type::Application(a) => {
-                hasher.update(b"app:");
+            Type::Arrow(a) => {
+                hasher.update(b"arr:");
                 hasher.update(a.left.uid().as_bytes());
                 hasher.update(b":");
                 hasher.update(a.right.uid().as_bytes());
@@ -62,14 +62,14 @@ impl Type {
         }
     }
 
-    /// Returns a reference to the inner Application if this is an Application type.
+    /// Returns a reference to the inner Arrow if this is an Arrow type.
     ///
     /// # Returns
     ///
-    /// `Some(&Application)` if this is an Application, `None` otherwise
-    pub fn as_application(&self) -> Option<&Application> {
+    /// `Some(&Arrow)` if this is an Arrow, `None` otherwise
+    pub fn as_arrow(&self) -> Option<&Arrow> {
         match self {
-            Type::Application(a) => Some(a),
+            Type::Arrow(a) => Some(a),
             _ => None,
         }
     }
@@ -78,11 +78,11 @@ impl Type {
 impl fmt::Display for Type {
     /// Formats the type for display.
     ///
-    /// Variables are shown as their name, applications as "(left -> right)".
+    /// Variables are shown as their name, Arrows as "(left -> right)".
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Type::Variable(v) => write!(f, "{}", v),
-            Type::Application(a) => write!(f, "{}", a),
+            Type::Arrow(a) => write!(f, "{}", a),
         }
     }
 }
@@ -237,10 +237,10 @@ impl std::hash::Hash for Variable {
     }
 }
 
-/// Represents a function type (application type).
+/// Represents a function type (Arrow type).
 ///
-/// An application represents a function type `left -> right`, where `left` is
-/// the input type and `right` is the output type. Applications can be nested
+/// An Arrow represents a function type `left -> right`, where `left` is
+/// the input type and `right` is the output type. Arrows can be nested
 /// to create complex function types.
 ///
 /// # Examples
@@ -251,12 +251,12 @@ impl std::hash::Hash for Variable {
 /// # Create A -> B
 /// A = implica.Variable("A")
 /// B = implica.Variable("B")
-/// func_type = implica.Application(A, B)
+/// func_type = implica.Arrow(A, B)
 /// print(func_type)  # "(A -> B)"
 ///
 /// # Create (A -> B) -> C (higher-order function type)
 /// C = implica.Variable("C")
-/// higher_order = implica.Application(func_type, C)
+/// higher_order = implica.Arrow(func_type, C)
 /// print(higher_order)  # "((A -> B) -> C)"
 /// ```
 ///
@@ -266,7 +266,7 @@ impl std::hash::Hash for Variable {
 /// * `right` - The output type of the function
 #[pyclass]
 #[derive(Clone, Debug)]
-pub struct Application {
+pub struct Arrow {
     pub left: Arc<Type>,
     pub right: Arc<Type>,
     /// Cached UID for performance - computed once and reused
@@ -274,31 +274,31 @@ pub struct Application {
 }
 
 #[pymethods]
-impl Application {
-    /// Creates a new application type (function type).
+impl Arrow {
+    /// Creates a new Arrow type (function type).
     ///
     /// # Arguments
     ///
-    /// * `left` - The input type (can be Variable or Application)
-    /// * `right` - The output type (can be Variable or Application)
+    /// * `left` - The input type (can be Variable or Arrow)
+    /// * `right` - The output type (can be Variable or Arrow)
     ///
     /// # Returns
     ///
-    /// A new `Application` representing the function type `left -> right`
+    /// A new `Arrow` representing the function type `left -> right`
     ///
     /// # Examples
     ///
     /// ```python
     /// A = implica.Variable("A")
     /// B = implica.Variable("B")
-    /// func = implica.Application(A, B)  # A -> B
+    /// func = implica.Arrow(A, B)  # A -> B
     /// ```
     #[new]
     pub fn new(left: Py<PyAny>, right: Py<PyAny>) -> PyResult<Self> {
         Python::attach(|py| {
             let left_type = python_to_type(left.bind(py))?;
             let right_type = python_to_type(right.bind(py))?;
-            Ok(Application {
+            Ok(Arrow {
                 left: Arc::new(left_type),
                 right: Arc::new(right_type),
                 uid_cache: Arc::new(RwLock::new(None)),
@@ -306,7 +306,7 @@ impl Application {
         })
     }
 
-    /// Gets the left (input) type of this application.
+    /// Gets the left (input) type of this Arrow.
     ///
     /// # Returns
     ///
@@ -316,7 +316,7 @@ impl Application {
         type_to_python(py, &self.left)
     }
 
-    /// Gets the right (output) type of this application.
+    /// Gets the right (output) type of this Arrow.
     ///
     /// # Returns
     ///
@@ -326,7 +326,7 @@ impl Application {
         type_to_python(py, &self.right)
     }
 
-    /// Returns a unique identifier for this application.
+    /// Returns a unique identifier for this Arrow.
     ///
     /// This result is cached to avoid recalculating for complex recursive types.
     ///
@@ -357,7 +357,7 @@ impl Application {
         uid
     }
 
-    /// Returns a string representation of the application.
+    /// Returns a string representation of the Arrow.
     ///
     /// Format: "(left -> right)"
     fn __str__(&self) -> String {
@@ -366,9 +366,9 @@ impl Application {
 
     /// Returns a detailed representation for debugging.
     ///
-    /// Format: Application(left, right)
+    /// Format: Arrow(left, right)
     fn __repr__(&self) -> String {
-        format!("Application({}, {})", self.left, self.right)
+        format!("Arrow({}, {})", self.left, self.right)
     }
 
     fn __hash__(&self) -> u64 {
@@ -387,8 +387,8 @@ impl Application {
     }
 }
 
-impl fmt::Display for Application {
-    /// Formats the application for display.
+impl fmt::Display for Arrow {
+    /// Formats the Arrow for display.
     ///
     /// Shows as "(left -> right)".
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -396,15 +396,15 @@ impl fmt::Display for Application {
     }
 }
 
-impl PartialEq for Application {
+impl PartialEq for Arrow {
     fn eq(&self, other: &Self) -> bool {
         self.uid() == other.uid()
     }
 }
 
-impl Eq for Application {}
+impl Eq for Arrow {}
 
-impl std::hash::Hash for Application {
+impl std::hash::Hash for Arrow {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         self.left.hash(state);
         self.right.hash(state);
@@ -415,7 +415,7 @@ impl std::hash::Hash for Application {
 ///
 /// # Arguments
 ///
-/// * `obj` - A Python object that should be either a Variable or Application
+/// * `obj` - A Python object that should be either a Variable or Arrow
 ///
 /// # Returns
 ///
@@ -423,15 +423,15 @@ impl std::hash::Hash for Application {
 ///
 /// # Errors
 ///
-/// `PyTypeError` if the object is neither a Variable nor an Application
+/// `PyTypeError` if the object is neither a Variable nor an Arrow
 pub fn python_to_type(obj: &Bound<'_, PyAny>) -> PyResult<Type> {
     if let Ok(var) = obj.extract::<Variable>() {
         Ok(Type::Variable(var))
-    } else if let Ok(app) = obj.extract::<Application>() {
-        Ok(Type::Application(app))
+    } else if let Ok(app) = obj.extract::<Arrow>() {
+        Ok(Type::Arrow(app))
     } else {
         Err(PyErr::new::<pyo3::exceptions::PyTypeError, _>(
-            "Expected Variable or Application",
+            "Expected Variable or Arrow",
         ))
     }
 }
@@ -445,7 +445,7 @@ pub fn python_to_type(obj: &Bound<'_, PyAny>) -> PyResult<Type> {
 ///
 /// # Returns
 ///
-/// A Python object representing the type (Variable or Application)
+/// A Python object representing the type (Variable or Arrow)
 ///
 /// # Errors
 ///
@@ -453,6 +453,6 @@ pub fn python_to_type(obj: &Bound<'_, PyAny>) -> PyResult<Type> {
 pub fn type_to_python(py: Python, typ: &Type) -> PyResult<Py<PyAny>> {
     match typ {
         Type::Variable(v) => Ok(Py::new(py, v.clone())?.into()),
-        Type::Application(a) => Ok(Py::new(py, a.clone())?.into()),
+        Type::Arrow(a) => Ok(Py::new(py, a.clone())?.into()),
     }
 }

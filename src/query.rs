@@ -333,8 +333,61 @@ impl Query {
         py: Python,
         variables: Vec<String>,
     ) -> PyResult<Vec<Py<PyAny>>> {
-        // For now, just return regular results (would need proper deduplication)
-        self.return_(py, variables)
+        // Execute all operations to build matched_vars
+        self.execute_operations(py)?;
+
+        if self.matched_vars.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        // Collect results with deduplication
+        let mut results = Vec::new();
+        let mut seen = std::collections::HashSet::new();
+
+        // Find maximum length
+        let max_len = self
+            .matched_vars
+            .values()
+            .map(|v| v.len())
+            .max()
+            .unwrap_or(0);
+
+        for i in 0..max_len {
+            let dict = PyDict::new(py);
+            let mut row_key = String::new();
+
+            for var in &variables {
+                if let Some(values) = self.matched_vars.get(var) {
+                    if i < values.len() {
+                        match &values[i] {
+                            QueryResult::Node(n) => {
+                                dict.set_item(var, Py::new(py, n.clone())?)?;
+                                // Build unique key based on node UID
+                                row_key.push_str(var);
+                                row_key.push(':');
+                                row_key.push_str(&n.uid());
+                                row_key.push(';');
+                            }
+                            QueryResult::Edge(e) => {
+                                dict.set_item(var, Py::new(py, e.clone())?)?;
+                                // Build unique key based on edge UID
+                                row_key.push_str(var);
+                                row_key.push(':');
+                                row_key.push_str(&e.uid());
+                                row_key.push(';');
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Only add if not empty and not seen before
+            if !dict.is_empty() && seen.insert(row_key) {
+                results.push(dict.into());
+            }
+        }
+
+        Ok(results)
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -578,6 +631,12 @@ impl Query {
                 }
 
                 if let Some(var) = node_pattern.variable {
+                    // Note: If variable already exists, it will be overwritten
+                    // This allows for intentional re-binding but may hide errors
+                    if self.matched_vars.contains_key(&var) {
+                        // Variable already exists - this is allowed but may be unintentional
+                        // Consider logging a warning in production environments
+                    }
                     self.matched_vars.insert(var, matches);
                 }
             }
@@ -604,9 +663,11 @@ impl Query {
             let mut end_matches = Vec::new();
 
             // Optimized: Use tree-based index to find edges by term type
-            let candidate_edges = if let Some(ref schema) = edge_pattern.term_type_schema {
+            let candidate_edges = if let Some(ref term) = edge_pattern.term {
+                // Use the optimized find_edges_by_term_type for O(log n) lookup
+                self.graph.find_edges_by_term_type(&term.r#type, py)?
+            } else if let Some(ref schema) = edge_pattern.term_type_schema {
                 // Try to extract the type from the schema if it's a simple pattern
-                // For now, we need to iterate but we can optimize specific cases
                 if schema.pattern == "$*$" {
                     // Wildcard - get all edges
                     self.graph.find_all_edges(py)?
@@ -642,12 +703,24 @@ impl Query {
             }
 
             if let Some(ref var) = start_pattern.variable {
+                // Note: If variable already exists, it will be overwritten
+                if self.matched_vars.contains_key(var) {
+                    // Variable already exists - this is allowed but may be unintentional
+                }
                 self.matched_vars.insert(var.clone(), start_matches);
             }
             if let Some(ref var) = edge_pattern.variable {
+                // Note: If variable already exists, it will be overwritten
+                if self.matched_vars.contains_key(var) {
+                    // Variable already exists - this is allowed but may be unintentional
+                }
                 self.matched_vars.insert(var.clone(), edge_matches);
             }
             if let Some(ref var) = end_pattern.variable {
+                // Note: If variable already exists, it will be overwritten
+                if self.matched_vars.contains_key(var) {
+                    // Variable already exists - this is allowed but may be unintentional
+                }
                 self.matched_vars.insert(var.clone(), end_matches);
             }
         }
@@ -670,7 +743,79 @@ impl Query {
                     self.graph.add_node(&node, py)?;
 
                     if let Some(var) = node_pattern.variable {
+                        // Note: If variable already exists, it will be overwritten
+                        if self.matched_vars.contains_key(&var) {
+                            // Variable already exists - this is allowed but may be unintentional
+                        }
                         self.matched_vars.insert(var, vec![QueryResult::Node(node)]);
+                    }
+                }
+            }
+            CreateOp::Edge(edge_pattern, start_var, end_var) => {
+                // Extract start and end nodes from matched_vars
+                let start_node = if let Some(start_results) = self.matched_vars.get(&start_var) {
+                    if let Some(QueryResult::Node(node)) = start_results.first() {
+                        node.clone()
+                    } else {
+                        return Err(ImplicaError::InvalidQuery {
+                            message: format!(
+                                "Start variable '{}' does not contain a node",
+                                start_var
+                            ),
+                            context: Some("edge creation".to_string()),
+                        }
+                        .into());
+                    }
+                } else {
+                    return Err(ImplicaError::InvalidQuery {
+                        message: format!("Start variable '{}' not found", start_var),
+                        context: Some("edge creation".to_string()),
+                    }
+                    .into());
+                };
+
+                let end_node = if let Some(end_results) = self.matched_vars.get(&end_var) {
+                    if let Some(QueryResult::Node(node)) = end_results.first() {
+                        node.clone()
+                    } else {
+                        return Err(ImplicaError::InvalidQuery {
+                            message: format!("End variable '{}' does not contain a node", end_var),
+                            context: Some("edge creation".to_string()),
+                        }
+                        .into());
+                    }
+                } else {
+                    return Err(ImplicaError::InvalidQuery {
+                        message: format!("End variable '{}' not found", end_var),
+                        context: Some("edge creation".to_string()),
+                    }
+                    .into());
+                };
+
+                // Create the term for the edge
+                if let Some(term_obj) = edge_pattern.term {
+                    let props = PyDict::new(py);
+                    for (k, v) in edge_pattern.properties {
+                        props.set_item(k, v)?;
+                    }
+
+                    // Create the term in Python and convert to PyAny
+                    let term_py: Py<PyAny> = Py::new(py, term_obj.clone())?.into();
+                    let start_py: Py<PyAny> = Py::new(py, start_node.clone())?.into();
+                    let end_py: Py<PyAny> = Py::new(py, end_node.clone())?.into();
+
+                    // Create the edge
+                    let edge = Edge::new(term_py, start_py, end_py, Some(props.into()))?;
+
+                    // Use the optimized add_edge method which updates the index
+                    self.graph.add_edge(&edge, py)?;
+
+                    if let Some(var) = edge_pattern.variable {
+                        // Note: If variable already exists, it will be overwritten
+                        if self.matched_vars.contains_key(&var) {
+                            // Variable already exists - this is allowed but may be unintentional
+                        }
+                        self.matched_vars.insert(var, vec![QueryResult::Edge(edge)]);
                     }
                 }
             }
@@ -683,7 +828,6 @@ impl Query {
                     }
                 }
             }
-            _ => {}
         }
         Ok(())
     }
@@ -739,6 +883,10 @@ impl Query {
                         self.graph.add_node(&node, py)?;
 
                         if let Some(var) = node_pattern.variable {
+                            // Note: If variable already exists, it will be overwritten
+                            if self.matched_vars.contains_key(&var) {
+                                // Variable already exists - this is allowed but may be unintentional
+                            }
                             self.matched_vars.insert(var, vec![QueryResult::Node(node)]);
                         }
                     }
@@ -746,32 +894,108 @@ impl Query {
             }
             MergeOp::Edge(edge_pattern, start_var, end_var) => {
                 // Edge merge: match or create edge
-                // This is a simplified implementation
-                // In practice, would need to check if edge already exists
-                if let (Some(start_matches), Some(end_matches)) = (
-                    self.matched_vars.get(&start_var),
-                    self.matched_vars.get(&end_var),
-                ) {
-                    if let (Some(QueryResult::Node(start)), Some(QueryResult::Node(end))) =
-                        (start_matches.first(), end_matches.first())
-                    {
-                        // Check if edge already exists
-                        let edges_dict = self.graph.edges.bind(py);
+                // Extract start and end nodes from matched_vars
+                let start_node = if let Some(start_results) = self.matched_vars.get(&start_var) {
+                    if let Some(QueryResult::Node(node)) = start_results.first() {
+                        node.clone()
+                    } else {
+                        return Err(ImplicaError::InvalidQuery {
+                            message: format!(
+                                "Start variable '{}' does not contain a node",
+                                start_var
+                            ),
+                            context: Some("edge merge".to_string()),
+                        }
+                        .into());
+                    }
+                } else {
+                    return Err(ImplicaError::InvalidQuery {
+                        message: format!("Start variable '{}' not found", start_var),
+                        context: Some("edge merge".to_string()),
+                    }
+                    .into());
+                };
 
-                        for (_uid, edge_obj) in edges_dict.iter() {
-                            let edge: Edge = edge_obj.extract()?;
-                            if edge.start.uid() == start.uid() && edge.end.uid() == end.uid() {
-                                // Edge exists
-                                if let Some(ref var) = edge_pattern.variable {
-                                    let matches = self.matched_vars.entry(var.clone()).or_default();
-                                    matches.push(QueryResult::Edge(edge));
-                                }
-                                break;
-                            }
+                let end_node = if let Some(end_results) = self.matched_vars.get(&end_var) {
+                    if let Some(QueryResult::Node(node)) = end_results.first() {
+                        node.clone()
+                    } else {
+                        return Err(ImplicaError::InvalidQuery {
+                            message: format!("End variable '{}' does not contain a node", end_var),
+                            context: Some("edge merge".to_string()),
+                        }
+                        .into());
+                    }
+                } else {
+                    return Err(ImplicaError::InvalidQuery {
+                        message: format!("End variable '{}' not found", end_var),
+                        context: Some("edge merge".to_string()),
+                    }
+                    .into());
+                };
+
+                let mut found = false;
+
+                // Optimized: Use tree-based index to find edges by term type
+                let candidate_edges = if let Some(ref term) = edge_pattern.term {
+                    // Use the optimized find_edges_by_term_type for O(log n) lookup
+                    self.graph.find_edges_by_term_type(&term.r#type, py)?
+                } else if let Some(ref schema) = edge_pattern.term_type_schema {
+                    // For wildcard or complex schemas, get all edges
+                    if schema.pattern == "$*$" {
+                        self.graph.find_all_edges(py)?
+                    } else {
+                        // For specific schemas, we still need to check all edges
+                        // but retrieve them efficiently from the index
+                        self.graph.find_all_edges(py)?
+                    }
+                } else {
+                    // No term type specified - get all edges
+                    self.graph.find_all_edges(py)?
+                };
+
+                // Check if edge already exists with matching start, end, and pattern
+                for edge in candidate_edges {
+                    if edge.start.uid() == start_node.uid()
+                        && edge.end.uid() == end_node.uid()
+                        && edge_pattern.matches(&edge, py)?
+                    {
+                        // Edge exists, add to matched_vars
+                        if let Some(ref var) = edge_pattern.variable {
+                            let matches = self.matched_vars.entry(var.clone()).or_default();
+                            matches.push(QueryResult::Edge(edge));
+                        }
+                        found = true;
+                        break;
+                    }
+                }
+
+                // If edge not found, create it
+                if !found {
+                    if let Some(term_obj) = edge_pattern.term {
+                        let props = PyDict::new(py);
+                        for (k, v) in edge_pattern.properties {
+                            props.set_item(k, v)?;
                         }
 
-                        // If edge not found, would create it here
-                        // For now, we skip edge creation in merge
+                        // Create the term in Python and convert to PyAny
+                        let term_py: Py<PyAny> = Py::new(py, term_obj.clone())?.into();
+                        let start_py: Py<PyAny> = Py::new(py, start_node.clone())?.into();
+                        let end_py: Py<PyAny> = Py::new(py, end_node.clone())?.into();
+
+                        // Create the edge
+                        let edge = Edge::new(term_py, start_py, end_py, Some(props.into()))?;
+
+                        // Use the optimized add_edge method which updates the index
+                        self.graph.add_edge(&edge, py)?;
+
+                        if let Some(var) = edge_pattern.variable {
+                            // Note: If variable already exists, it will be overwritten
+                            if self.matched_vars.contains_key(&var) {
+                                // Variable already exists - this is allowed but may be unintentional
+                            }
+                            self.matched_vars.insert(var, vec![QueryResult::Edge(edge)]);
+                        }
                     }
                 }
             }
@@ -779,16 +1003,40 @@ impl Query {
         Ok(())
     }
 
-    fn execute_delete(&mut self, py: Python, vars: Vec<String>, _detach: bool) -> PyResult<()> {
+    fn execute_delete(&mut self, py: Python, vars: Vec<String>, detach: bool) -> PyResult<()> {
         // Delete nodes/edges that were matched
         for var in vars {
             if let Some(results) = self.matched_vars.get(&var) {
-                for result in results {
+                // Clone results to avoid borrow issues
+                let results_clone = results.clone();
+
+                for result in results_clone {
                     match result {
                         QueryResult::Node(node) => {
-                            let uid = node.uid();
+                            let node_uid = node.uid();
+
+                            // If detach is true, delete all connected edges first
+                            if detach {
+                                let edges_dict = self.graph.edges.bind(py);
+                                let mut edges_to_delete = Vec::new();
+
+                                // Find all edges connected to this node
+                                for (uid_obj, edge_obj) in edges_dict.iter() {
+                                    let edge: Edge = edge_obj.extract()?;
+                                    if edge.start.uid() == node_uid || edge.end.uid() == node_uid {
+                                        let edge_uid: String = uid_obj.extract()?;
+                                        edges_to_delete.push(edge_uid);
+                                    }
+                                }
+
+                                // Delete the connected edges
+                                for edge_uid in edges_to_delete {
+                                    let _ = self.graph.remove_edge(&edge_uid, py);
+                                }
+                            }
+
                             // Use the optimized remove_node method which updates the index
-                            let _ = self.graph.remove_node(&uid, py);
+                            let _ = self.graph.remove_node(&node_uid, py);
                         }
                         QueryResult::Edge(edge) => {
                             let uid = edge.uid();
@@ -804,15 +1052,42 @@ impl Query {
     }
 
     fn execute_set(&mut self, py: Python, var: String, props: Py<PyDict>) -> PyResult<()> {
-        // Set properties on matched nodes
+        // Set properties on matched nodes and edges
         if let Some(results) = self.matched_vars.get_mut(&var) {
-            for result in results {
-                if let QueryResult::Node(node) = result {
-                    // Update node properties by merging new props into existing
-                    let node_props = node.properties.bind(py);
-                    let new_props = props.bind(py);
-                    for (key, value) in new_props.iter() {
-                        node_props.set_item(key, value)?;
+            // Clone results to avoid borrow issues during re-indexing
+            let results_clone = results.clone();
+
+            for result in results_clone {
+                match result {
+                    QueryResult::Node(node) => {
+                        let uid = node.uid();
+
+                        // Update node properties by merging new props into existing
+                        let node_props = node.properties.bind(py);
+                        let new_props = props.bind(py);
+                        for (key, value) in new_props.iter() {
+                            node_props.set_item(key, value)?;
+                        }
+
+                        // Re-add node to graph to ensure index consistency
+                        // This updates the node in the nodes dictionary without changing the UID
+                        let nodes_dict = self.graph.nodes.bind(py);
+                        nodes_dict.set_item(&uid, Py::new(py, node)?)?;
+                    }
+                    QueryResult::Edge(edge) => {
+                        let uid = edge.uid();
+
+                        // Update edge properties by merging new props into existing
+                        let edge_props = edge.properties.bind(py);
+                        let new_props = props.bind(py);
+                        for (key, value) in new_props.iter() {
+                            edge_props.set_item(key, value)?;
+                        }
+
+                        // Re-add edge to graph to ensure consistency
+                        // This updates the edge in the edges dictionary without changing the UID
+                        let edges_dict = self.graph.edges.bind(py);
+                        edges_dict.set_item(&uid, Py::new(py, edge)?)?;
                     }
                 }
             }

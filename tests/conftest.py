@@ -23,20 +23,20 @@ def var_c():
 
 @pytest.fixture
 def app_ab(var_a, var_b):
-    """Fixture for Application(A -> B)"""
-    return implica.Application(var_a, var_b)
+    """Fixture for Arrow(A -> B)"""
+    return implica.Arrow(var_a, var_b)
 
 
 @pytest.fixture
 def app_ac(var_a, var_c):
-    """Fixture for Application (A -> C)"""
-    return implica.Application(var_a, var_c)
+    """Fixture for Arrow (A -> C)"""
+    return implica.Arrow(var_a, var_c)
 
 
 @pytest.fixture
 def app_ba(var_a, var_b):
-    """Fixture for Application (B -> A)"""
-    return implica.Application(var_b, var_a)
+    """Fixture for Arrow (B -> A)"""
+    return implica.Arrow(var_b, var_a)
 
 
 @pytest.fixture

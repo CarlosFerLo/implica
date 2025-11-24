@@ -24,7 +24,7 @@ import implica
 class TestTypeMismatchErrors:
     """Tests for TypeMismatch errors (raised as TypeError)."""
 
-    def test_term_application_type_mismatch(self):
+    def test_term_Arrow_type_mismatch(self):
         """Test that applying incompatible types raises TypeError."""
         # Create types
         A = implica.Variable("A")
@@ -32,7 +32,7 @@ class TestTypeMismatchErrors:
         C = implica.Variable("C")
 
         # Create function type A -> B
-        func_type = implica.Application(A, B)
+        func_type = implica.Arrow(A, B)
 
         # Create terms
         f = implica.Term("f", func_type)
@@ -47,7 +47,7 @@ class TestTypeMismatchErrors:
         assert "a" in error_msg
         assert "c" in error_msg
 
-    def test_term_application_non_function_type(self):
+    def test_term_Arrow_non_function_type(self):
         """Test that applying a non-function term raises TypeError."""
         A = implica.Variable("A")
 
@@ -59,14 +59,14 @@ class TestTypeMismatchErrors:
             x(y)
 
         assert "Type mismatch" in str(exc_info.value)
-        assert "application type" in str(exc_info.value).lower()
+        assert "Arrow type" in str(exc_info.value).lower()
 
-    def test_term_application_success_case(self):
-        """Test that correct type application works."""
+    def test_term_Arrow_success_case(self):
+        """Test that correct type Arrow works."""
         A = implica.Variable("A")
         B = implica.Variable("B")
 
-        func_type = implica.Application(A, B)
+        func_type = implica.Arrow(A, B)
 
         f = implica.Term("f", func_type)
         x = implica.Term("x", A)  # Correct type
@@ -236,7 +236,7 @@ class TestErrorMessageQuality:
         B = implica.Variable("B")
         C = implica.Variable("C")
 
-        func_type = implica.Application(A, B)
+        func_type = implica.Arrow(A, B)
         f = implica.Term("f", func_type)
         x = implica.Term("x", C)
 
@@ -278,7 +278,7 @@ class TestErrorExceptionTypes:
         B = implica.Variable("B")
         C = implica.Variable("C")
 
-        func_type = implica.Application(A, B)
+        func_type = implica.Arrow(A, B)
         f = implica.Term("f", func_type)
         x = implica.Term("x", C)
 
@@ -300,16 +300,16 @@ class TestErrorExceptionTypes:
 class TestComplexErrorScenarios:
     """Tests for error handling in complex multi-step scenarios."""
 
-    def test_chained_term_applications(self):
-        """Test errors in chained function applications."""
+    def test_chained_term_Arrows(self):
+        """Test errors in chained function Arrows."""
         A = implica.Variable("A")
         B = implica.Variable("B")
         C = implica.Variable("C")
         D = implica.Variable("D")
 
         # Create f: A -> B -> C
-        func1 = implica.Application(B, C)
-        func2 = implica.Application(A, func1)
+        func1 = implica.Arrow(B, C)
+        func2 = implica.Arrow(A, func1)
 
         f = implica.Term("f", func2)
         x = implica.Term("x", A)
@@ -389,12 +389,12 @@ class TestRegressionTests:
             except Exception as e:
                 pytest.fail(f"Pattern '{pattern_str}' should be valid but raised: {e}")
 
-    def test_term_application_with_matching_types(self):
-        """Ensure term application with matching types still works."""
+    def test_term_Arrow_with_matching_types(self):
+        """Ensure term Arrow with matching types still works."""
         A = implica.Variable("A")
         B = implica.Variable("B")
 
-        func_type = implica.Application(A, B)
+        func_type = implica.Arrow(A, B)
         f = implica.Term("f", func_type)
         x = implica.Term("x", A)
 

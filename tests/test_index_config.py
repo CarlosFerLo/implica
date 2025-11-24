@@ -235,7 +235,7 @@ class TestGraphOperationsWithBloom:
         # Create types
         type_a = implica.Variable("A")
         type_b = implica.Variable("B")
-        type_func = implica.Application(type_a, type_b)
+        type_func = implica.Arrow(type_a, type_b)
 
         # Create nodes using query().create().execute()
         graph.query().create(node="na", type=type_a).execute()

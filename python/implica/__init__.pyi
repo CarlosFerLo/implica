@@ -18,7 +18,7 @@ class Variable(BaseType):
     def __hash__(self) -> int: ...
     def __eq__(self, other: object) -> bool: ...
 
-class Application(BaseType):
+class Arrow(BaseType):
     left: "Type"
     right: "Type"
 
@@ -26,7 +26,7 @@ class Application(BaseType):
     def __hash__(self) -> int: ...
     def __eq__(self, other: object) -> bool: ...
 
-Type = Variable | Application
+Type = Variable | Arrow
 
 ## Terms_
 
@@ -44,7 +44,7 @@ class Term:
     def __repr__(self) -> str: ...
     def __call__(self, other: "Term") -> "Term":
         """
-        If the self has an application type and other has the corresponding self.type.left type,
+        If the self has an Arrow type and other has the corresponding self.type.left type,
         then return a term of type self.type.right and with name (self.name other.name).
         """
         ...
@@ -228,13 +228,13 @@ class TypeSchema:
     - Variable matching: $name$ matches any Variable with that name
     - Wildcard: $*$ matches any type
     - Capture: $(name:pattern)$ captures matched type as variable
-    - Application: $(a -> b)$ matches Application types
+    - Arrow: $(a -> b)$ matches Arrow types
 
     Examples:
     - "$A$" matches Variable("A")
     - "$*$" matches any type
-    - "$(x:*)$ -> $(y:*)$" matches any Application
-    - "$A$ -> $*$" matches Application with left Variable("A")
+    - "$(x:*)$ -> $(y:*)$" matches any Arrow
+    - "$A$ -> $*$" matches Arrow with left Variable("A")
     """
 
     pattern: str
@@ -672,7 +672,7 @@ results = (graph.query()
 
 # 16. Type schema wildcards and captures
 results = graph.query().match("(n:$*$)").return_("n")  # All nodes
-results = graph.query().match("(n:$(x:*) -> $(y:*)$)").return_("n")  # All application types
+results = graph.query().match("(n:$(x:*) -> $(y:*)$)").return_("n")  # All Arrow types
 
 # 17. Combining programmatic and string patterns
 results = (graph.query()

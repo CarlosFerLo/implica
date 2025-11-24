@@ -17,8 +17,8 @@ class TestNodeCreation:
         assert repr(node) == "Node(A)"
         assert node.type == var_a
 
-    def test_node_creation_with_application(self, app_ab):
-        """Test creating a node with an Application type"""
+    def test_node_creation_with_Arrow(self, app_ab):
+        """Test creating a node with an Arrow type"""
         node = implica.Node(app_ab)
         assert str(node) == "Node((A -> B))"
         assert node.type == app_ab
@@ -74,16 +74,14 @@ class TestNodeUID:
         node2 = implica.Node(var_b)
         assert node1.uid() != node2.uid()
 
-    def test_nodes_with_application_types_have_unique_uids(self, app_ab, app_ac):
-        """Test that nodes with different application types have different UIDs"""
+    def test_nodes_with_Arrow_types_have_unique_uids(self, app_ab, app_ac):
+        """Test that nodes with different Arrow types have different UIDs"""
         node1 = implica.Node(app_ab)
         node2 = implica.Node(app_ac)
         assert node1.uid() != node2.uid()
 
-    def test_nodes_with_application_types_but_with_inverse_order_have_unique_ids(
-        self, app_ab, app_ba
-    ):
-        """Test that node with application types in inverse order have different UIDs"""
+    def test_nodes_with_Arrow_types_but_with_inverse_order_have_unique_ids(self, app_ab, app_ba):
+        """Test that node with Arrow types in inverse order have different UIDs"""
         node1 = implica.Node(app_ab)
         node2 = implica.Node(app_ba)
         assert node1.uid() != node2.uid()
@@ -175,8 +173,8 @@ class TestNodeStringRepresentations:
         node = implica.Node(var_a)
         assert str(node) == "Node(A)"
 
-    def test_node_str_with_application(self, app_ab):
-        """Test __str__ method with Application type"""
+    def test_node_str_with_Arrow(self, app_ab):
+        """Test __str__ method with Arrow type"""
         node = implica.Node(app_ab)
         assert str(node) == "Node((A -> B))"
 
@@ -185,8 +183,8 @@ class TestNodeStringRepresentations:
         node = implica.Node(var_a)
         assert repr(node) == "Node(A)"
 
-    def test_node_repr_with_application(self, app_ab):
-        """Test __repr__ method with Application type"""
+    def test_node_repr_with_Arrow(self, app_ab):
+        """Test __repr__ method with Arrow type"""
         node = implica.Node(app_ab)
         assert repr(node) == "Node((A -> B))"
 
@@ -234,7 +232,7 @@ class TestEdgeCreation:
         """Test creating an edge where start and end are the same type"""
         node_a = implica.Node(var_a)
         # Create a term with type A -> A
-        app_aa = implica.Application(var_a, var_a)
+        app_aa = implica.Arrow(var_a, var_a)
         term = implica.Term("identity", app_aa)
 
         edge = implica.Edge(term, node_a, node_a)
@@ -457,12 +455,12 @@ class TestEdgeStringRepresentations:
 
         assert repr(edge) == "Edge(f: A -> B)"
 
-    def test_edge_str_with_application_types(self, app_ab, app_ac):
-        """Test __str__ with Application types in nodes"""
+    def test_edge_str_with_Arrow_types(self, app_ab, app_ac):
+        """Test __str__ with Arrow types in nodes"""
         node1 = implica.Node(app_ab)
         node2 = implica.Node(app_ac)
         # Create a term with type (A -> B) -> (A -> C)
-        term_type = implica.Application(app_ab, app_ac)
+        term_type = implica.Arrow(app_ab, app_ac)
         term = implica.Term("transform", term_type)
         edge = implica.Edge(term, node1, node2)
 

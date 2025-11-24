@@ -145,19 +145,19 @@ def test_type_variable_immutability(var_a):
     assert var_a.name == "A"
 
 
-# ==================== Application Tests ====================
+# ==================== Arrow Tests ====================
 
 
-def test_application_creation(app_ab):
-    """Test Application creation"""
+def test_Arrow_creation(app_ab):
+    """Test Arrow creation"""
     assert str(app_ab) == "(A -> B)"
     # UID is now a SHA256 hash (64 hex characters)
     assert len(app_ab.uid()) == 64
     assert all(c in "0123456789abcdef" for c in app_ab.uid())
 
 
-def test_application_getters(app_ab):
-    """Test Application left and right getters"""
+def test_Arrow_getters(app_ab):
+    """Test Arrow left and right getters"""
     left = app_ab.left
     right = app_ab.right
     assert isinstance(left, implica.Variable)
@@ -166,85 +166,85 @@ def test_application_getters(app_ab):
     assert right.name == "B"
 
 
-def test_application_with_variable_types():
-    """Test Application with Variable types"""
+def test_Arrow_with_variable_types():
+    """Test Arrow with Variable types"""
     var_x = implica.Variable("X")
     var_y = implica.Variable("Y")
-    app = implica.Application(var_x, var_y)
+    app = implica.Arrow(var_x, var_y)
 
     assert app.left == var_x
     assert app.right == var_y
     assert str(app) == "(X -> Y)"
 
 
-def test_application_with_nested_applications(var_a, var_b, var_c):
-    """Test Application with nested Application types"""
+def test_Arrow_with_nested_Arrows(var_a, var_b, var_c):
+    """Test Arrow with nested Arrow types"""
     # (A -> B) -> C
-    inner_app = implica.Application(var_a, var_b)
-    outer_app = implica.Application(inner_app, var_c)
+    inner_app = implica.Arrow(var_a, var_b)
+    outer_app = implica.Arrow(inner_app, var_c)
 
     assert str(outer_app) == "((A -> B) -> C)"
     assert outer_app.left == inner_app
     assert outer_app.right == var_c
 
 
-def test_application_deeply_nested():
-    """Test deeply nested Applications"""
+def test_Arrow_deeply_nested():
+    """Test deeply nested Arrows"""
     var_a = implica.Variable("A")
     var_b = implica.Variable("B")
     var_c = implica.Variable("C")
     var_d = implica.Variable("D")
 
     # ((A -> B) -> C) -> D
-    app1 = implica.Application(var_a, var_b)
-    app2 = implica.Application(app1, var_c)
-    app3 = implica.Application(app2, var_d)
+    app1 = implica.Arrow(var_a, var_b)
+    app2 = implica.Arrow(app1, var_c)
+    app3 = implica.Arrow(app2, var_d)
 
     assert str(app3) == "(((A -> B) -> C) -> D)"
-    assert isinstance(app3.left, implica.Application)
-    assert isinstance(app3.left.left, implica.Application)
+    assert isinstance(app3.left, implica.Arrow)
+    assert isinstance(app3.left.left, implica.Arrow)
     assert isinstance(app3.left.left.left, implica.Variable)
 
 
-def test_application_right_nested(var_a, var_b, var_c):
-    """Test Application with right-nested types"""
+def test_Arrow_right_nested(var_a, var_b, var_c):
+    """Test Arrow with right-nested types"""
 
     # A -> (B -> C)
-    inner_app = implica.Application(var_b, var_c)
-    outer_app = implica.Application(var_a, inner_app)
+    inner_app = implica.Arrow(var_b, var_c)
+    outer_app = implica.Arrow(var_a, inner_app)
 
     assert str(outer_app) == "(A -> (B -> C))"
     assert outer_app.left == var_a
     assert outer_app.right == inner_app
 
 
-def test_application_repr(app_ab):
-    """Test Application repr format"""
+def test_Arrow_repr(app_ab):
+    """Test Arrow repr format"""
 
     repr_str = repr(app_ab)
-    assert "Application" in repr_str
+    assert "Arrow" in repr_str
 
 
-def test_application_uid_consistency():
-    """Test that Application UID is consistent across instances with same structure"""
+def test_Arrow_uid_consistency():
+    """Test that Arrow UID is consistent across instances with same structure"""
     var_a1 = implica.Variable("A")
     var_b1 = implica.Variable("B")
-    app1 = implica.Application(var_a1, var_b1)
+    app1 = implica.Arrow(var_a1, var_b1)
 
     var_a2 = implica.Variable("A")
     var_b2 = implica.Variable("B")
-    app2 = implica.Application(var_a2, var_b2)
+    app2 = implica.Arrow(var_a2, var_b2)
 
     assert app1.uid() == app2.uid()
 
     # Different structure should have different UID
     var_c = implica.Variable("C")
-    app3 = implica.Application(var_a1, var_c)
+    app3 = implica.Arrow(var_a1, var_c)
     assert app1.uid() != app3.uid()
 
 
-def test_application_uid_caching(app_ab):
-    """Test that Application UID is cached"""
+def test_Arrow_uid_caching(app_ab):
+    """Test that Arrow UID is cached"""
 
     uid1 = app_ab.uid()
     uid2 = app_ab.uid()
@@ -254,12 +254,12 @@ def test_application_uid_caching(app_ab):
     assert uid1 == uid2
 
 
-def test_application_hash(var_a, var_b, var_c):
-    """Test Application hashing for use in sets and dicts"""
+def test_Arrow_hash(var_a, var_b, var_c):
+    """Test Arrow hashing for use in sets and dicts"""
 
-    app1 = implica.Application(var_a, var_b)
-    app2 = implica.Application(var_a, var_b)
-    app3 = implica.Application(var_a, var_c)
+    app1 = implica.Arrow(var_a, var_b)
+    app2 = implica.Arrow(var_a, var_b)
+    app3 = implica.Arrow(var_a, var_c)
 
     # Same structure should have same hash
     assert hash(app1) == hash(app2)
@@ -273,12 +273,12 @@ def test_application_hash(var_a, var_b, var_c):
     assert app_dict[app2] == "value1"
 
 
-def test_application_equality(var_a, var_b, var_c):
-    """Test Application equality comparison"""
+def test_Arrow_equality(var_a, var_b, var_c):
+    """Test Arrow equality comparison"""
 
-    app1 = implica.Application(var_a, var_b)
-    app2 = implica.Application(var_a, var_b)
-    app3 = implica.Application(var_a, var_c)
+    app1 = implica.Arrow(var_a, var_b)
+    app2 = implica.Arrow(var_a, var_b)
+    app3 = implica.Arrow(var_a, var_c)
 
     # Reflexive
     assert app1 == app1
@@ -288,7 +288,7 @@ def test_application_equality(var_a, var_b, var_c):
     assert app2 == app1
 
     # Transitive
-    app4 = implica.Application(implica.Variable("A"), implica.Variable("B"))
+    app4 = implica.Arrow(implica.Variable("A"), implica.Variable("B"))
     assert app1 == app2 and app2 == app4
     assert app1 == app4
 
@@ -297,8 +297,8 @@ def test_application_equality(var_a, var_b, var_c):
     assert not (app1 == app3)
 
 
-def test_application_inequality_with_different_types(var_a, var_b, app_ab):
-    """Test Application inequality with non-Application types"""
+def test_Arrow_inequality_with_different_types(var_a, var_b, app_ab):
+    """Test Arrow inequality with non-Arrow types"""
 
     assert app_ab != var_a
     assert app_ab != "(A -> B)"
@@ -306,30 +306,30 @@ def test_application_inequality_with_different_types(var_a, var_b, app_ab):
     assert app_ab != []
 
 
-def test_application_with_same_left_and_right(var_a):
-    """Test Application with same Variable on both sides"""
-    app = implica.Application(var_a, var_a)
+def test_Arrow_with_same_left_and_right(var_a):
+    """Test Arrow with same Variable on both sides"""
+    app = implica.Arrow(var_a, var_a)
 
     assert str(app) == "(A -> A)"
     assert app.left == app.right
     assert app.left == var_a
 
 
-def test_application_equality_with_nested_structures():
-    """Test equality of Applications with nested structures"""
+def test_Arrow_equality_with_nested_structures():
+    """Test equality of Arrows with nested structures"""
     var_a = implica.Variable("A")
     var_b = implica.Variable("B")
     var_c = implica.Variable("C")
 
     # Build same structure in two ways
-    app1 = implica.Application(implica.Application(var_a, var_b), var_c)
-    app2 = implica.Application(implica.Application(var_a, var_b), var_c)
+    app1 = implica.Arrow(implica.Arrow(var_a, var_b), var_c)
+    app2 = implica.Arrow(implica.Arrow(var_a, var_b), var_c)
 
     assert app1 == app2
 
 
-def test_application_immutability(app_ab):
-    """Test Type Application Immutability"""
+def test_Arrow_immutability(app_ab):
+    """Test Type Arrow Immutability"""
     with pytest.raises(Exception):
         app_ab.left = implica.Variable("C")
     with pytest.raises(Exception):
@@ -343,28 +343,28 @@ def test_application_immutability(app_ab):
 
 
 def test_type_equality_mixed(var_a, var_b, app_ab, app_ac):
-    """Test Type Equality between Variables and Applications"""
+    """Test Type Equality between Variables and Arrows"""
     assert var_a == var_a
     assert var_a == implica.Variable("A")
     assert var_a != var_b
 
     assert app_ab == app_ab
-    assert app_ab == implica.Application(implica.Variable("A"), implica.Variable("B"))
+    assert app_ab == implica.Arrow(implica.Variable("A"), implica.Variable("B"))
     assert app_ab != app_ac
 
-    # Variable should not equal Application even if names match
+    # Variable should not equal Arrow even if names match
     assert var_a != app_ab
 
 
 def test_different_type_combinations():
-    """Test various combinations of Variables and Applications"""
+    """Test various combinations of Variables and Arrows"""
     var_a = implica.Variable("A")
     var_b = implica.Variable("B")
     var_c = implica.Variable("C")
 
-    app_ab = implica.Application(var_a, var_b)
-    app_bc = implica.Application(var_b, var_c)
-    app_nested = implica.Application(app_ab, var_c)
+    app_ab = implica.Arrow(var_a, var_b)
+    app_bc = implica.Arrow(var_b, var_c)
+    app_nested = implica.Arrow(app_ab, var_c)
 
     # All should be unique
     types = [var_a, var_b, var_c, app_ab, app_bc, app_nested]
@@ -388,13 +388,13 @@ def test_type_str_representation(var_a, var_b, var_c):
 
     assert str(var_a) == "A"
 
-    app1 = implica.Application(var_a, var_b)
+    app1 = implica.Arrow(var_a, var_b)
     assert str(app1) == "(A -> B)"
 
-    app2 = implica.Application(app1, var_c)
+    app2 = implica.Arrow(app1, var_c)
     assert str(app2) == "((A -> B) -> C)"
 
-    app3 = implica.Application(var_a, app1)
+    app3 = implica.Arrow(var_a, app1)
     assert str(app3) == "(A -> (A -> B))"
 
 
@@ -407,13 +407,13 @@ def test_complex_type_structure():
     var_d = implica.Variable("D")
     var_e = implica.Variable("E")
 
-    left_part = implica.Application(implica.Application(var_a, var_b), var_c)
-    right_part = implica.Application(var_d, var_e)
-    complex_type = implica.Application(left_part, right_part)
+    left_part = implica.Arrow(implica.Arrow(var_a, var_b), var_c)
+    right_part = implica.Arrow(var_d, var_e)
+    complex_type = implica.Arrow(left_part, right_part)
 
     assert str(complex_type) == "(((A -> B) -> C) -> (D -> E))"
-    assert isinstance(complex_type.left, implica.Application)
-    assert isinstance(complex_type.right, implica.Application)
+    assert isinstance(complex_type.left, implica.Arrow)
+    assert isinstance(complex_type.right, implica.Arrow)
 
 
 def test_type_comparison_comprehensive(var_b):
@@ -421,14 +421,14 @@ def test_type_comparison_comprehensive(var_b):
     var_a1 = implica.Variable("A")
     var_a2 = implica.Variable("A")
 
-    app1 = implica.Application(var_a1, var_b)
-    app2 = implica.Application(var_a2, var_b)
-    app3 = implica.Application(var_b, var_a1)
+    app1 = implica.Arrow(var_a1, var_b)
+    app2 = implica.Arrow(var_a2, var_b)
+    app3 = implica.Arrow(var_b, var_a1)
 
     # Equal Variables
     assert var_a1 == var_a2
 
-    # Equal Applications
+    # Equal Arrows
     assert app1 == app2
 
     # Different order matters
@@ -456,8 +456,8 @@ def test_base_type_interface_variable(var_a):
     assert hasattr(var_a, "__repr__")
 
 
-def test_base_type_interface_application(app_ab):
-    """Test that Application implements BaseType interface"""
+def test_base_type_interface_Arrow(app_ab):
+    """Test that Arrow implements BaseType interface"""
 
     # Should have uid method
     assert hasattr(app_ab, "uid")
@@ -494,18 +494,18 @@ def test_type_in_collections(var_a, var_b, app_ab):
 # ==================== Edge Cases and Error Handling ====================
 
 
-def test_application_with_deeply_nested_same_structure(var_a, var_b):
+def test_Arrow_with_deeply_nested_same_structure(var_a, var_b):
     """Test equality with deeply nested identical structures"""
 
     # Build: (((A -> A) -> B) -> B)
-    app1 = implica.Application(var_a, var_a)
-    app2 = implica.Application(app1, var_b)
-    app3 = implica.Application(app2, var_b)
+    app1 = implica.Arrow(var_a, var_a)
+    app2 = implica.Arrow(app1, var_b)
+    app3 = implica.Arrow(app2, var_b)
 
     # Build same structure again
-    app1_copy = implica.Application(var_a, var_a)
-    app2_copy = implica.Application(app1_copy, var_b)
-    app3_copy = implica.Application(app2_copy, var_b)
+    app1_copy = implica.Arrow(var_a, var_a)
+    app2_copy = implica.Arrow(app1_copy, var_b)
+    app3_copy = implica.Arrow(app2_copy, var_b)
 
     assert app3 == app3_copy
     assert app3.uid() == app3_copy.uid()
@@ -518,8 +518,8 @@ def test_variable_name_with_unicode():
     assert str(var) == "Τύπος"
 
 
-def test_application_symmetry(app_ab, app_ba):
-    """Test that Application(A, B) != Application(B, A)"""
+def test_Arrow_symmetry(app_ab, app_ba):
+    """Test that Arrow(A, B) != Arrow(B, A)"""
 
     assert app_ab != app_ba
     assert str(app_ab) == "(A -> B)"
@@ -534,13 +534,13 @@ def test_large_type_structure():
     # Build a chain: T0 -> T1 -> T2 -> ... -> T9
     current = vars[0]
     for var in vars[1:]:
-        current = implica.Application(current, var)
+        current = implica.Arrow(current, var)
 
     # Verify structure
-    assert isinstance(current, implica.Application)
+    assert isinstance(current, implica.Arrow)
     temp = current
     for i in range(8, -1, -1):
-        assert isinstance(temp, implica.Application)
+        assert isinstance(temp, implica.Arrow)
         assert temp.right == vars[i + 1]
         temp = temp.left
     assert temp == vars[0]

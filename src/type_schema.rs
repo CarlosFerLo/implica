@@ -2,7 +2,7 @@
 //!
 //! This module provides the `TypeSchema` structure for defining regex-like patterns
 //! that match against types. Schemas support wildcards, variable capture, and
-//! application type matching.
+//! Arrow type matching.
 
 use crate::errors::ImplicaError;
 use crate::types::Type;
@@ -21,8 +21,8 @@ enum Pattern {
     /// Matches a specific variable by name
     Variable(String),
 
-    /// Matches an application type with sub-patterns for left and right
-    Application {
+    /// Matches an Arrow type with sub-patterns for left and right
+    Arrow {
         left: Box<Pattern>,
         right: Box<Pattern>,
     },
@@ -36,7 +36,7 @@ enum Pattern {
 /// Type schemas allow flexible pattern matching on types with support for:
 /// - Wildcards: `*` matches any type
 /// - Specific variables: `Person` matches only the Variable named "Person"
-/// - Application patterns: `* -> *` matches Application types
+/// - Arrow patterns: `* -> *` matches Arrow types
 /// - Named captures: `(name:pattern)` matches and captures the type
 /// - Structural constraints: `(:pattern)` matches without capturing
 ///
@@ -51,10 +51,10 @@ enum Pattern {
 /// # Specific variable - matches only Person
 /// schema = implica.TypeSchema("Person")
 ///
-/// # Application pattern - matches A -> B
+/// # Arrow pattern - matches A -> B
 /// schema = implica.TypeSchema("A -> B")
 ///
-/// # Wildcard application - matches any function type
+/// # Wildcard Arrow - matches any function type
 /// schema = implica.TypeSchema("* -> *")
 ///
 /// # Named capture example
@@ -117,7 +117,7 @@ impl TypeSchema {
     ///
     /// # Arguments
     ///
-    /// * `type` - The type to check (Variable or Application)
+    /// * `type` - The type to check (Variable or Arrow)
     ///
     /// # Returns
     ///
@@ -156,7 +156,7 @@ impl TypeSchema {
     ///
     /// ```python
     /// schema = implica.TypeSchema("(input:*) -> (output:*)")
-    /// func_type = implica.Application(
+    /// func_type = implica.Arrow(
     ///     implica.Variable("A"),
     ///     implica.Variable("B")
     /// )
@@ -241,7 +241,7 @@ impl TypeSchema {
             return Ok(Pattern::Wildcard);
         }
 
-        // Check for application pattern FIRST (at top level): left -> right
+        // Check for Arrow pattern FIRST (at top level): left -> right
         // This must be done before checking for captures to handle patterns like "(in:*) -> (out:*)"
         if let Some(arrow_pos) = find_arrow(input) {
             let left_str = input[..arrow_pos].trim();
@@ -250,7 +250,7 @@ impl TypeSchema {
             let left_pattern = Self::parse_pattern_recursive(left_str)?;
             let right_pattern = Self::parse_pattern_recursive(right_str)?;
 
-            return Ok(Pattern::Application {
+            return Ok(Pattern::Arrow {
                 left: Box::new(left_pattern),
                 right: Box::new(right_pattern),
             });
@@ -334,10 +334,10 @@ impl TypeSchema {
                 }
             }
 
-            Pattern::Application { left, right } => {
-                // Match only if type is an Application with matching parts
+            Pattern::Arrow { left, right } => {
+                // Match only if type is an Arrow with matching parts
                 match r#type {
-                    Type::Application(app) => {
+                    Type::Arrow(app) => {
                         Self::match_pattern(left, &app.left, captures)
                             && Self::match_pattern(right, &app.right, captures)
                     }

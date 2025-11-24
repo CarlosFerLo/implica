@@ -4,7 +4,7 @@ A Rust-powered Python library for type theoretical graph modeling with Cypher-li
 
 ## Features
 
-- **Type Theory**: Full support for type theoretical constructs (Variables, Applications, Terms)
+- **Type Theory**: Full support for type theoretical constructs (Variables, Arrows, Terms)
 - **Graph Modeling**: Represent type theoretical models as graphs with Nodes and Edges
 - **Cypher-like Queries**: Intuitive query language inspired by Neo4j's Cypher
 - **Type Schema Patterns**: Powerful pattern matching for types
@@ -33,8 +33,8 @@ import implica
 var_a = implica.Variable("A")
 var_b = implica.Variable("B")
 
-# Create function types (applications)
-func_type = implica.Application(var_a, var_b)  # A -> B
+# Create function types (Arrows)
+func_type = implica.Arrow(var_a, var_b)  # A -> B
 print(func_type)  # (A -> B)
 ```
 
@@ -42,7 +42,7 @@ print(func_type)  # (A -> B)
 
 ```python
 # Create terms with types
-f = implica.Term("f", implica.Application(var_a, var_b))
+f = implica.Term("f", implica.Arrow(var_a, var_b))
 x = implica.Term("x", var_a)
 
 # Apply terms
@@ -80,7 +80,7 @@ schema = implica.TypeSchema("$A$")
 schema.matches(var_a)  # True
 schema.matches(var_b)  # False
 
-# Application patterns
+# Arrow patterns
 schema = implica.TypeSchema("$A -> B$")
 schema.matches(func_type)  # True
 
@@ -177,12 +177,12 @@ graph.query().merge("(n:A {id: 1})").execute()
 ### Types
 
 - `Variable(name: str)` - Type variable
-- `Application(left: Type, right: Type)` - Function type
+- `Arrow(left: Type, right: Type)` - Function type
 
 ### Terms
 
 - `Term(name: str, type: Type)` - Type theoretical term
-- `Term.__call__(other: Term) -> Term` - Term application
+- `Term.__call__(other: Term) -> Term` - Term Arrow
 
 ### Graph
 
@@ -206,8 +206,8 @@ graph.query().merge("(n:A {id: 1})").execute()
 
 The library is implemented in Rust for performance and uses PyO3 for Python bindings. The architecture consists of:
 
-- **types.rs** - Core type system (Variable, Application) with SHA256 UIDs
-- **term.rs** - Term implementation and application with SHA256 UIDs
+- **types.rs** - Core type system (Variable, Arrow) with SHA256 UIDs
+- **term.rs** - Term implementation and Arrow with SHA256 UIDs
 - **graph.rs** - Graph, Node, and Edge structures with optimized search methods
 - **type_schema.rs** - Pattern matching for types
 - **patterns.rs** - Query pattern structures
@@ -216,7 +216,7 @@ The library is implemented in Rust for performance and uses PyO3 for Python bind
 
 ### Performance Optimizations
 
-- **SHA256 UIDs**: All elements (Variable, Application, Term, Node, Edge) use SHA256 hashes for unique identification
+- **SHA256 UIDs**: All elements (Variable, Arrow, Term, Node, Edge) use SHA256 hashes for unique identification
 - **O(1) Lookups**: Node and edge lookups by UID use Python dictionaries for constant-time access
 - **Type Indexing**: `build_type_index()` creates dynamic indices for fast type-based queries
 - **Cached UIDs**: UIDs are computed once and cached to avoid redundant hash calculations

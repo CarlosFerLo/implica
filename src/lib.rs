@@ -8,7 +8,7 @@
 //!
 //! ## Main Components
 //!
-//! - **Type System**: Variables and Applications representing type theoretical types
+//! - **Type System**: Variables and Arrows representing type theoretical types
 //! - **Terms**: Typed terms in the type theory
 //! - **Graph**: Nodes and edges forming the graph structure
 //! - **Type Schemas**: Pattern matching for types
@@ -52,7 +52,7 @@ use query::Query;
 use term::Term;
 use type_index::IndexConfig;
 use type_schema::TypeSchema;
-use types::{Application, Variable};
+use types::{Arrow, Variable};
 
 /// A Python module implemented in Rust for type theoretical graph modeling.
 ///
@@ -62,7 +62,7 @@ use types::{Application, Variable};
 /// # Classes Exposed
 ///
 /// - `Variable`: Type variables
-/// - `Application`: Application types (A -> B)
+/// - `Arrow`: Arrow types (A -> B)
 /// - `Term`: Typed terms
 /// - `Node`: Graph nodes with types
 /// - `Edge`: Graph edges with terms
@@ -75,7 +75,7 @@ use types::{Application, Variable};
 fn implica(m: &Bound<'_, PyModule>) -> PyResult<()> {
     // Type system
     m.add_class::<Variable>()?;
-    m.add_class::<Application>()?;
+    m.add_class::<Arrow>()?;
 
     // Terms
     m.add_class::<Term>()?;

@@ -139,7 +139,7 @@ impl Graph {
 
 **Características implementadas**:
 
-- ✅ Sistema de UIDs basado en SHA256 para todos los elementos (Variable, Application, Term, Node, Edge)
+- ✅ Sistema de UIDs basado en SHA256 para todos los elementos (Variable, Arrow, Term, Node, Edge)
 - ✅ Métodos helper `build_type_index()` para crear índices bajo demanda
 - ✅ Método `get_nodes_by_type()` para búsqueda optimizada por tipo
 - ✅ Métodos `get_node_by_uid()` y `get_edge_by_uid()` para búsqueda O(1)
@@ -191,7 +191,7 @@ pub struct Variable {
 
 - ✅ `src/lib.rs` - Documentación del módulo principal y descripción general
 - ✅ `src/term.rs` - Terms con ejemplos de uso y aplicación
-- ✅ `src/types.rs` - Sistema de tipos (Variable, Application, Type)
+- ✅ `src/types.rs` - Sistema de tipos (Variable, Arrow, Type)
 - ✅ `src/type_schema.rs` - TypeSchema con patrones y ejemplos
 - ✅ `src/graph.rs` - Graph, Node, Edge con casos de uso
 - ✅ `src/patterns.rs` - NodePattern, EdgePattern, PathPattern con sintaxis
@@ -283,8 +283,8 @@ impl From<ImplicaError> for PyErr {
 
 ```python
 # tests/test_errors.py - Todos los tipos de error cubiertos
-test_term_application_type_mismatch              ✓  # TypeError en aplicación incorrecta
-test_term_application_non_function_type          ✓  # TypeError en tipo no función
+test_term_Arrow_type_mismatch              ✓  # TypeError en aplicación incorrecta
+test_term_Arrow_non_function_type          ✓  # TypeError en tipo no función
 test_empty_pattern                               ✓  # ValueError en patrón vacío
 test_unmatched_parentheses                       ✓  # ValueError en paréntesis sin cerrar
 test_unmatched_brackets                          ✓  # ValueError en corchetes sin cerrar
@@ -465,11 +465,11 @@ def test_variable_uid_equals_name(name):
     assert var.uid() == name
 
 @given(st.text(min_size=1), st.text(min_size=1))
-def test_application_commutative_uid(a, b):
-    """Application UID should be consistent"""
+def test_Arrow_commutative_uid(a, b):
+    """Arrow UID should be consistent"""
     var_a = implica.Variable(a)
     var_b = implica.Variable(b)
-    app = implica.Application(var_a, var_b)
+    app = implica.Arrow(var_a, var_b)
     assert app.uid() == f"{a} -> {b}"
 ```
 
