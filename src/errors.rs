@@ -37,6 +37,8 @@
 use pyo3::{exceptions, PyErr};
 use std::fmt;
 
+use crate::graph::{Edge, Node};
+
 /// Main error type for the implica library.
 ///
 /// This enum represents all possible errors that can occur during library operations.
@@ -211,6 +213,26 @@ pub enum ImplicaError {
         /// Reason for failure
         reason: String,
     },
+
+    PythonConversion {
+        message: String,
+        context: Option<String>,
+    },
+
+    NodeAlreadyExists {
+        message: String,
+        existing: Node,
+        new: Node,
+    },
+    EdgeAlreadyExists {
+        message: String,
+        existing: Edge,
+        new: Edge,
+    },
+    VariableAlreadyExists {
+        name: String,
+        context: Option<String>,
+    },
 }
 
 impl fmt::Display for ImplicaError {
@@ -264,6 +286,13 @@ impl fmt::Display for ImplicaError {
                 }
                 Ok(())
             }
+            ImplicaError::VariableAlreadyExists { name, context } => {
+                write!(f, "Variable '{}' already exists", name)?;
+                if let Some(ctx) = context {
+                    write!(f, " ({})", ctx)?;
+                }
+                Ok(())
+            }
             ImplicaError::SchemaValidation { schema, reason } => {
                 write!(f, "Schema validation failed for '{}': {}", schema, reason)
             }
@@ -280,6 +309,35 @@ impl fmt::Display for ImplicaError {
             }
             ImplicaError::IndexOperation { operation, reason } => {
                 write!(f, "Index operation '{}' failed: {}", operation, reason)
+            }
+            ImplicaError::PythonConversion { message, context } => {
+                write!(f, "Python conversion error: '{}'", message)?;
+                if let Some(ctx) = context {
+                    write!(f, "({})", ctx)?;
+                }
+                Ok(())
+            }
+            ImplicaError::NodeAlreadyExists {
+                message,
+                existing,
+                new,
+            } => {
+                write!(
+                    f,
+                    "Node already exists in the graph: '{}'\nExisting: '{}'\nNew: '{}'",
+                    message, existing, new
+                )
+            }
+            ImplicaError::EdgeAlreadyExists {
+                message,
+                existing,
+                new,
+            } => {
+                write!(
+                    f,
+                    "Node already exists in the graph: '{}'\nExisting: '{}'\nNew: '{}'",
+                    message, existing, new
+                )
             }
         }
     }
@@ -317,8 +375,20 @@ impl From<ImplicaError> for PyErr {
             ImplicaError::VariableNotFound { .. } => {
                 exceptions::PyNameError::new_err(err.to_string())
             }
+            ImplicaError::VariableAlreadyExists { .. } => {
+                exceptions::PyNameError::new_err(err.to_string())
+            }
             ImplicaError::IndexOperation { .. } => {
                 exceptions::PyRuntimeError::new_err(err.to_string())
+            }
+            ImplicaError::PythonConversion { .. } => {
+                exceptions::PyRuntimeError::new_err(err.to_string())
+            }
+            ImplicaError::NodeAlreadyExists { .. } => {
+                exceptions::PyValueError::new_err(err.to_string())
+            }
+            ImplicaError::EdgeAlreadyExists { .. } => {
+                exceptions::PyValueError::new_err(err.to_string())
             }
         }
     }

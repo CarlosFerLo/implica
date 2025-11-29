@@ -250,13 +250,19 @@ class Graph:
     nodes: dict[str, Node]  # uid -> Node_
     edges: dict[str, Edge]  # uid -> Edge_
 
-    def __init__(self, config: IndexConfig | None = None) -> None:
+    keep_term_strategy: KeepTermStrategy
+
+    def __init__(
+        self, config: IndexConfig | None = None, keep_term_strategy: KeepTermStrategy | None = None
+    ) -> None:
         """
         Create a new graph.
 
         Args:
             config: Optional IndexConfig for optimization settings.
                    If None, uses default (no bloom filters).
+            keep_term_strategy: Strategy for resolving term conflicts.
+                    If None, defaults to KeepExisting.
         """
         ...
 
@@ -565,6 +571,38 @@ class Query:
         Examples:
         - .match(node="n").set("n", {"name": "new_name", "value": 42})
         - .match(edge="e").set("e", {"weight": 1.5})
+        """
+        ...
+    # SET_TERM clause - for updating terms (witnesses)_
+    def set_term(self, variable: str, term: Term) -> "Query":
+        """
+        Set term (witness) on matched nodes or edges.
+
+        This operation changes the term that witnesses/inhabits a type.
+        All matched nodes/edges must have the same type as the provided term,
+        otherwise a TypeError is raised.
+
+        For nodes: Changes the term that inhabits the node's type.
+        For edges: Changes the witness term while preserving the edge structure
+                   (start node, end node remain the same).
+
+        Type Safety:
+        - All matched elements must have compatible types with the term
+        - The term's type must exactly match each matched element's type
+        - Mixed-type matches will raise an error
+
+        Examples:
+        - .match("(n:A)").set_term("n", term_a)  # ✅ All nodes type A
+        - .match("-[e:$A -> B$]->").set_term("e", new_term)  # ✅ Change edge witness
+        - .match("(n:$*$)").set_term("n", term_a)  # ❌ Error: mixed types
+
+        Raises:
+            TypeError: If term type doesn't match all elements
+            TypeError: If matched elements have heterogeneous types
+
+        Note:
+            This is separate from set() to make type constraints explicit.
+            Use set() for properties, set_term() for type-theoretical witnesses.
         """
         ...
     # DELETE clause - for removing nodes/edges_

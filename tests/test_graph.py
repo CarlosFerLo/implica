@@ -24,6 +24,30 @@ class TestKeepTermStrategy:
         assert str(keep_new) == "KeepNew"
         assert str(keep_simplest) == "KeepSimplest"
 
+    def test_repr_implementation(self):
+        keep_existent = implica.KeepTermStrategy.KeepExisting
+        keep_new = implica.KeepTermStrategy.KeepNew
+        keep_simplest = implica.KeepTermStrategy.KeepSimplest
+
+        assert repr(keep_existent) == "KeepTermStrategy.KeepExisting"
+        assert repr(keep_new) == "KeepTermStrategy.KeepNew"
+        assert repr(keep_simplest) == "KeepTermStrategy.KeepSimplest"
+
+    def test_keep_term_strategy_keep_existing(self, var_a):
+        """Test KeepExisting strategy retains existing term"""
+        graph = implica.Graph(keep_term_strategy=implica.KeepTermStrategy.KeepExisting)
+
+        # Create initial term and node
+        initial_term = implica.Term("a", var_a)
+
+        graph.query().create(node="N", type=var_a, term=initial_term).execute()
+
+        # New term to attempt to set
+        new_term = implica.Term("b", var_a)
+
+        # Update node with new term
+        graph.query().match("(N)").set_term("N.term", new_term).execute()
+
 
 # ============================================================================
 # NODE TESTS
@@ -39,12 +63,14 @@ class TestNodeCreation:
         assert str(node) == "Node(A)"
         assert repr(node) == "Node(A)"
         assert node.type == var_a
+        assert node.term is None
 
     def test_node_creation_with_Arrow(self, app_ab):
         """Test creating a node with an Arrow type"""
         node = implica.Node(app_ab)
         assert str(node) == "Node((A -> B))"
         assert node.type == app_ab
+        assert node.term is None
 
     def test_node_creation_with_properties(self, var_a):
         """Test creating nodes with properties"""
@@ -52,18 +78,62 @@ class TestNodeCreation:
         assert node.properties["value"] == 1
         assert node.properties["name"] == "test"
         assert node.properties["flag"] is True
+        assert node.term is None
 
     def test_node_creation_without_properties(self, var_a):
         """Test creating a node without explicit properties"""
         node = implica.Node(var_a)
         assert isinstance(node.properties, dict)
         assert len(node.properties) == 0
+        assert node.term is None
 
     def test_node_creation_with_empty_properties(self, var_a):
         """Test creating a node with empty properties dict"""
         node = implica.Node(var_a, properties={})
         assert isinstance(node.properties, dict)
         assert len(node.properties) == 0
+        assert node.term is None
+
+    def test_node_creation_with_term(self, var_a):
+        """Test creating a node with a term"""
+        term = implica.Term("a", var_a)
+        node = implica.Node(var_a, term)
+        assert node.term is not None
+        assert node.term.name == "a"
+        assert str(node) == "Node(A, a)"
+
+    def test_node_creation_with_term_none(self, var_a):
+        """Test creating a node with term explicitly set to None"""
+        node = implica.Node(var_a, term=None)
+        assert node.term is None
+        assert str(node) == "Node(A)"
+
+    def test_node_creation_with_term_and_properties(self, var_a):
+        """Test creating a node with term and properties"""
+        term = implica.Term("a", var_a)
+        node = implica.Node(var_a, term, {"prop": "value"})
+        assert node.term is not None
+        assert node.term.name == "a"
+        assert node.properties["prop"] == "value"
+
+    def test_node_term_setter(self, var_a):
+        """Test setting a node's term after creation"""
+        node = implica.Node(var_a)
+        assert node.term is None
+
+        term = implica.Term("a", var_a)
+        node.term = term
+        assert node.term is not None
+        assert node.term.name == "a"
+
+    def test_node_term_clear(self, var_a):
+        """Test clearing a node's term"""
+        term = implica.Term("a", var_a)
+        node = implica.Node(var_a, term)
+        assert node.term is not None
+
+        node.term = None
+        assert node.term is None
 
 
 class TestNodeUID:
@@ -528,3 +598,67 @@ class TestGraphCreation:
         """Test that graph has a query method"""
         assert hasattr(graph, "query")
         assert callable(graph.query)
+
+
+class TestAutomaticEdgeCreation:
+    """Test suite for automatic edge creation from Arrow-typed nodes"""
+
+    def test_arrow_node_with_term_creates_edge(self, var_a, var_b, app_ab):
+        """Test that adding an Arrow node with a term creates an edge"""
+        graph = implica.Graph()
+
+        # Initialize nodes for A and B
+        graph.query().create(node="A", type=var_a).create(node="B", type=var_b).execute()
+
+        # Create a term with that type
+        term = implica.Term("f", app_ab)
+
+        # Create a node with the Arrow type and term
+        graph.query().create(node="F", type=app_ab, term=term).execute()
+
+        # Verify the node and edge were added
+        results = graph.query().match("(A)-[E]->(B)").return_("E")[0]
+
+        assert len(results) == 1
+        assert results["E"] is not None
+        assert isinstance(results["E"], implica.Edge)
+        assert results["E"].term.name == "f"
+        assert results["E"].start.type == var_a
+        assert results["E"].end.type == var_b
+
+    def test_node_without_arrow_type_does_not_create_edge(self, var_a):
+        """Test that adding a non-Arrow node does not create an edge"""
+        graph = implica.Graph()
+
+        # Create a node with a Variable type
+        graph.query().create(node="A", type=var_a).execute()
+
+        # Verify no edges were created
+        results = graph.query().match("()-[E]->()").return_("E")
+        assert len(results) == 0
+
+
+class TestTermApplication:
+    """Test suite for automatic term application through edges"""
+
+    def test_term_application_through_edge(self, var_a, var_b, app_ab):
+        """Test that terms are applied through edges"""
+
+        graph = implica.Graph()
+
+        edge_term = implica.Term("f", app_ab)
+
+        q = graph.query().create(node="A", type=var_a, term=implica.Term("a", var_a))
+        q = q.create(node="B", type=var_b)
+        q.create(edge="E", start="A", end="B", term=edge_term).execute()
+
+        results = graph.query().match("(A)-[E]->(B)").return_("B")[0]
+
+        print(f"Results: {results}")
+
+        assert len(results) == 1
+        node_b = results["B"]
+        assert node_b is not None
+        assert isinstance(node_b, implica.Node)
+        assert node_b.term is not None
+        assert node_b.term.name == "(f a)"

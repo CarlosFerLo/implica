@@ -34,20 +34,10 @@ impl Type {
     ///
     /// A SHA256 hash representing this type uniquely
     pub fn uid(&self) -> String {
-        let mut hasher = Sha256::new();
         match self {
-            Type::Variable(v) => {
-                hasher.update(b"var:");
-                hasher.update(v.name.as_bytes());
-            }
-            Type::Arrow(a) => {
-                hasher.update(b"arr:");
-                hasher.update(a.left.uid().as_bytes());
-                hasher.update(b":");
-                hasher.update(a.right.uid().as_bytes());
-            }
+            Type::Variable(v) => v.uid(),
+            Type::Arrow(a) => a.uid(),
         }
-        format!("{:x}", hasher.finalize())
     }
 
     /// Returns a reference to the inner Variable if this is a Variable type.
@@ -424,7 +414,7 @@ impl std::hash::Hash for Arrow {
 /// # Errors
 ///
 /// `PyTypeError` if the object is neither a Variable nor an Arrow
-pub fn python_to_type(obj: &Bound<'_, PyAny>) -> PyResult<Type> {
+pub(crate) fn python_to_type(obj: &Bound<'_, PyAny>) -> PyResult<Type> {
     if let Ok(var) = obj.extract::<Variable>() {
         Ok(Type::Variable(var))
     } else if let Ok(app) = obj.extract::<Arrow>() {
@@ -450,7 +440,7 @@ pub fn python_to_type(obj: &Bound<'_, PyAny>) -> PyResult<Type> {
 /// # Errors
 ///
 /// Returns an error if the Python object creation fails
-pub fn type_to_python(py: Python, typ: &Type) -> PyResult<Py<PyAny>> {
+pub(crate) fn type_to_python(py: Python, typ: &Type) -> PyResult<Py<PyAny>> {
     match typ {
         Type::Variable(v) => Ok(Py::new(py, v.clone())?.into()),
         Type::Arrow(a) => Ok(Py::new(py, a.clone())?.into()),

@@ -5,7 +5,7 @@
 //! Arrow type matching.
 
 use crate::errors::ImplicaError;
-use crate::types::Type;
+use crate::typing::{python_to_type, type_to_python, Type};
 use pyo3::prelude::*;
 use std::collections::HashMap;
 
@@ -132,7 +132,7 @@ impl TypeSchema {
     /// ```
     pub fn matches(&self, r#type: Py<PyAny>) -> PyResult<bool> {
         Python::attach(|py| {
-            let type_obj = crate::types::python_to_type(r#type.bind(py))?;
+            let type_obj = python_to_type(r#type.bind(py))?;
             Ok(self.matches_internal(&type_obj).is_some())
         })
     }
@@ -164,11 +164,11 @@ impl TypeSchema {
     /// # captures = {"input": Variable("A"), "output": Variable("B")}
     /// ```
     pub fn capture(&self, r#type: Py<PyAny>, py: Python) -> PyResult<Py<PyAny>> {
-        let type_obj = crate::types::python_to_type(r#type.bind(py))?;
+        let type_obj = python_to_type(r#type.bind(py))?;
         if let Some(captures) = self.matches_internal(&type_obj) {
             let dict = pyo3::types::PyDict::new(py);
             for (key, val) in captures {
-                dict.set_item(key, crate::types::type_to_python(py, &val)?)?;
+                dict.set_item(key, type_to_python(py, &val)?)?;
             }
             Ok(dict.into())
         } else {

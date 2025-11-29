@@ -41,18 +41,14 @@ pub mod errors;
 pub mod graph;
 pub mod patterns;
 pub mod query;
-pub mod term;
-pub mod type_index;
-pub mod type_schema;
-pub mod types;
+pub mod typing;
 
-use graph::{Edge, Graph, KeepTermStrategy, Node};
-use patterns::{EdgePattern, NodePattern, PathPattern};
+use graph::{Edge, Graph, Node};
+use patterns::{EdgePattern, NodePattern, PathPattern, TypeSchema};
 use query::Query;
-use term::Term;
-use type_index::IndexConfig;
-use type_schema::TypeSchema;
-use types::{Arrow, Variable};
+use typing::{Arrow, Variable};
+
+use crate::typing::{Application, BasicTerm};
 
 /// A Python module implemented in Rust for type theoretical graph modeling.
 ///
@@ -78,16 +74,13 @@ fn implica(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<Arrow>()?;
 
     // Terms
-    m.add_class::<Term>()?;
+    m.add_class::<BasicTerm>()?;
+    m.add_class::<Application>()?;
 
     // Graph components
     m.add_class::<Node>()?;
     m.add_class::<Edge>()?;
     m.add_class::<Graph>()?;
-
-    // Graph configuration
-    m.add_class::<IndexConfig>()?;
-    m.add_class::<KeepTermStrategy>()?;
 
     // Query system
     m.add_class::<TypeSchema>()?;
