@@ -1,3 +1,4 @@
+mod alias;
 mod base;
 mod edge;
 mod node;

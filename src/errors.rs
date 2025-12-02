@@ -35,7 +35,7 @@
 //! ```
 
 use pyo3::{exceptions, PyErr};
-use std::fmt;
+use std::fmt::{Display, Formatter, Result};
 
 use crate::graph::{Edge, Node};
 
@@ -214,7 +214,7 @@ pub enum ImplicaError {
         reason: String,
     },
 
-    PythonConversion {
+    PythonError {
         message: String,
         context: Option<String>,
     },
@@ -233,10 +233,14 @@ pub enum ImplicaError {
         name: String,
         context: Option<String>,
     },
+    ContextConflict {
+        message: String,
+        context: Option<String>,
+    },
 }
 
-impl fmt::Display for ImplicaError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+impl Display for ImplicaError {
+    fn fmt(&self, f: &mut Formatter<'_>) -> Result {
         match self {
             ImplicaError::TypeMismatch {
                 expected,
@@ -310,8 +314,8 @@ impl fmt::Display for ImplicaError {
             ImplicaError::IndexOperation { operation, reason } => {
                 write!(f, "Index operation '{}' failed: {}", operation, reason)
             }
-            ImplicaError::PythonConversion { message, context } => {
-                write!(f, "Python conversion error: '{}'", message)?;
+            ImplicaError::PythonError { message, context } => {
+                write!(f, "Python error: '{}'", message)?;
                 if let Some(ctx) = context {
                     write!(f, "({})", ctx)?;
                 }
@@ -338,6 +342,13 @@ impl fmt::Display for ImplicaError {
                     "Node already exists in the graph: '{}'\nExisting: '{}'\nNew: '{}'",
                     message, existing, new
                 )
+            }
+            ImplicaError::ContextConflict { message, context } => {
+                write!(f, "Context Conflict: '{}'", message)?;
+                if let Some(context) = context {
+                    write!(f, " ({})", context)?;
+                }
+                Ok(())
             }
         }
     }
@@ -381,13 +392,16 @@ impl From<ImplicaError> for PyErr {
             ImplicaError::IndexOperation { .. } => {
                 exceptions::PyRuntimeError::new_err(err.to_string())
             }
-            ImplicaError::PythonConversion { .. } => {
+            ImplicaError::PythonError { .. } => {
                 exceptions::PyRuntimeError::new_err(err.to_string())
             }
             ImplicaError::NodeAlreadyExists { .. } => {
                 exceptions::PyValueError::new_err(err.to_string())
             }
             ImplicaError::EdgeAlreadyExists { .. } => {
+                exceptions::PyValueError::new_err(err.to_string())
+            }
+            ImplicaError::ContextConflict { .. } => {
                 exceptions::PyValueError::new_err(err.to_string())
             }
         }
@@ -509,6 +523,15 @@ impl ImplicaError {
         ImplicaError::IndexOperation {
             operation: operation.into(),
             reason: reason.into(),
+        }
+    }
+}
+
+impl From<PyErr> for ImplicaError {
+    fn from(value: PyErr) -> Self {
+        ImplicaError::PythonError {
+            message: value.to_string(),
+            context: None,
         }
     }
 }

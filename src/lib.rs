@@ -37,11 +37,13 @@
 
 use pyo3::prelude::*;
 
+pub mod context;
 pub mod errors;
 pub mod graph;
 pub mod patterns;
 pub mod query;
 pub mod typing;
+pub mod utils;
 
 use graph::{Edge, Graph, Node};
 use patterns::{EdgePattern, NodePattern, PathPattern, TypeSchema};

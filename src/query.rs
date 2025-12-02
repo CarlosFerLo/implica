@@ -6,14 +6,16 @@
 
 #![allow(unused_variables)]
 
+use crate::context::Context;
 use crate::errors::ImplicaError;
 use crate::graph::{Edge, Graph, Node};
-use crate::patterns::{EdgePattern, NodePattern, PathPattern};
-use crate::typing::{python_to_term, Term};
+use crate::patterns::{EdgePattern, NodePattern, PathPattern, TermSchema, TypeSchema};
+use crate::typing::{python_to_term, python_to_type, Term};
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
 use std::collections::HashMap;
 use std::iter::zip;
+use std::sync::Arc;
 use uuid::Uuid;
 
 /// Cypher-like query builder for the graph.
@@ -54,6 +56,7 @@ pub struct Query {
     pub graph: Graph,
     pub matches: Vec<HashMap<String, QueryResult>>,
     pub operations: Vec<QueryOperation>,
+    pub context: Arc<Context>,
 }
 
 /// Result type for query matching (internal).
@@ -155,6 +158,7 @@ impl Query {
             graph,
             matches: Vec::new(),
             operations: Vec::new(),
+            context: Arc::new(Context::new()),
         }
     }
 
@@ -193,7 +197,6 @@ impl Query {
     /// q.match(edge="e", start=start_node, end=end_node)
     /// ```
     #[allow(clippy::too_many_arguments)]
-    #[pyo3(signature = (pattern=None, *, node=None, edge=None, start=None, end=None, r#type=None, type_schema=None, term=None, term_type_schema=None, properties=None))]
     pub fn r#match(
         &mut self,
         pattern: Option<String>,
@@ -204,7 +207,7 @@ impl Query {
         r#type: Option<Py<PyAny>>,
         type_schema: Option<Py<PyAny>>,
         term: Option<Py<PyAny>>,
-        term_type_schema: Option<Py<PyAny>>,
+        term_schema: Option<Py<PyAny>>,
         properties: Option<Py<PyDict>>,
     ) -> PyResult<Self> {
         if let Some(p) = pattern {
@@ -213,26 +216,115 @@ impl Query {
             self.operations
                 .push(QueryOperation::Match(MatchOp::Path(path)));
         } else if node.is_some() {
-            // Match node
-            let node_pattern = NodePattern::new(node, r#type, type_schema, properties, term)?;
-            self.operations
-                .push(QueryOperation::Match(MatchOp::Node(node_pattern)));
+            Python::attach(|py| -> PyResult<()> {
+                // Convert Python types to Rust types
+                let type_obj = if let Some(t) = r#type {
+                    Some(python_to_type(t.bind(py))?)
+                } else {
+                    None
+                };
+
+                let type_schema_obj = if let Some(ts) = type_schema {
+                    let schema_str: String = ts.bind(py).extract()?;
+                    Some(crate::patterns::TypeSchema::new(schema_str)?)
+                } else {
+                    None
+                };
+
+                let term_obj = if let Some(t) = term {
+                    Some(python_to_term(t.bind(py))?)
+                } else {
+                    None
+                };
+
+                let term_schema_obj = if let Some(ts) = term_schema {
+                    let schema_str: String = ts.bind(py).extract()?;
+                    Some(crate::patterns::TermSchema::new(schema_str)?)
+                } else {
+                    None
+                };
+
+                let properties_map = if let Some(props) = properties {
+                    Some(
+                        props
+                            .bind(py)
+                            .extract::<std::collections::HashMap<String, Py<PyAny>>>()?,
+                    )
+                } else {
+                    None
+                };
+
+                // Match node
+                let node_pattern = NodePattern::new(
+                    node,
+                    type_obj,
+                    type_schema_obj,
+                    term_obj,
+                    term_schema_obj,
+                    properties_map,
+                )?;
+                self.operations
+                    .push(QueryOperation::Match(MatchOp::Node(node_pattern)));
+                Ok(())
+            })?;
         } else if edge.is_some() {
-            // Match edge
-            let edge_pattern = EdgePattern::new(
-                edge.clone(),
-                term,
-                term_type_schema,
-                properties,
-                "forward".to_string(),
-            )?;
-            let start_var = Self::extract_var_or_none(start)?;
-            let end_var = Self::extract_var_or_none(end)?;
-            self.operations.push(QueryOperation::Match(MatchOp::Edge(
-                edge_pattern,
-                start_var,
-                end_var,
-            )));
+            Python::attach(|py| -> PyResult<()> {
+                // Convert Python types to Rust types
+                let type_obj = if let Some(t) = r#type {
+                    Some(Arc::new(python_to_type(t.bind(py))?))
+                } else {
+                    None
+                };
+
+                let type_schema_obj = if let Some(ts) = type_schema {
+                    let schema_str: String = ts.bind(py).extract()?;
+                    Some(TypeSchema::new(schema_str)?)
+                } else {
+                    None
+                };
+
+                let term_obj = if let Some(t) = term {
+                    Some(Arc::new(python_to_term(t.bind(py))?))
+                } else {
+                    None
+                };
+
+                let term_schema_obj = if let Some(ts) = term_schema {
+                    let schema_str: String = ts.bind(py).extract()?;
+                    Some(TermSchema::new(schema_str)?)
+                } else {
+                    None
+                };
+
+                let properties_map = if let Some(props) = properties {
+                    Some(
+                        props
+                            .bind(py)
+                            .extract::<std::collections::HashMap<String, Py<PyAny>>>()?,
+                    )
+                } else {
+                    None
+                };
+
+                // Match edge
+                let edge_pattern = EdgePattern::new(
+                    edge.clone(),
+                    type_obj,
+                    type_schema_obj,
+                    term_obj,
+                    term_schema_obj,
+                    properties_map,
+                    "forward".to_string(),
+                )?;
+                let start_var = Self::extract_var_or_none(start)?;
+                let end_var = Self::extract_var_or_none(end)?;
+                self.operations.push(QueryOperation::Match(MatchOp::Edge(
+                    edge_pattern,
+                    start_var,
+                    end_var,
+                )));
+                Ok(())
+            })?;
         }
 
         Ok(self.clone())
@@ -330,19 +422,65 @@ impl Query {
             self.operations
                 .push(QueryOperation::Create(CreateOp::Path(path)));
         } else if node.is_some() {
-            let node_pattern = NodePattern::new(node, r#type, None, properties, term)?;
-            self.operations
-                .push(QueryOperation::Create(CreateOp::Node(node_pattern)));
+            Python::attach(|py| -> PyResult<()> {
+                // Convert Python types to Rust types
+                let type_obj = if let Some(t) = r#type {
+                    Some(python_to_type(t.bind(py))?)
+                } else {
+                    None
+                };
+
+                let term_obj = if let Some(t) = term {
+                    Some(python_to_term(t.bind(py))?)
+                } else {
+                    None
+                };
+
+                let properties_map = if let Some(props) = properties {
+                    Some(props.bind(py).extract::<HashMap<String, Py<PyAny>>>()?)
+                } else {
+                    None
+                };
+
+                let node_pattern =
+                    NodePattern::new(node, type_obj, None, term_obj, None, properties_map)?;
+                self.operations
+                    .push(QueryOperation::Create(CreateOp::Node(node_pattern)));
+                Ok(())
+            })?;
         } else if edge.is_some() {
-            let edge_pattern =
-                EdgePattern::new(edge.clone(), term, None, properties, "forward".to_string())?;
-            let start_var = Self::extract_var(start)?;
-            let end_var = Self::extract_var(end)?;
-            self.operations.push(QueryOperation::Create(CreateOp::Edge(
-                edge_pattern,
-                start_var,
-                end_var,
-            )));
+            Python::attach(|py| -> PyResult<()> {
+                // Convert Python types to Rust types
+                let term_obj = if let Some(t) = term {
+                    Some(Arc::new(python_to_term(t.bind(py))?))
+                } else {
+                    None
+                };
+
+                let properties_map = if let Some(props) = properties {
+                    Some(props.bind(py).extract::<HashMap<String, Py<PyAny>>>()?)
+                } else {
+                    None
+                };
+
+                let edge_pattern = EdgePattern::new(
+                    edge.clone(),
+                    None,
+                    None,
+                    term_obj,
+                    None,
+                    properties_map,
+                    "forward".to_string(),
+                )?;
+                let start_var = Self::extract_var(start)?;
+                let end_var = Self::extract_var(end)?;
+                self.operations.push(QueryOperation::Create(CreateOp::Edge(
+                    edge_pattern,
+                    start_var,
+                    end_var,
+                )));
+                Ok(())
+            })?;
         }
 
         Ok(self.clone())
@@ -355,14 +493,6 @@ impl Query {
                 .push(QueryOperation::Set(variable, props_cloned));
             Ok(self.clone())
         })
-    }
-
-    pub fn set_term(&mut self, py: Python, variable: String, term: Py<PyAny>) -> PyResult<Self> {
-        let term = python_to_term(term.bind(py))?;
-
-        self.operations
-            .push(QueryOperation::SetTerm(variable, term));
-        Ok(self.clone())
     }
 
     #[pyo3(signature = (*variables, detach=false))]
@@ -389,24 +519,85 @@ impl Query {
         properties: Option<Py<PyDict>>,
     ) -> PyResult<Self> {
         if node.is_some() {
-            let node_pattern = NodePattern::new(node, r#type, type_schema, properties, term)?;
-            self.operations
-                .push(QueryOperation::Merge(MergeOp::Node(node_pattern)));
+            Python::attach(|py| -> PyResult<()> {
+                // Convert Python types to Rust types
+                let type_obj = if let Some(t) = r#type {
+                    Some(python_to_type(t.bind(py))?)
+                } else {
+                    None
+                };
+
+                let type_schema_obj = if let Some(ts) = type_schema {
+                    let schema_str: String = ts.bind(py).extract()?;
+                    Some(TypeSchema::new(schema_str)?)
+                } else {
+                    None
+                };
+
+                let term_obj = if let Some(t) = term {
+                    Some(python_to_term(t.bind(py))?)
+                } else {
+                    None
+                };
+
+                let properties_map = if let Some(props) = properties {
+                    Some(props.bind(py).extract::<HashMap<String, Py<PyAny>>>()?)
+                } else {
+                    None
+                };
+
+                let node_pattern = NodePattern::new(
+                    node,
+                    type_obj,
+                    type_schema_obj,
+                    term_obj,
+                    None,
+                    properties_map,
+                )?;
+                self.operations
+                    .push(QueryOperation::Merge(MergeOp::Node(node_pattern)));
+                Ok(())
+            })?;
         } else if edge.is_some() {
-            let edge_pattern = EdgePattern::new(
-                edge.clone(),
-                term,
-                term_type_schema,
-                properties,
-                "forward".to_string(),
-            )?;
-            let start_var = Self::extract_var(start)?;
-            let end_var = Self::extract_var(end)?;
-            self.operations.push(QueryOperation::Merge(MergeOp::Edge(
-                edge_pattern,
-                start_var,
-                end_var,
-            )));
+            Python::attach(|py| -> PyResult<()> {
+                // Convert Python types to Rust types
+                let term_obj = if let Some(t) = term {
+                    Some(Arc::new(python_to_term(t.bind(py))?))
+                } else {
+                    None
+                };
+
+                let term_type_schema_obj = if let Some(ts) = term_type_schema {
+                    let schema_str: String = ts.bind(py).extract()?;
+                    Some(TermSchema::new(schema_str)?)
+                } else {
+                    None
+                };
+
+                let properties_map = if let Some(props) = properties {
+                    Some(props.bind(py).extract::<HashMap<String, Py<PyAny>>>()?)
+                } else {
+                    None
+                };
+
+                let edge_pattern = EdgePattern::new(
+                    edge.clone(),
+                    None,
+                    None,
+                    term_obj,
+                    term_type_schema_obj,
+                    properties_map,
+                    "forward".to_string(),
+                )?;
+                let start_var = Self::extract_var(start)?;
+                let end_var = Self::extract_var(end)?;
+                self.operations.push(QueryOperation::Merge(MergeOp::Edge(
+                    edge_pattern,
+                    start_var,
+                    end_var,
+                )));
+                Ok(())
+            })?;
         }
 
         Ok(self.clone())
@@ -481,7 +672,7 @@ impl Query {
         for op in self.operations.clone() {
             match op {
                 QueryOperation::Match(match_op) => {
-                    self.execute_match(py, match_op)?;
+                    self.execute_match(match_op)?;
                 }
                 QueryOperation::Create(create_op) => {
                     todo!("Implement this!");
@@ -528,13 +719,15 @@ impl Query {
         Ok(())
     }
 
-    fn execute_match(&mut self, py: Python, match_op: MatchOp) -> PyResult<()> {
+    fn execute_match(&mut self, match_op: MatchOp) -> PyResult<()> {
         match match_op {
             MatchOp::Node(node_pattern) => {
                 let mut new_matches = Vec::new();
 
-                for node in self.graph.nodes.read().unwrap().values() {
-                    if node_pattern.matches(node, py)? {
+                for node_lock in self.graph.nodes.read().unwrap().values() {
+                    let node = node_lock.read().unwrap();
+
+                    if node_pattern.matches(&node, self.context.clone())? {
                         new_matches.push(node.clone());
                     }
                 }
@@ -589,8 +782,9 @@ impl Query {
             MatchOp::Edge(edge_pattern, start_var, end_var) => {
                 let mut potential_matches = Vec::new();
 
-                for edge in self.graph.edges.read().unwrap().values() {
-                    if edge_pattern.matches(edge, py)? {
+                for edge_lock in self.graph.edges.read().unwrap().values() {
+                    let edge = edge_lock.read().unwrap();
+                    if edge_pattern.matches(&edge, self.context.clone())? {
                         potential_matches.push(edge.clone());
                     }
                 }
@@ -600,8 +794,14 @@ impl Query {
                         if self.matches.is_empty() {
                             for m in potential_matches {
                                 let mut dict = HashMap::from([
-                                    (start.clone(), QueryResult::Node((*m.start).clone())),
-                                    (end.clone(), QueryResult::Node((*m.end).clone())),
+                                    (
+                                        start.clone(),
+                                        QueryResult::Node((*m.start.read().unwrap()).clone()),
+                                    ),
+                                    (
+                                        end.clone(),
+                                        QueryResult::Node((*m.end.read().unwrap()).clone()),
+                                    ),
                                 ]);
                                 if let Some(ref var) = edge_pattern.variable {
                                     dict.insert(var.clone(), QueryResult::Edge(m));
@@ -627,10 +827,16 @@ impl Query {
                                                                     for new in
                                                                         potential_matches.iter()
                                                                     {
+                                                                        let new_start = new
+                                                                            .start
+                                                                            .read()
+                                                                            .unwrap();
+                                                                        let new_end =
+                                                                            new.end.read().unwrap();
                                                                         if (new == old_var_edge)
-                                                                            & (new.start.as_ref()
+                                                                            & (&*new_start
                                                                                 == old_start_node)
-                                                                            & (new.end.as_ref()
+                                                                            & (&*new_end
                                                                                 == old_end_node)
                                                                         {
                                                                             results.push(m.clone());
@@ -668,8 +874,10 @@ impl Query {
                                                     match old_start {
                                                         QueryResult::Node(old_start_node) => {
                                                             for new in potential_matches.iter() {
+                                                                let new_start =
+                                                                    new.start.read().unwrap();
                                                                 if (new == old_var_edge)
-                                                                    & (new.start.as_ref()
+                                                                    & (&*new_start
                                                                         == old_start_node)
                                                                 {
                                                                     results.push(m.clone());
@@ -698,8 +906,9 @@ impl Query {
                                                 QueryResult::Edge(old_var_edge) => match old_end {
                                                     QueryResult::Node(old_end_node) => {
                                                         for new in potential_matches.iter() {
+                                                            let new_end = new.end.read().unwrap();
                                                             if (new == old_var_edge)
-                                                                & (new.end.as_ref() == old_end_node)
+                                                                & (&*new_end == old_end_node)
                                                             {
                                                                 results.push(m.clone());
                                                             }
@@ -728,10 +937,12 @@ impl Query {
                                                     match old_end {
                                                         QueryResult::Node(old_end_node) => {
                                                             for new in potential_matches.iter() {
-                                                                if (new.start.as_ref()
-                                                                    == old_start_node)
-                                                                    & (new.end.as_ref()
-                                                                        == old_end_node)
+                                                                let new_start =
+                                                                    new.start.read().unwrap();
+                                                                let new_end =
+                                                                    new.end.read().unwrap();
+                                                                if (&*new_start == old_start_node)
+                                                                    & (&*new_end == old_end_node)
                                                                 {
                                                                     let mut dict = m.clone();
                                                                     dict.insert(
@@ -770,13 +981,15 @@ impl Query {
                                                             dict.insert(
                                                                 start.clone(),
                                                                 QueryResult::Node(
-                                                                    (*new.start).clone(),
+                                                                    (*new.start.read().unwrap())
+                                                                        .clone(),
                                                                 ),
                                                             );
                                                             dict.insert(
                                                                 end.clone(),
                                                                 QueryResult::Node(
-                                                                    (*new.end).clone(),
+                                                                    (*new.end.read().unwrap())
+                                                                        .clone(),
                                                                 ),
                                                             );
                                                             results.push(dict);
@@ -797,7 +1010,8 @@ impl Query {
                                             match old_start {
                                                 QueryResult::Node(old_start_node) => {
                                                     for new in potential_matches.iter() {
-                                                        if new.start.as_ref() == old_start_node {
+                                                        let new_start = new.start.read().unwrap();
+                                                        if &*new_start == old_start_node {
                                                             let mut dict = m.clone();
                                                             dict.insert(
                                                                 var.clone(),
@@ -806,7 +1020,8 @@ impl Query {
                                                             dict.insert(
                                                                 end.clone(),
                                                                 QueryResult::Node(
-                                                                    (*new.end).clone(),
+                                                                    (*new.end.read().unwrap())
+                                                                        .clone(),
                                                                 ),
                                                             );
                                                             results.push(dict);
@@ -827,7 +1042,8 @@ impl Query {
                                             match old_end {
                                                 QueryResult::Node(old_end_node) => {
                                                     for new in potential_matches.iter() {
-                                                        if new.end.as_ref() == old_end_node {
+                                                        let new_end = new.end.read().unwrap();
+                                                        if &*new_end == old_end_node {
                                                             let mut dict = m.clone();
                                                             dict.insert(
                                                                 var.clone(),
@@ -836,7 +1052,8 @@ impl Query {
                                                             dict.insert(
                                                                 start.clone(),
                                                                 QueryResult::Node(
-                                                                    (*new.start).clone(),
+                                                                    (*new.start.read().unwrap())
+                                                                        .clone(),
                                                                 ),
                                                             );
                                                             results.push(dict);
@@ -866,8 +1083,16 @@ impl Query {
                                     for m in potential_matches {
                                         let dict = HashMap::from([
                                             (var.clone(), QueryResult::Edge(m.clone())),
-                                            (start.clone(), QueryResult::Node((*m.start).clone())),
-                                            (end.clone(), QueryResult::Node((*m.end).clone())),
+                                            (
+                                                start.clone(),
+                                                QueryResult::Node(
+                                                    (*m.start.read().unwrap()).clone(),
+                                                ),
+                                            ),
+                                            (
+                                                end.clone(),
+                                                QueryResult::Node((*m.end.read().unwrap()).clone()),
+                                            ),
                                         ]);
                                         self.matches.push(dict);
                                     }
@@ -881,10 +1106,12 @@ impl Query {
                                                     match old_end {
                                                         QueryResult::Node(old_end_node) => {
                                                             for new in potential_matches.iter() {
-                                                                if (new.start.as_ref()
-                                                                    == old_start_node)
-                                                                    & (new.end.as_ref()
-                                                                        == old_end_node)
+                                                                let new_start =
+                                                                    new.start.read().unwrap();
+                                                                let new_end =
+                                                                    new.end.read().unwrap();
+                                                                if (&*new_start == old_start_node)
+                                                                    & (&*new_end == old_end_node)
                                                                 {
                                                                     results.push(m.clone());
                                                                 }
@@ -911,12 +1138,14 @@ impl Query {
                                             match old_start {
                                                 QueryResult::Node(old_start_node) => {
                                                     for new in potential_matches.iter() {
-                                                        if new.start.as_ref() == old_start_node {
+                                                        let new_start = new.start.read().unwrap();
+                                                        if &*new_start == old_start_node {
                                                             let mut dict = m.clone();
                                                             dict.insert(
                                                                 end.clone(),
                                                                 QueryResult::Node(
-                                                                    (*new.end).clone(),
+                                                                    (*new.end.read().unwrap())
+                                                                        .clone(),
                                                                 ),
                                                             );
                                                             results.push(dict);
@@ -935,11 +1164,15 @@ impl Query {
                                         (None, Some(old_end)) => match old_end {
                                             QueryResult::Node(old_end_node) => {
                                                 for new in potential_matches.iter() {
-                                                    if new.end.as_ref() == old_end_node {
+                                                    let new_end = new.end.read().unwrap();
+                                                    if &*new_end == old_end_node {
                                                         let mut dict = m.clone();
                                                         dict.insert(
                                                             start.clone(),
-                                                            QueryResult::Node((*new.start).clone()),
+                                                            QueryResult::Node(
+                                                                (*new.start.read().unwrap())
+                                                                    .clone(),
+                                                            ),
                                                         );
                                                         results.push(dict);
                                                     }
@@ -964,8 +1197,16 @@ impl Query {
                                 } else {
                                     for m in potential_matches {
                                         let dict = HashMap::from([
-                                            (start.clone(), QueryResult::Node((*m.start).clone())),
-                                            (end.clone(), QueryResult::Node((*m.end).clone())),
+                                            (
+                                                start.clone(),
+                                                QueryResult::Node(
+                                                    (*m.start.read().unwrap()).clone(),
+                                                ),
+                                            ),
+                                            (
+                                                end.clone(),
+                                                QueryResult::Node((*m.end.read().unwrap()).clone()),
+                                            ),
                                         ]);
                                         self.matches.push(dict);
                                     }
@@ -978,7 +1219,7 @@ impl Query {
                             for m in potential_matches {
                                 let mut dict = HashMap::from([(
                                     start.clone(),
-                                    QueryResult::Node((*m.start).clone()),
+                                    QueryResult::Node((*m.start.read().unwrap()).clone()),
                                 )]);
                                 if let Some(ref var) = edge_pattern.variable {
                                     dict.insert(var.clone(), QueryResult::Edge(m));
@@ -1000,8 +1241,10 @@ impl Query {
                                                     match old_start {
                                                         QueryResult::Node(old_start_node) => {
                                                             for new in potential_matches.iter() {
+                                                                let new_start =
+                                                                    new.start.read().unwrap();
                                                                 if (new == old_var_edge)
-                                                                    & (new.start.as_ref()
+                                                                    & (&*new_start
                                                                         == old_start_node)
                                                                 {
                                                                     results.push(m.clone());
@@ -1034,7 +1277,8 @@ impl Query {
                                                             dict.insert(
                                                                 start.clone(),
                                                                 QueryResult::Node(
-                                                                    (*new.start).clone(),
+                                                                    (*new.start.read().unwrap())
+                                                                        .clone(),
                                                                 ),
                                                             );
                                                             results.push(dict);
@@ -1054,7 +1298,8 @@ impl Query {
                                             match old_start {
                                                 QueryResult::Node(old_start_node) => {
                                                     for new in potential_matches.iter() {
-                                                        if new.start.as_ref() == old_start_node {
+                                                        let new_start = new.start.read().unwrap();
+                                                        if &*new_start == old_start_node {
                                                             let mut dict = m.clone();
                                                             dict.insert(
                                                                 var.clone(),
@@ -1084,7 +1329,10 @@ impl Query {
                                 } else {
                                     for m in potential_matches {
                                         let dict = HashMap::from([
-                                            (start.clone(), QueryResult::Node((*m.end).clone())),
+                                            (
+                                                start.clone(),
+                                                QueryResult::Node((*m.end.read().unwrap()).clone()),
+                                            ),
                                             (var.clone(), QueryResult::Edge(m.clone())),
                                         ]);
                                         self.matches.push(dict);
@@ -1096,7 +1344,8 @@ impl Query {
                                         match old_start {
                                             QueryResult::Node(old_start_node) => {
                                                 for new in potential_matches.iter() {
-                                                    if old_start_node == new.start.as_ref() {
+                                                    let new_start = new.start.read().unwrap();
+                                                    if old_start_node == &*new_start {
                                                         results.push(m.clone());
                                                     }
                                                 }
@@ -1121,7 +1370,7 @@ impl Query {
                                     for m in potential_matches {
                                         let dict = HashMap::from([(
                                             start.clone(),
-                                            QueryResult::Node((*m.start).clone()),
+                                            QueryResult::Node((*m.start.read().unwrap()).clone()),
                                         )]);
                                         self.matches.push(dict);
                                     }
@@ -1134,7 +1383,7 @@ impl Query {
                             for m in potential_matches {
                                 let mut dict = HashMap::from([(
                                     end.clone(),
-                                    QueryResult::Node((*m.end).clone()),
+                                    QueryResult::Node((*m.end.read().unwrap()).clone()),
                                 )]);
                                 if let Some(ref var) = edge_pattern.variable {
                                     dict.insert(var.clone(), QueryResult::Edge(m));
@@ -1155,8 +1404,9 @@ impl Query {
                                                 QueryResult::Edge(old_var_edge) => match old_end {
                                                     QueryResult::Node(old_end_node) => {
                                                         for new in potential_matches.iter() {
+                                                            let new_end = new.end.read().unwrap();
                                                             if (new == old_var_edge)
-                                                                & (new.end.as_ref() == old_end_node)
+                                                                & (&*new_end == old_end_node)
                                                             {
                                                                 results.push(m.clone());
                                                             }
@@ -1188,7 +1438,8 @@ impl Query {
                                                             dict.insert(
                                                                 end.clone(),
                                                                 QueryResult::Node(
-                                                                    (*new.end).clone(),
+                                                                    (*new.end.read().unwrap())
+                                                                        .clone(),
                                                                 ),
                                                             );
                                                             results.push(dict);
@@ -1209,7 +1460,8 @@ impl Query {
                                             match old_end {
                                                 QueryResult::Node(old_end_node) => {
                                                     for new in potential_matches.iter() {
-                                                        if new.end.as_ref() == old_end_node {
+                                                        let new_end = new.end.read().unwrap();
+                                                        if &*new_end == old_end_node {
                                                             let mut dict = m.clone();
                                                             dict.insert(
                                                                 var.clone(),
@@ -1241,7 +1493,10 @@ impl Query {
                                 } else {
                                     for m in potential_matches {
                                         let dict = HashMap::from([
-                                            (end.clone(), QueryResult::Node((*m.end).clone())),
+                                            (
+                                                end.clone(),
+                                                QueryResult::Node((*m.end.read().unwrap()).clone()),
+                                            ),
                                             (var.clone(), QueryResult::Edge(m.clone())),
                                         ]);
                                         self.matches.push(dict);
@@ -1253,7 +1508,8 @@ impl Query {
                                         match old_end {
                                             QueryResult::Node(old_end_node) => {
                                                 for new in potential_matches.iter() {
-                                                    if old_end_node == new.end.as_ref() {
+                                                    let new_end = new.end.read().unwrap();
+                                                    if old_end_node == &*new_end {
                                                         results.push(m.clone());
                                                     }
                                                 }
@@ -1278,7 +1534,7 @@ impl Query {
                                     for m in potential_matches {
                                         let dict = HashMap::from([(
                                             end.clone(),
-                                            QueryResult::Node((*m.end).clone()),
+                                            QueryResult::Node((*m.end.read().unwrap()).clone()),
                                         )]);
                                         self.matches.push(dict);
                                     }
@@ -1356,14 +1612,15 @@ impl Query {
                 }
 
                 let mut prev = path.nodes.remove(0);
-                self.execute_match(py, MatchOp::Node(prev.clone()))?;
+                self.execute_match(MatchOp::Node(prev.clone()))?;
 
                 for (ep, np) in zip(path.edges, path.nodes) {
-                    self.execute_match(py, MatchOp::Node(np.clone()))?;
-                    self.execute_match(
-                        py,
-                        MatchOp::Edge(ep, prev.variable.clone(), np.variable.clone()),
-                    )?;
+                    self.execute_match(MatchOp::Node(np.clone()))?;
+                    self.execute_match(MatchOp::Edge(
+                        ep,
+                        prev.variable.clone(),
+                        np.variable.clone(),
+                    ))?;
                     prev = np;
                 }
 

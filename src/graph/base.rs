@@ -6,12 +6,14 @@
 
 use crate::errors::ImplicaError;
 
-use crate::typing::Type;
+use crate::patterns::{EdgePattern, TypeSchema};
+use crate::typing::{Term, Type};
 use pyo3::prelude::*;
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 
-use crate::{Edge, Node};
+use crate::context::Context;
+use crate::graph::{alias::SharedPropertyMap, Edge, Node};
 
 /// Represents a type theoretical theory model as a graph.
 ///
@@ -57,8 +59,8 @@ use crate::{Edge, Node};
 #[pyclass]
 #[derive(Debug)]
 pub struct Graph {
-    pub nodes: Arc<RwLock<HashMap<String, Node>>>, // uid -> Node
-    pub edges: Arc<RwLock<HashMap<String, Edge>>>, // uid -> Edge
+    pub nodes: Arc<RwLock<HashMap<String, Arc<RwLock<Node>>>>>, // uid -> Node
+    pub edges: Arc<RwLock<HashMap<String, Arc<RwLock<Edge>>>>>, // uid -> Edge
 }
 
 impl Clone for Graph {
@@ -163,8 +165,16 @@ impl Graph {
     /// # Returns
     ///
     /// A vector of nodes matching the type
-    pub fn find_nodes_by_type(&self, typ: &Type) -> PyResult<Node> {
-        Ok(self.nodes.read().unwrap()[&typ.uid()].clone())
+    pub fn find_node_by_type(&self, typ: &Type) -> PyResult<Arc<RwLock<Node>>> {
+        let nodes = self.nodes.read().unwrap();
+        match nodes.get(&typ.uid()) {
+            Some(node) => Ok(node.clone()),
+            None => Err(ImplicaError::NodeNotFound {
+                uid: typ.uid(),
+                context: Some("find_node_by_type".to_string()),
+            }
+            .into()),
+        }
     }
 
     /// Finds nodes that match a wildcard (any type).
@@ -176,7 +186,7 @@ impl Graph {
     /// # Returns
     ///
     /// A vector of all nodes
-    pub fn find_all_nodes(&self) -> PyResult<Vec<Node>> {
+    pub fn find_all_nodes(&self) -> PyResult<Vec<Arc<RwLock<Node>>>> {
         let mut result = Vec::new();
 
         for n in self.nodes.read().unwrap().values() {
@@ -198,11 +208,12 @@ impl Graph {
     /// # Returns
     ///
     /// A vector of edges whose term has the matching type
-    pub fn find_edges_by_term_type(&self, typ: &Type) -> PyResult<Vec<Edge>> {
+    pub fn find_edges_by_term_type(&self, typ: &Type) -> PyResult<Vec<Arc<RwLock<Edge>>>> {
         let mut result = Vec::new();
 
         for e in self.edges.read().unwrap().values() {
-            let term = e.term.read().unwrap();
+            let edge = e.read().unwrap();
+            let term = edge.term.clone();
             if term.r#type().as_ref() == typ {
                 result.push(e.clone());
             }
@@ -220,7 +231,7 @@ impl Graph {
     /// # Returns
     ///
     /// A vector of all edges
-    pub fn find_all_edges(&self) -> PyResult<Vec<Edge>> {
+    pub fn find_all_edges(&self) -> PyResult<Vec<Arc<RwLock<Edge>>>> {
         let mut result = Vec::new();
 
         for e in self.edges.read().unwrap().values() {
@@ -230,43 +241,44 @@ impl Graph {
         Ok(result)
     }
 
-    /// Adds a node to the graph and updates the type index.
-    ///
-    /// This method also implements automatic term synchronization and edge creation:
-    /// - If the node has a term and its type is Arrow (A -> B), an edge is automatically created
-    /// - If a node of the same type already exists with a term, the terms are resolved using KeepTermStrategy
-    /// - If an edge of the same type exists, terms are synchronized
-    ///
-    /// # Arguments
-    ///
-    /// * `node` - The node to add
-    /// * `py` - Python context
-    pub fn add_node(&mut self, node: &Node) -> PyResult<()> {
+    pub fn add_node(&self, node: &Node) -> PyResult<()> {
         let uid = node.uid();
 
         if let Some(existing) = self.nodes.read().unwrap().get(&uid) {
             return Err(ImplicaError::NodeAlreadyExists {
                 message: "Tried to add a node with a type that already exists.".to_string(),
-                existing: existing.clone(),
+                existing: existing.read().unwrap().clone(),
                 new: node.clone(),
             }
             .into());
         }
 
-        self.nodes.write().unwrap().insert(uid, node.clone());
+        self.nodes
+            .write()
+            .unwrap()
+            .insert(uid, Arc::new(RwLock::new(node.clone())));
 
         Ok(())
     }
 
-    /// Removes a node from the graph and updates the type index.
-    ///
-    /// # Arguments
-    ///
-    /// * `node_uid` - The UID of the node to remove
-    /// * `py` - Python context
-    pub fn remove_node(&mut self, node_uid: &str) -> PyResult<()> {
+    pub fn remove_node(&self, node_uid: &str) -> PyResult<()> {
         match self.nodes.write().unwrap().remove(node_uid) {
-            Some(_) => Ok(()),
+            Some(node_lock) => {
+                let node = node_lock.read().unwrap();
+                let pattern = EdgePattern::new(
+                    None,
+                    None,
+                    Some(TypeSchema::new(format!("*->{}", node.r#type))?),
+                    None,
+                    None,
+                    None,
+                    "forward".to_string(),
+                )?;
+
+                self.remove_edges_matching(pattern)?;
+
+                Ok(())
+            }
             None => Err(ImplicaError::NodeNotFound {
                 uid: node_uid.to_string(),
                 context: Some("node deletion".to_string()),
@@ -275,30 +287,29 @@ impl Graph {
         }
     }
 
-    /// Adds an edge to the graph and updates the type index.
-    ///
-    /// This method also implements automatic term application:
-    /// - If the start node has a term 'a' and the edge has term 'f', the end node gets term 'f(a)'
-    /// - Terms are resolved using KeepTermStrategy if conflicts arise
-    /// - Terms are synchronized with nodes of matching Arrow types
-    ///
-    /// # Arguments
-    ///
-    /// * `edge` - The edge to add
-    /// * `py` - Python context
-    pub fn add_edge(&mut self, edge: &Edge) -> PyResult<()> {
+    pub fn add_edge(
+        &self,
+        term: Arc<Term>,
+        start: Arc<RwLock<Node>>,
+        end: Arc<RwLock<Node>>,
+        properties: Option<SharedPropertyMap>,
+    ) -> PyResult<()> {
+        let edge = Edge::new(term, start, end, properties);
         let uid = edge.uid();
 
         if let Some(existing) = self.edges.read().unwrap().get(&uid) {
             return Err(ImplicaError::EdgeAlreadyExists {
                 message: "Tried to add a node that already exists.".to_string(),
-                existing: existing.clone(),
+                existing: existing.read().unwrap().clone(),
                 new: edge.clone(),
             }
             .into());
         }
 
-        self.edges.write().unwrap().insert(uid, edge.clone());
+        self.edges
+            .write()
+            .unwrap()
+            .insert(uid, Arc::new(RwLock::new(edge)));
 
         Ok(())
     }
@@ -309,7 +320,7 @@ impl Graph {
     ///
     /// * `edge_uid` - The UID of the edge to remove
     /// * `py` - Python context
-    pub fn remove_edge(&mut self, edge_uid: &str) -> PyResult<()> {
+    pub fn remove_edge(&self, edge_uid: &str) -> PyResult<()> {
         match self.edges.write().unwrap().remove(edge_uid) {
             Some(_) => Ok(()),
             None => Err(ImplicaError::EdgeNotFound {
@@ -318,6 +329,24 @@ impl Graph {
             }
             .into()),
         }
+    }
+
+    pub fn remove_edges_matching(&self, pattern: EdgePattern) -> PyResult<()> {
+        let mut remove_uids = Vec::new();
+
+        for edge_lock in self.edges.read().unwrap().values() {
+            let edge = edge_lock.read().unwrap();
+            let context = Arc::new(Context::new());
+            if pattern.matches(&edge, context)? {
+                remove_uids.push(edge.uid());
+            }
+        }
+
+        for uid in remove_uids {
+            self.remove_edge(&uid)?;
+        }
+
+        Ok(())
     }
 }
 

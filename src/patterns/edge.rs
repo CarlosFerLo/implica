@@ -1,11 +1,14 @@
 use pyo3::prelude::*;
-use pyo3::types::PyDict;
 
 use std::collections::HashMap;
+use std::sync::Arc;
 
+use crate::context::Context;
 use crate::errors::ImplicaError;
+use crate::graph::Edge;
+use crate::patterns::term_schema::TermSchema;
 use crate::patterns::type_schema::TypeSchema;
-use crate::typing::{python_to_term, Term};
+use crate::typing::{Term, Type};
 
 /// Compiled direction for efficient matching.
 #[derive(Clone, Debug, PartialEq)]
@@ -39,13 +42,20 @@ impl CompiledDirection {
 
 /// Internal compiled representation for efficient edge matching.
 #[derive(Clone, Debug)]
-enum CompiledEdgeMatcher {
+enum CompiledTypeEdgeMatcher {
     /// Match any term (no type constraint)
     Any,
     /// Match edges with a specific term
-    ExactTerm(Term),
+    ExactType(Arc<Type>),
     /// Match edges with a term matching the schema
     SchemaTerm(TypeSchema),
+}
+
+#[derive(Clone, Debug)]
+enum CompiledTermEdgeMatcher {
+    Any,
+    ExactTerm(Arc<Term>),
+    SchemaTerm(TermSchema),
 }
 
 /// Represents an edge pattern in a Cypher-like query.
@@ -85,13 +95,16 @@ pub struct EdgePattern {
     #[pyo3(get)]
     pub variable: Option<String>,
     /// Compiled matcher for efficient term checking
-    compiled_matcher: CompiledEdgeMatcher,
-    /// Compiled direction for efficient checking
+    compiled_term_matcher: CompiledTermEdgeMatcher,
+    compiled_type_matcher: CompiledTypeEdgeMatcher,
     compiled_direction: CompiledDirection,
     pub properties: HashMap<String, Py<PyAny>>,
+
     // Keep these for backward compatibility and introspection
-    pub term: Option<Term>,
-    pub term_type_schema: Option<TypeSchema>,
+    pub term: Option<Arc<Term>>,
+    pub type_schema: Option<TypeSchema>,
+    pub r#type: Option<Arc<Type>>,
+    pub term_schema: Option<TermSchema>,
 }
 
 impl Clone for EdgePattern {
@@ -103,11 +116,14 @@ impl Clone for EdgePattern {
             }
             EdgePattern {
                 variable: self.variable.clone(),
-                compiled_matcher: self.compiled_matcher.clone(),
+                compiled_type_matcher: self.compiled_type_matcher.clone(),
+                compiled_term_matcher: self.compiled_term_matcher.clone(),
                 compiled_direction: self.compiled_direction.clone(),
                 properties: props,
                 term: self.term.clone(),
-                term_type_schema: self.term_type_schema.clone(),
+                r#type: self.r#type.clone(),
+                type_schema: self.type_schema.clone(),
+                term_schema: self.term_schema.clone(),
             }
         })
     }
@@ -115,130 +131,6 @@ impl Clone for EdgePattern {
 
 #[pymethods]
 impl EdgePattern {
-    /// Creates a new edge pattern.
-    ///
-    /// The pattern is compiled and validated at creation time for optimal performance.
-    /// Invalid term schemas, directions, or conflicting constraints will cause immediate errors.
-    ///
-    /// # Arguments
-    ///
-    /// * `variable` - Optional variable name to bind matched edges
-    /// * `term` - Optional specific term to match
-    /// * `term_type_schema` - Optional type schema for the term (string or TypeSchema)
-    /// * `properties` - Optional dictionary of required properties
-    /// * `direction` - Direction of the edge: "forward", "backward", or "any" (default: "forward")
-    ///
-    /// # Returns
-    ///
-    /// A new `EdgePattern` instance, compiled and ready for matching
-    ///
-    /// # Errors
-    ///
-    /// * `ValueError` if both `term` and `term_type_schema` are provided (conflicting constraints)
-    /// * `ValueError` if `term_type_schema` string is invalid
-    /// * `ValueError` if `direction` is not one of "forward", "backward", or "any"
-    /// * `ValueError` if variable name is invalid (empty or whitespace-only)
-    ///
-    /// # Examples
-    ///
-    /// ```python
-    /// # Forward edge
-    /// pattern = implica.EdgePattern(variable="e", direction="forward")
-    ///
-    /// # Backward edge with type schema
-    /// pattern = implica.EdgePattern(
-    ///     variable="back",
-    ///     term_type_schema="A -> B",
-    ///     direction="backward"
-    /// )
-    /// ```
-    #[new]
-    #[pyo3(signature = (variable=None, term=None, term_type_schema=None, properties=None, direction="forward".to_string()))]
-    pub fn new(
-        variable: Option<String>,
-        term: Option<Py<PyAny>>,
-        term_type_schema: Option<Py<PyAny>>,
-        properties: Option<Py<PyDict>>,
-        direction: String,
-    ) -> PyResult<Self> {
-        Python::attach(|py| {
-            // Validate variable name if provided
-            if let Some(ref var) = variable {
-                if var.trim().is_empty() {
-                    return Err(ImplicaError::invalid_identifier(
-                        var.clone(),
-                        "variable name cannot be empty or whitespace-only",
-                    )
-                    .into());
-                }
-            }
-
-            // Validate and compile direction
-            let compiled_direction = CompiledDirection::from_string(&direction)?;
-
-            // Parse term if provided
-            let term_obj = if let Some(t) = term {
-                Some(python_to_term(t.bind(py))?)
-            } else {
-                None
-            };
-
-            // Parse schema if provided
-            let schema = if let Some(s) = term_type_schema {
-                if let Ok(schema_str) = s.bind(py).extract::<String>() {
-                    Some(TypeSchema::new(schema_str)?) // Fail fast on invalid schema
-                } else {
-                    Some(s.bind(py).extract::<TypeSchema>()?)
-                }
-            } else {
-                None
-            };
-
-            // Validate: cannot have both term and term_type_schema
-            if term_obj.is_some() && schema.is_some() {
-                return Err(ImplicaError::schema_validation(
-                    "EdgePattern",
-                    "Cannot specify both 'term' and 'term_type_schema' - they are mutually exclusive",
-                )
-                .into());
-            }
-
-            // Build compiled matcher for efficient matching
-            let compiled_matcher = if let Some(ref t) = term_obj {
-                CompiledEdgeMatcher::ExactTerm(t.clone())
-            } else if let Some(ref s) = schema {
-                CompiledEdgeMatcher::SchemaTerm(s.clone())
-            } else {
-                CompiledEdgeMatcher::Any
-            };
-
-            // Parse properties
-            let mut props = HashMap::new();
-            if let Some(p) = properties {
-                for (k, v) in p.bind(py).iter() {
-                    let key: String = k.extract()?;
-                    if key.trim().is_empty() {
-                        return Err(ImplicaError::invalid_identifier(
-                            key,
-                            "property key cannot be empty or whitespace-only",
-                        )
-                        .into());
-                    }
-                    props.insert(key, v.into());
-                }
-            }
-
-            Ok(EdgePattern {
-                variable,
-                compiled_matcher,
-                compiled_direction,
-                properties: props,
-                term: term_obj,
-                term_type_schema: schema,
-            })
-        })
-    }
-
     /// Gets the direction of this edge pattern.
     ///
     /// # Returns
@@ -252,8 +144,8 @@ impl EdgePattern {
     fn __repr__(&self) -> String {
         let term_info = if self.term.is_some() {
             ", term=<specified>"
-        } else if self.term_type_schema.is_some() {
-            ", term_type_schema=<specified>"
+        } else if self.type_schema.is_some() {
+            ", type_schema=<specified>"
         } else {
             ""
         };
@@ -267,58 +159,73 @@ impl EdgePattern {
 }
 
 impl EdgePattern {
-    /// Checks if an edge matches this pattern.
-    ///
-    /// This uses the pre-compiled matcher for optimal performance.
-    /// This is an internal method used by the query system.
-    ///
-    /// Note: Direction matching is context-dependent and should be checked
-    /// by the caller based on the traversal direction.
-    ///
-    /// # Arguments
-    ///
-    /// * `edge` - The edge to check
-    /// * `py` - Python context
-    ///
-    /// # Returns
-    ///
-    /// `Ok(true)` if the edge matches, `Ok(false)` otherwise
-    pub fn matches(&self, edge: &crate::graph::Edge, py: Python) -> PyResult<bool> {
-        // Check term using compiled matcher (most efficient path)
-        match &self.compiled_matcher {
-            CompiledEdgeMatcher::Any => {
-                // No term constraint, continue to property check
-            }
-            CompiledEdgeMatcher::ExactTerm(term_obj) => {
-                let edge_term = edge.term.read().unwrap();
-
-                if &*edge_term != term_obj {
-                    return Ok(false);
-                }
-            }
-            CompiledEdgeMatcher::SchemaTerm(schema) => {
-                let edge_term = edge.term.read().unwrap();
-
-                if !schema.matches_type(&edge_term.r#type()) {
-                    return Ok(false);
-                }
+    pub fn new(
+        variable: Option<String>,
+        r#type: Option<Arc<Type>>,
+        type_schema: Option<TypeSchema>,
+        term: Option<Arc<Term>>,
+        term_schema: Option<TermSchema>,
+        properties: Option<HashMap<String, Py<PyAny>>>,
+        direction: String,
+    ) -> PyResult<Self> {
+        // Validate variable name if provided
+        if let Some(ref var) = variable {
+            if var.trim().is_empty() {
+                return Err(ImplicaError::invalid_identifier(
+                    var.clone(),
+                    "variable name cannot be empty or whitespace-only",
+                )
+                .into());
             }
         }
 
-        // Check properties if specified
-        if !self.properties.is_empty() {
-            for (key, value) in &self.properties {
-                if let Some(edge_value) = edge.properties.read().unwrap().get(key) {
-                    if !edge_value.bind(py).eq(value.bind(py))? {
-                        return Ok(false);
-                    }
-                } else {
-                    return Ok(false);
-                }
-            }
+        // Validate and compile direction
+        let compiled_direction = CompiledDirection::from_string(&direction)?;
+
+        // Validate: cannot have both term and term_type_schema
+        if term.is_some() && term_schema.is_some() {
+            return Err(ImplicaError::schema_validation(
+                "EdgePattern",
+                "Cannot specify both 'term' and 'term_schema' - they are mutually exclusive",
+            )
+            .into());
         }
 
-        Ok(true)
+        if r#type.is_some() && type_schema.is_some() {
+            return Err(ImplicaError::schema_validation(
+                "EdgePattern",
+                "Cannot specify both 'type' and 'type_schema' - they are mutually exclusive",
+            )
+            .into());
+        }
+
+        let compiled_term_matcher = if let Some(t) = term.clone() {
+            CompiledTermEdgeMatcher::ExactTerm(t.clone())
+        } else if let Some(t) = term_schema.clone() {
+            CompiledTermEdgeMatcher::SchemaTerm(t)
+        } else {
+            CompiledTermEdgeMatcher::Any
+        };
+
+        let compiled_type_matcher = if let Some(t) = r#type.clone() {
+            CompiledTypeEdgeMatcher::ExactType(t.clone())
+        } else if let Some(t) = type_schema.clone() {
+            CompiledTypeEdgeMatcher::SchemaTerm(t.clone())
+        } else {
+            CompiledTypeEdgeMatcher::Any
+        };
+
+        Ok(EdgePattern {
+            variable,
+            compiled_type_matcher,
+            compiled_term_matcher,
+            compiled_direction,
+            properties: properties.unwrap_or_default(),
+            term: term.clone(),
+            r#type: r#type.clone(),
+            type_schema,
+            term_schema,
+        })
     }
 
     /// Checks if the direction matches for traversal.
@@ -339,5 +246,63 @@ impl EdgePattern {
             CompiledDirection::Forward => forward,
             CompiledDirection::Backward => !forward,
         }
+    }
+}
+
+impl EdgePattern {
+    pub fn matches(&self, edge: &Edge, context: Arc<Context>) -> PyResult<bool> {
+        // Check term using compiled matcher (most efficient path)
+        match &self.compiled_type_matcher {
+            CompiledTypeEdgeMatcher::Any => {
+                // No term constraint, continue to property check
+            }
+            CompiledTypeEdgeMatcher::ExactType(type_obj) => {
+                let edge_term = edge.term.clone();
+
+                if &*edge_term.r#type() != type_obj.as_ref() {
+                    return Ok(false);
+                }
+            }
+            CompiledTypeEdgeMatcher::SchemaTerm(type_schema) => {
+                let edge_term = edge.term.clone();
+
+                if !type_schema.matches(&edge_term.r#type(), context.clone())? {
+                    return Ok(false);
+                }
+            }
+        }
+
+        match &self.compiled_term_matcher {
+            CompiledTermEdgeMatcher::Any => {}
+            CompiledTermEdgeMatcher::ExactTerm(term_obj) => {
+                let edge_term = edge.term.clone();
+
+                if &*edge_term != term_obj.as_ref() {
+                    return Ok(false);
+                }
+            }
+            CompiledTermEdgeMatcher::SchemaTerm(term_schema) => {
+                let edge_term = edge.term.clone();
+
+                if !term_schema.matches(&edge_term, context.clone())? {
+                    return Ok(false);
+                }
+            }
+        }
+
+        // Check properties if specified
+        if !self.properties.is_empty() {
+            for (key, value) in &self.properties {
+                if let Some(edge_value) = edge.properties.read().unwrap().get(key) {
+                    if Python::attach(|py| !edge_value.bind(py).eq(value.bind(py)).unwrap()) {
+                        return Ok(false);
+                    };
+                } else {
+                    return Ok(false);
+                }
+            }
+        }
+
+        Ok(true)
     }
 }

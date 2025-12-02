@@ -6,6 +6,7 @@ use std::collections::HashMap;
 use std::fmt::Display;
 use std::sync::{Arc, RwLock};
 
+use crate::graph::alias::{PropertyMap, SharedPropertyMap};
 use crate::typing::{python_to_term, python_to_type, term_to_python, type_to_python, Term, Type};
 
 /// Represents a node in the graph (a type in the model).
@@ -36,7 +37,7 @@ use crate::typing::{python_to_term, python_to_type, term_to_python, type_to_pyth
 pub struct Node {
     pub r#type: Arc<Type>,
     pub term: Option<Arc<RwLock<Term>>>,
-    pub properties: Arc<RwLock<HashMap<String, Py<PyAny>>>>,
+    pub properties: SharedPropertyMap,
     /// Cached UID for performance - computed once and reused
     pub(in crate::graph) uid_cache: Arc<RwLock<Option<String>>>,
 }
@@ -178,7 +179,7 @@ impl Node {
     }
 
     #[setter]
-    pub fn set_properties(&self, props: HashMap<String, Py<PyAny>>) {
+    pub fn set_properties(&self, props: PropertyMap) {
         let mut guard = self.properties.write().unwrap();
         guard.clear();
         guard.extend(props);

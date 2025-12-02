@@ -11,6 +11,7 @@ use crate::{
         type_to_python,
         types::{python_to_type, Type},
     },
+    utils::validate_variable_name,
 };
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -117,6 +118,10 @@ impl std::hash::Hash for BasicTerm {
 impl BasicTerm {
     #[new]
     pub fn new(py: Python, name: String, r#type: Py<PyAny>) -> PyResult<Self> {
+        if let Err(e) = validate_variable_name(&name) {
+            return Err(e.into());
+        }
+
         let type_arc = Arc::new(python_to_type(r#type.bind(py))?);
         Ok(BasicTerm {
             name,
@@ -322,7 +327,7 @@ pub(crate) fn python_to_term(obj: &Bound<'_, PyAny>) -> PyResult<Term> {
     } else if let Ok(app) = obj.extract::<Application>() {
         Ok(Term::Application(app))
     } else {
-        Err(ImplicaError::PythonConversion {
+        Err(ImplicaError::PythonError {
             message: format!("Error converting python object '{}' to term.", obj),
             context: Some("python_to_term".to_string()),
         }

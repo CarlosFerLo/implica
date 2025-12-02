@@ -1,20 +1,14 @@
-//! Type pattern matching and schema validation.
-//!
-//! This module provides the `TypeSchema` structure for defining regex-like patterns
-//! that match against types. Schemas support wildcards, variable capture, and
-//! Arrow type matching.
-
+use crate::context::{Context, ContextElement};
 use crate::errors::ImplicaError;
-use crate::typing::{python_to_type, type_to_python, Type};
+use crate::typing::Type;
+use crate::utils::validate_variable_name;
 use pyo3::prelude::*;
-use std::collections::HashMap;
 
-/// Internal representation of a parsed type pattern.
-///
-/// This enum represents the compiled/parsed form of a pattern string,
-/// allowing for efficient matching without re-parsing.
+use std::fmt::Display;
+use std::sync::Arc;
+
 #[derive(Clone, Debug, PartialEq)]
-enum Pattern {
+enum TypePattern {
     /// Matches any type (*)
     Wildcard,
 
@@ -23,12 +17,15 @@ enum Pattern {
 
     /// Matches an Arrow type with sub-patterns for left and right
     Arrow {
-        left: Box<Pattern>,
-        right: Box<Pattern>,
+        left: Box<TypePattern>,
+        right: Box<TypePattern>,
     },
 
     /// Captures a matched type with a given name
-    Capture { name: String, pattern: Box<Pattern> },
+    Capture {
+        name: String,
+        pattern: Box<TypePattern>,
+    },
 }
 
 /// Represents a regex-like pattern for matching types.
@@ -79,117 +76,41 @@ pub struct TypeSchema {
     pub pattern: String,
 
     /// Compiled pattern for efficient matching
-    compiled: Pattern,
+    compiled: TypePattern,
+}
+
+impl Display for TypeSchema {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "TypeSchema('{}')", self.pattern)
+    }
 }
 
 #[pymethods]
 impl TypeSchema {
-    /// Creates a new type schema from a pattern string.
-    ///
-    /// # Arguments
-    ///
-    /// * `pattern` - The pattern string (e.g., "*", "Person", "A -> B")
-    ///
-    /// # Returns
-    ///
-    /// A new `TypeSchema` instance
-    ///
-    /// # Examples
-    ///
-    /// ```python
-    /// # Match any type
-    /// any_schema = implica.TypeSchema("*")
-    ///
-    /// # Match specific variable
-    /// person_schema = implica.TypeSchema("Person")
-    ///
-    /// # Match function type
-    /// func_schema = implica.TypeSchema("* -> *")
-    /// ```
-    #[new]
-    pub fn new(pattern: String) -> PyResult<Self> {
+    fn __str__(&self) -> String {
+        self.to_string()
+    }
+
+    fn __repr__(&self) -> String {
+        self.to_string()
+    }
+}
+
+impl TypeSchema {
+    pub fn new(pattern: String) -> Result<Self, ImplicaError> {
         let compiled = Self::parse_pattern(&pattern)?;
 
         Ok(TypeSchema { pattern, compiled })
     }
 
-    /// Checks if a type matches this schema.
-    ///
-    /// # Arguments
-    ///
-    /// * `type` - The type to check (Variable or Arrow)
-    ///
-    /// # Returns
-    ///
-    /// `True` if the type matches the schema pattern, `False` otherwise
-    ///
-    /// # Examples
-    ///
-    /// ```python
-    /// schema = implica.TypeSchema("Person")
-    /// person_type = implica.Variable("Person")
-    /// assert schema.matches(person_type) == True
-    /// ```
-    pub fn matches(&self, r#type: Py<PyAny>) -> PyResult<bool> {
-        Python::attach(|py| {
-            let type_obj = python_to_type(r#type.bind(py))?;
-            Ok(self.matches_internal(&type_obj).is_some())
-        })
+    pub fn matches(&self, r#type: &Type, context: Arc<Context>) -> Result<bool, ImplicaError> {
+        Self::match_pattern(&self.compiled, r#type, context)
     }
 
-    /// Captures variables from a type that matches this schema.
-    ///
-    /// If the type matches and the schema contains capture groups like `$(name:pattern)$`,
-    /// this returns a dictionary mapping capture names to the matched types.
-    ///
-    /// # Arguments
-    ///
-    /// * `type` - The type to match and capture from
-    /// * `py` - Python context
-    ///
-    /// # Returns
-    ///
-    /// A Python dictionary with capture names as keys and matched types as values.
-    /// Returns an empty dictionary if the type doesn't match or there are no captures.
-    ///
-    /// # Examples
-    ///
-    /// ```python
-    /// schema = implica.TypeSchema("(input:*) -> (output:*)")
-    /// func_type = implica.Arrow(
-    ///     implica.Variable("A"),
-    ///     implica.Variable("B")
-    /// )
-    /// captures = schema.capture(func_type)
-    /// # captures = {"input": Variable("A"), "output": Variable("B")}
-    /// ```
-    pub fn capture(&self, r#type: Py<PyAny>, py: Python) -> PyResult<Py<PyAny>> {
-        let type_obj = python_to_type(r#type.bind(py))?;
-        if let Some(captures) = self.matches_internal(&type_obj) {
-            let dict = pyo3::types::PyDict::new(py);
-            for (key, val) in captures {
-                dict.set_item(key, type_to_python(py, &val)?)?;
-            }
-            Ok(dict.into())
-        } else {
-            Ok(pyo3::types::PyDict::new(py).into())
-        }
-    }
-
-    fn __str__(&self) -> String {
-        format!("TypeSchema(\"{}\")", self.pattern)
-    }
-
-    fn __repr__(&self) -> String {
-        self.__str__()
-    }
-}
-
-impl TypeSchema {
-    /// Parses a pattern string into a compiled Pattern.
+    /// Parses a pattern string into a compiled TypePattern.
     ///
     /// This is called once during TypeSchema construction for efficient matching.
-    fn parse_pattern(input: &str) -> Result<Pattern, ImplicaError> {
+    fn parse_pattern(input: &str) -> Result<TypePattern, ImplicaError> {
         let trimmed = input.trim();
 
         // Validate balanced parentheses first
@@ -228,7 +149,7 @@ impl TypeSchema {
         Ok(())
     }
 
-    fn parse_pattern_recursive(input: &str) -> Result<Pattern, ImplicaError> {
+    fn parse_pattern_recursive(input: &str) -> Result<TypePattern, ImplicaError> {
         let input = input.trim();
 
         // Empty pattern is invalid
@@ -238,7 +159,7 @@ impl TypeSchema {
 
         // Wildcard
         if input == "*" {
-            return Ok(Pattern::Wildcard);
+            return Ok(TypePattern::Wildcard);
         }
 
         // Check for Arrow pattern FIRST (at top level): left -> right
@@ -250,7 +171,7 @@ impl TypeSchema {
             let left_pattern = Self::parse_pattern_recursive(left_str)?;
             let right_pattern = Self::parse_pattern_recursive(right_str)?;
 
-            return Ok(Pattern::Arrow {
+            return Ok(TypePattern::Arrow {
                 left: Box::new(left_pattern),
                 right: Box::new(right_pattern),
             });
@@ -275,7 +196,10 @@ impl TypeSchema {
                 }
 
                 // Otherwise it's a named capture
-                return Ok(Pattern::Capture {
+
+                validate_variable_name(name_part)?;
+
+                return Ok(TypePattern::Capture {
                     name: name_part.to_string(),
                     pattern: Box::new(inner_pattern),
                 });
@@ -295,94 +219,78 @@ impl TypeSchema {
             ));
         }
 
-        Ok(Pattern::Variable(input.to_string()))
-    }
-
-    /// Internal matching function that returns captures.
-    ///
-    /// This is the internal implementation used by both `matches()` and `capture()`.
-    ///
-    /// # Returns
-    ///
-    /// `Some(HashMap)` with captures if the type matches, `None` otherwise
-    fn matches_internal(&self, r#type: &Type) -> Option<HashMap<String, Type>> {
-        let mut captures = HashMap::new();
-        if Self::match_pattern(&self.compiled, r#type, &mut captures) {
-            Some(captures)
-        } else {
-            None
-        }
+        Ok(TypePattern::Variable(input.to_string()))
     }
 
     /// Recursively matches a pattern against a type.
     fn match_pattern(
-        pattern: &Pattern,
+        pattern: &TypePattern,
         r#type: &Type,
-        captures: &mut HashMap<String, Type>,
-    ) -> bool {
+        context: Arc<Context>,
+    ) -> Result<bool, ImplicaError> {
         match pattern {
-            Pattern::Wildcard => {
+            TypePattern::Wildcard => {
                 // Wildcard matches anything
-                true
+                Ok(true)
             }
 
-            Pattern::Variable(name) => {
+            TypePattern::Variable(name) => {
+                if let Ok(e) = context.get(name) {
+                    match e {
+                        ContextElement::Type(ref t) => {
+                            return Ok(r#type == t);
+                        }
+                        ContextElement::Term(_) => {
+                            return Err(ImplicaError::ContextConflict {
+                                message: "expected context element to be a type but is a term"
+                                    .to_string(),
+                                context: Some("type match pattern".to_string()),
+                            });
+                        }
+                    }
+                }
                 // Match only if type is a Variable with the same name
                 match r#type {
-                    Type::Variable(v) => v.name == *name,
-                    _ => false,
+                    Type::Variable(v) => Ok(v.name == *name),
+                    _ => Ok(false),
                 }
             }
 
-            Pattern::Arrow { left, right } => {
+            TypePattern::Arrow { left, right } => {
                 // Match only if type is an Arrow with matching parts
                 match r#type {
                     Type::Arrow(app) => {
-                        Self::match_pattern(left, &app.left, captures)
-                            && Self::match_pattern(right, &app.right, captures)
+                        let result = Self::match_pattern(left, &app.left, context.clone())?
+                            && Self::match_pattern(right, &app.right, context.clone())?;
+
+                        Ok(result)
                     }
-                    _ => false,
+                    _ => Ok(false),
                 }
             }
 
-            Pattern::Capture { name, pattern } => {
+            TypePattern::Capture { name, pattern } => {
                 // Try to match the inner pattern
-                if Self::match_pattern(pattern, r#type, captures) {
-                    // Check if this capture name already exists
-                    if let Some(existing) = captures.get(name) {
-                        // If it does, verify that the captured types are equal
-                        if existing == r#type {
-                            // Same value, match succeeds
-                            true
-                        } else {
-                            // Different value, match fails
-                            false
+                if Self::match_pattern(pattern, r#type, context.clone())? {
+                    if let Ok(e) = context.get(name) {
+                        match e {
+                            ContextElement::Type(ref t) => Ok(r#type == t),
+                            ContextElement::Term(_) => Err(ImplicaError::ContextConflict {
+                                message: "expected context element to be a type but is a term"
+                                    .to_string(),
+                                context: Some("type match pattern".to_string()),
+                            }),
                         }
                     } else {
                         // First time capturing this name, insert it
-                        captures.insert(name.clone(), r#type.clone());
-                        true
+                        context.add_type(name.clone(), r#type.clone())?;
+                        Ok(true)
                     }
                 } else {
-                    false
+                    Ok(false)
                 }
             }
         }
-    }
-
-    /// Public helper for Rust code to check if a type matches.
-    ///
-    /// This is a convenience method for Rust code (not exposed to Python).
-    ///
-    /// # Arguments
-    ///
-    /// * `type` - The type to check
-    ///
-    /// # Returns
-    ///
-    /// `true` if the type matches, `false` otherwise
-    pub fn matches_type(&self, r#type: &Type) -> bool {
-        self.matches_internal(r#type).is_some()
     }
 }
 

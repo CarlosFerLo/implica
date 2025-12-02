@@ -15,7 +15,7 @@ use crate::patterns::{
 ///
 /// # Pattern Syntax
 ///
-/// - Nodes: `(variable)`, `(variable:Type)`, `(:Type)`, `()`
+/// - Nodes: `(variable)`, `(variable:Type)`, `(variable:Type:Term)`, `(:Type:Term)`, `(:Type)`, `()`
 /// - Edges: `-[variable]->` (forward), `<-[variable]-` (backward), `-[variable]-` (any)
 /// - Typed edges: `-[var:schema]->`
 ///
@@ -27,11 +27,14 @@ use crate::patterns::{
 /// # Parse from string
 /// pattern = implica.PathPattern("(n:Person)-[e:knows]->(m:Person)")
 ///
+/// # Parse with term schemas
+/// pattern = implica.PathPattern("(n:Person:name)-[e:knows]->(m:Person:age)")
+///
 /// # Parse complex path
 /// pattern = implica.PathPattern("(a:A)-[r1]->(b:B)-[r2]->(c:C)")
 ///
-/// # Anonymous nodes
-/// pattern = implica.PathPattern("()-[e:relation]->()")
+/// # Anonymous nodes with type and term
+/// pattern = implica.PathPattern("(:Person:name)-[e:relation]->(:Company:industry)")
 ///
 /// # Programmatic construction
 /// pattern = implica.PathPattern()
@@ -126,7 +129,7 @@ impl PathPattern {
     ///
     /// # Supported Syntax
     ///
-    /// - Simple nodes: `(n)`, `(n:Type)`, `(:Type)`, `()`
+    /// - Simple nodes: `(n)`, `(n:Type)`, `(n:Type:Term)`, `(:Type:Term)`, `(:Type)`, `()`
     /// - Forward edges: `-[e]->`, `-[e:type]->`
     /// - Backward edges: `<-[e]-`, `<-[e:type]-`
     /// - Bidirectional: `-[e]-`
@@ -153,8 +156,14 @@ impl PathPattern {
     /// # Typed path
     /// p = implica.PathPattern.parse("(n:Person)-[e:knows]->(m:Person)")
     ///
+    /// # Path with term schemas
+    /// p = implica.PathPattern.parse("(n:Person:name)-[e:knows]->(m:Person:age)")
+    ///
     /// # Complex path
     /// p = implica.PathPattern.parse("(a:A)-[r1]->(b:B)<-[r2]-(c:C)")
+    ///
+    /// # Anonymous nodes with terms
+    /// p = implica.PathPattern.parse("(:Employee:salary)-[works_at]->(:Company:revenue)")
     /// ```
     #[staticmethod]
     pub fn parse(pattern: String) -> PyResult<Self> {

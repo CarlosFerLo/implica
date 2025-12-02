@@ -6,9 +6,9 @@ use std::collections::HashMap;
 use std::fmt::Display;
 use std::sync::{Arc, RwLock};
 
-use crate::typing::{python_to_term, term_to_python, Term};
-use crate::Node;
-
+use crate::graph::alias::SharedPropertyMap;
+use crate::graph::node::Node;
+use crate::typing::{term_to_python, Term};
 /// Represents an edge in the graph (a typed term in the model).
 ///
 /// Edges are directed connections between nodes, each representing a term.
@@ -43,10 +43,10 @@ use crate::Node;
 #[pyclass]
 #[derive(Debug)]
 pub struct Edge {
-    pub term: Arc<RwLock<Term>>,
-    pub start: Arc<Node>,
-    pub end: Arc<Node>,
-    pub properties: Arc<RwLock<HashMap<String, Py<PyAny>>>>,
+    pub term: Arc<Term>,
+    pub start: Arc<RwLock<Node>>,
+    pub end: Arc<RwLock<Node>>,
+    pub properties: SharedPropertyMap,
     /// Cached UID for performance - computed once and reused
     pub(in crate::graph) uid_cache: Arc<RwLock<Option<String>>>,
 }
@@ -78,9 +78,9 @@ impl Display for Edge {
         write!(
             f,
             "Edge({}: {} -> {})",
-            self.term.read().unwrap(),
-            self.start.r#type,
-            self.end.r#type
+            self.term,
+            self.start.read().unwrap().r#type,
+            self.end.read().unwrap().r#type
         )
     }
 }
@@ -95,57 +95,6 @@ impl Eq for Edge {}
 
 #[pymethods]
 impl Edge {
-    /// Creates a new edge with the given term, start and end nodes, and optional properties.
-    ///
-    /// # Arguments
-    ///
-    /// * `term` - The term for this edge
-    /// * `start` - The starting node
-    /// * `end` - The ending node
-    /// * `properties` - Optional dictionary of properties (default: empty dict)
-    ///
-    /// # Returns
-    ///
-    /// A new `Edge` instance
-    ///
-    /// # Examples
-    ///
-    /// ```python
-    /// edge = implica.Edge(term, start_node, end_node)
-    ///
-    /// # With properties
-    /// edge = implica.Edge(
-    ///     term, start_node, end_node,
-    ///     {"weight": 1.0, "label": "applies_to"}
-    /// )
-    /// ```
-    #[new]
-    #[pyo3(signature = (term, start, end, properties=None))]
-    pub fn new(
-        term: Py<PyAny>,
-        start: Py<PyAny>,
-        end: Py<PyAny>,
-        properties: Option<Py<PyDict>>,
-    ) -> PyResult<Self> {
-        Python::attach(|py| {
-            let term_obj = python_to_term(term.bind(py))?;
-            let start_obj = start.bind(py).extract::<Node>()?;
-            let end_obj = end.bind(py).extract::<Node>()?;
-            let props = properties
-                .unwrap_or_else(|| PyDict::new(py).into())
-                .bind(py)
-                .extract::<HashMap<String, Py<PyAny>>>()?;
-
-            Ok(Edge {
-                term: Arc::new(RwLock::new(term_obj)),
-                start: Arc::new(start_obj),
-                end: Arc::new(end_obj),
-                properties: Arc::new(RwLock::new(props)),
-                uid_cache: Arc::new(RwLock::new(None)),
-            })
-        })
-    }
-
     /// Gets the term of this edge.
     ///
     /// # Returns
@@ -153,7 +102,7 @@ impl Edge {
     /// The term as a Python object
     #[getter]
     pub fn term(&self, py: Python) -> PyResult<Py<PyAny>> {
-        let term = self.term.read().unwrap();
+        let term = self.term.clone();
         term_to_python(py, &term)
     }
 
@@ -164,7 +113,7 @@ impl Edge {
     /// The start node as a Python object
     #[getter]
     pub fn start(&self, py: Python) -> PyResult<Py<Node>> {
-        Py::new(py, (*self.start).clone())
+        Py::new(py, (*self.start).read().unwrap().clone())
     }
 
     /// Gets the ending node of this edge.
@@ -174,7 +123,7 @@ impl Edge {
     /// The end node as a Python object
     #[getter]
     pub fn end(&self, py: Python) -> PyResult<Py<Node>> {
-        Py::new(py, (*self.end).clone())
+        Py::new(py, (*self.end).read().unwrap().clone())
     }
 
     #[getter]
@@ -212,7 +161,7 @@ impl Edge {
         // Calculate the UID
         let mut hasher = Sha256::new();
         hasher.update(b"edge:");
-        hasher.update(self.term.read().unwrap().uid().as_bytes());
+        hasher.update(self.term.uid().as_bytes());
         let uid = format!("{:x}", hasher.finalize());
 
         // Cache it for future use
@@ -241,5 +190,22 @@ impl Edge {
     fn __eq__(&self, other: &Self) -> bool {
         // Equality based on uid
         self == other
+    }
+}
+
+impl Edge {
+    pub fn new(
+        term: Arc<Term>,
+        start: Arc<RwLock<Node>>,
+        end: Arc<RwLock<Node>>,
+        properties: Option<SharedPropertyMap>,
+    ) -> Self {
+        Edge {
+            term,
+            start,
+            end,
+            properties: properties.unwrap_or(Arc::new(RwLock::new(HashMap::new()))),
+            uid_cache: Arc::new(RwLock::new(None)),
+        }
     }
 }

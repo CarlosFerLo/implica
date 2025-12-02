@@ -3,11 +3,13 @@
 //! This module provides the core type system with variables and Arrow types.
 //! Types form the foundation for the type theoretical graph model.
 
-use crate::errors::ImplicaError;
 use pyo3::prelude::*;
 use sha2::{Digest, Sha256};
 use std::fmt;
 use std::sync::{Arc, RwLock};
+
+use crate::errors::ImplicaError;
+use crate::utils::validate_variable_name;
 
 /// Represents a type in the type theory.
 ///
@@ -126,12 +128,8 @@ impl Variable {
     #[new]
     pub fn new(name: String) -> PyResult<Self> {
         // Validate that the name is not empty or whitespace-only
-        if name.trim().is_empty() {
-            return Err(ImplicaError::invalid_identifier(
-                name.clone(),
-                "name cannot be empty or whitespace-only",
-            )
-            .into());
+        if let Err(e) = validate_variable_name(&name) {
+            return Err(e.into());
         }
 
         Ok(Variable {
@@ -414,15 +412,16 @@ impl std::hash::Hash for Arrow {
 /// # Errors
 ///
 /// `PyTypeError` if the object is neither a Variable nor an Arrow
-pub(crate) fn python_to_type(obj: &Bound<'_, PyAny>) -> PyResult<Type> {
+pub(crate) fn python_to_type(obj: &Bound<'_, PyAny>) -> Result<Type, ImplicaError> {
     if let Ok(var) = obj.extract::<Variable>() {
         Ok(Type::Variable(var))
     } else if let Ok(app) = obj.extract::<Arrow>() {
         Ok(Type::Arrow(app))
     } else {
-        Err(PyErr::new::<pyo3::exceptions::PyTypeError, _>(
-            "Expected Variable or Arrow",
-        ))
+        Err(ImplicaError::PythonError {
+            message: format!("Error converting python object '{}' to type.", obj),
+            context: Some("python_to_type".to_string()),
+        })
     }
 }
 
