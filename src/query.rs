@@ -10,7 +10,7 @@ use crate::context::Context;
 use crate::errors::ImplicaError;
 use crate::graph::{Edge, Graph, Node};
 use crate::patterns::{EdgePattern, NodePattern, PathPattern, TermSchema, TypeSchema};
-use crate::typing::{python_to_term, python_to_type, Arrow, Term, Type};
+use crate::typing::{python_to_term, python_to_type, Arrow, Type};
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
 use std::collections::HashMap;
@@ -76,10 +76,8 @@ pub enum QueryOperation {
     Match(MatchOp),
     Where(String),
     Create(CreateOp),
-    Set(String, Py<PyDict>),
-    SetTerm(String, Term),
-    Delete(Vec<String>, bool),
-    Merge(MergeOp),
+    Set(String, HashMap<String, Py<PyAny>>, bool),
+    Delete(Vec<String>),
     With(Vec<String>),
     OrderBy(String, String, bool),
     Limit(usize),
@@ -92,12 +90,18 @@ impl Clone for QueryOperation {
             QueryOperation::Match(m) => QueryOperation::Match(m.clone()),
             QueryOperation::Where(w) => QueryOperation::Where(w.clone()),
             QueryOperation::Create(c) => QueryOperation::Create(c.clone()),
-            QueryOperation::Set(var, dict) => QueryOperation::Set(var.clone(), dict.clone_ref(py)),
-            QueryOperation::SetTerm(var, term) => {
-                QueryOperation::SetTerm(var.clone(), term.clone())
+            QueryOperation::Set(var, dict, overwrite) => {
+                let mut new_dict = HashMap::new();
+
+                Python::attach(|py| {
+                    for (k, v) in dict.iter() {
+                        new_dict.insert(k.clone(), v.clone_ref(py));
+                    }
+                });
+
+                QueryOperation::Set(var.clone(), new_dict, *overwrite)
             }
-            QueryOperation::Delete(vars, detach) => QueryOperation::Delete(vars.clone(), *detach),
-            QueryOperation::Merge(m) => QueryOperation::Merge(m.clone()),
+            QueryOperation::Delete(vars) => QueryOperation::Delete(vars.clone()),
             QueryOperation::With(w) => QueryOperation::With(w.clone()),
             QueryOperation::OrderBy(v, k, asc) => {
                 QueryOperation::OrderBy(v.clone(), k.clone(), *asc)
@@ -126,15 +130,6 @@ pub enum CreateOp {
     Node(NodePattern),
     Edge(EdgePattern, String, String),
     Path(PathPattern),
-}
-
-/// Merge operation types (internal).
-///
-/// Represents different elements that can be merged (create if not exists).
-#[derive(Clone, Debug)]
-pub enum MergeOp {
-    Node(NodePattern),
-    Edge(EdgePattern, String, String),
 }
 
 #[pymethods]
@@ -523,120 +518,30 @@ impl Query {
         Ok(self.clone())
     }
 
-    pub fn set(&mut self, variable: String, properties: Py<PyDict>) -> PyResult<Self> {
-        Python::attach(|py| {
-            let props_cloned = properties.clone_ref(py);
-            self.operations
-                .push(QueryOperation::Set(variable, props_cloned));
-            Ok(self.clone())
-        })
-    }
+    pub fn set(
+        &mut self,
+        variable: String,
+        properties: Py<PyDict>,
+        overwrite: bool,
+    ) -> PyResult<Self> {
+        let mut props = HashMap::new();
+        Python::attach(|py| -> PyResult<()> {
+            for (k, v) in properties.bind(py) {
+                let key = k.extract::<String>()?;
+                let val = v.unbind();
+                props.insert(key, val);
+            }
+            Ok(())
+        })?;
 
-    #[pyo3(signature = (*variables, detach=false))]
-    pub fn delete(&mut self, variables: Vec<String>, detach: bool) -> PyResult<Self> {
         self.operations
-            .push(QueryOperation::Delete(variables, detach));
+            .push(QueryOperation::Set(variable, props, overwrite));
         Ok(self.clone())
     }
 
-    #[allow(clippy::too_many_arguments)]
-    #[pyo3(signature = (pattern=None, *, node=None, edge=None, r#type=None, type_schema=None, term=None, term_type_schema=None, start=None, end=None, properties=None))]
-    #[allow(unused_variables)]
-    pub fn merge(
-        &mut self,
-        pattern: Option<String>,
-        node: Option<String>,
-        edge: Option<String>,
-        r#type: Option<Py<PyAny>>,
-        type_schema: Option<Py<PyAny>>,
-        term: Option<Py<PyAny>>,
-        term_type_schema: Option<Py<PyAny>>,
-        start: Option<Py<PyAny>>,
-        end: Option<Py<PyAny>>,
-        properties: Option<Py<PyDict>>,
-    ) -> PyResult<Self> {
-        if node.is_some() {
-            Python::attach(|py| -> PyResult<()> {
-                // Convert Python types to Rust types
-                let type_obj = if let Some(t) = r#type {
-                    Some(python_to_type(t.bind(py))?)
-                } else {
-                    None
-                };
-
-                let type_schema_obj = if let Some(ts) = type_schema {
-                    let schema_str: String = ts.bind(py).extract()?;
-                    Some(TypeSchema::new(schema_str)?)
-                } else {
-                    None
-                };
-
-                let term_obj = if let Some(t) = term {
-                    Some(python_to_term(t.bind(py))?)
-                } else {
-                    None
-                };
-
-                let properties_map = if let Some(props) = properties {
-                    Some(props.bind(py).extract::<HashMap<String, Py<PyAny>>>()?)
-                } else {
-                    None
-                };
-
-                let node_pattern = NodePattern::new(
-                    node,
-                    type_obj.map(Arc::new),
-                    type_schema_obj,
-                    term_obj.map(Arc::new),
-                    None,
-                    properties_map,
-                )?;
-                self.operations
-                    .push(QueryOperation::Merge(MergeOp::Node(node_pattern)));
-                Ok(())
-            })?;
-        } else if edge.is_some() {
-            Python::attach(|py| -> PyResult<()> {
-                // Convert Python types to Rust types
-                let term_obj = if let Some(t) = term {
-                    Some(Arc::new(python_to_term(t.bind(py))?))
-                } else {
-                    None
-                };
-
-                let term_type_schema_obj = if let Some(ts) = term_type_schema {
-                    let schema_str: String = ts.bind(py).extract()?;
-                    Some(TermSchema::new(schema_str)?)
-                } else {
-                    None
-                };
-
-                let properties_map = if let Some(props) = properties {
-                    Some(props.bind(py).extract::<HashMap<String, Py<PyAny>>>()?)
-                } else {
-                    None
-                };
-
-                let edge_pattern = EdgePattern::new(
-                    edge.clone(),
-                    None,
-                    None,
-                    term_obj,
-                    term_type_schema_obj,
-                    properties_map,
-                    "forward".to_string(),
-                )?;
-                let start_var = Self::extract_var(start)?;
-                let end_var = Self::extract_var(end)?;
-                self.operations.push(QueryOperation::Merge(MergeOp::Edge(
-                    edge_pattern,
-                    start_var,
-                    end_var,
-                )));
-                Ok(())
-            })?;
-        }
-
+    #[pyo3(signature = (*variables))]
+    pub fn delete(&mut self, variables: Vec<String>) -> PyResult<Self> {
+        self.operations.push(QueryOperation::Delete(variables));
         Ok(self.clone())
     }
 
@@ -714,21 +619,11 @@ impl Query {
                 QueryOperation::Create(create_op) => {
                     self.execute_create(create_op)?;
                 }
-                QueryOperation::Merge(merge_op) => {
-                    todo!("Implement this!");
-                    //self.execute_merge(py, merge_op)?;
+                QueryOperation::Delete(vars) => {
+                    self.execute_delete(vars)?;
                 }
-                QueryOperation::Delete(vars, detach) => {
-                    todo!("Implement this!");
-                    //self.execute_delete(py, vars, detach)?;
-                }
-                QueryOperation::Set(var, props) => {
-                    todo!("Implement this!");
-                    //self.execute_set(py, var, props)?;
-                }
-                QueryOperation::SetTerm(var, term) => {
-                    todo!("Implement this!");
-                    //self.execute_set_term(py, var, term)?;
+                QueryOperation::Set(var, props, overwrite) => {
+                    self.execute_set(var, props, overwrite)?;
                 }
                 QueryOperation::Where(condition) => {
                     todo!("Implement this!");
@@ -2317,227 +2212,96 @@ impl Query {
         Ok(())
     }
 
+    fn execute_delete(&mut self, vars: Vec<String>) -> Result<(), ImplicaError> {
+        for m in self.matches.iter_mut() {
+            for var in vars.iter() {
+                if let Some(qr) = m.remove(var) {
+                    match qr {
+                        QueryResult::Node(n) => {
+                            self.graph.remove_node(&n.uid())?;
+                        }
+                        QueryResult::Edge(e) => {
+                            self.graph.remove_edge(&e.uid())?;
+                        }
+                    }
+                } else {
+                    return Err(ImplicaError::VariableNotFound {
+                        name: var.clone(),
+                        context: Some("delete".to_string()),
+                    });
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    fn execute_set(
+        &mut self,
+        var: String,
+        props: HashMap<String, Py<PyAny>>,
+        overwrite: bool,
+    ) -> Result<(), ImplicaError> {
+        for m in self.matches.iter() {
+            if let Some(qr) = m.get(&var) {
+                match qr {
+                    QueryResult::Node(n) => {
+                        let nodes = self.graph.nodes.read().unwrap();
+                        if let Some(node_lock) = nodes.get(&n.uid()) {
+                            let node = node_lock.read().unwrap();
+                            let mut node_props = node.properties.write().unwrap();
+
+                            if overwrite {
+                                node_props.clear();
+                            }
+
+                            Python::attach(|py| {
+                                for (k, v) in props.iter() {
+                                    node_props.insert(k.clone(), v.clone_ref(py));
+                                }
+                            })
+                        } else {
+                            return Err(ImplicaError::NodeNotFound {
+                                uid: n.uid(),
+                                context: Some("execute set node".to_string()),
+                            });
+                        }
+                    }
+                    QueryResult::Edge(e) => {
+                        let edges = self.graph.nodes.read().unwrap();
+                        if let Some(edge_lock) = edges.get(&e.uid()) {
+                            let edge = edge_lock.read().unwrap();
+                            let mut edge_props = edge.properties.write().unwrap();
+
+                            if overwrite {
+                                edge_props.clear();
+                            }
+
+                            Python::attach(|py| {
+                                for (k, v) in props.iter() {
+                                    edge_props.insert(k.clone(), v.clone_ref(py));
+                                }
+                            });
+                        } else {
+                            return Err(ImplicaError::EdgeNotFound {
+                                uid: e.uid(),
+                                context: Some("execute set edge".to_string()),
+                            });
+                        }
+                    }
+                }
+            } else {
+                return Err(ImplicaError::VariableNotFound {
+                    name: var.clone(),
+                    context: Some("delete".to_string()),
+                });
+            }
+        }
+
+        Ok(())
+    }
+
     /*  TODO: Finish this
-
-
-    fn execute_merge(&mut self, py: Python, merge_op: MergeOp) -> PyResult<()> {
-        match merge_op {
-            MergeOp::Node(node_pattern) => {
-                let mut found = false;
-
-                // Optimized: Use tree-based type index for O(log n) lookup
-                if let Some(ref type_obj) = node_pattern.type_obj {
-                    let type_nodes = self.graph.find_nodes_by_type(type_obj, py)?;
-
-                    for node in type_nodes {
-                        if node_pattern.matches(&node, py)? {
-                            // Node exists, add to matched_vars
-                            if let Some(ref var) = node_pattern.variable {
-                                let matches = self.matched_vars.entry(var.clone()).or_default();
-                                matches.push(QueryResult::Node(node));
-                            }
-                            found = true;
-                            break;
-                        }
-                    }
-                } else {
-                    // No specific type - get all nodes efficiently
-                    let all_nodes = self.graph.find_all_nodes(py)?;
-                    for node in all_nodes {
-                        if node_pattern.matches(&node, py)? {
-                            // Node exists, add to matched_vars
-                            if let Some(ref var) = node_pattern.variable {
-                                let matches = self.matched_vars.entry(var.clone()).or_default();
-                                matches.push(QueryResult::Node(node));
-                            }
-                            found = true;
-                            break;
-                        }
-                    }
-                }
-
-                // If not found, create it
-                if !found {
-                    if let Some(type_obj) = node_pattern.type_obj {
-                        let type_py = type_to_python(py, &type_obj)?;
-                        let props = PyDict::new(py);
-                        for (k, v) in node_pattern.properties {
-                            props.set_item(k, v)?;
-                        }
-
-                        let node = Node::new(type_py, None, Some(props.into()))?;
-
-                        // Use the optimized add_node method which updates the index
-                        self.graph.add_node(&node, py)?;
-
-                        if let Some(var) = node_pattern.variable {
-                            // Note: If variable already exists, it will be overwritten
-                            if self.matched_vars.contains_key(&var) {
-                                // Variable already exists - this is allowed but may be unintentional
-                            }
-                            self.matched_vars.insert(var, vec![QueryResult::Node(node)]);
-                        }
-                    }
-                }
-            }
-            MergeOp::Edge(edge_pattern, start_var, end_var) => {
-                // Edge merge: match or create edge
-                // Extract start and end nodes from matched_vars
-                let start_node = if let Some(start_results) = self.matched_vars.get(&start_var) {
-                    if let Some(QueryResult::Node(node)) = start_results.first() {
-                        node.clone()
-                    } else {
-                        return Err(ImplicaError::InvalidQuery {
-                            message: format!(
-                                "Start variable '{}' does not contain a node",
-                                start_var
-                            ),
-                            context: Some("edge merge".to_string()),
-                        }
-                        .into());
-                    }
-                } else {
-                    return Err(ImplicaError::InvalidQuery {
-                        message: format!("Start variable '{}' not found", start_var),
-                        context: Some("edge merge".to_string()),
-                    }
-                    .into());
-                };
-
-                let end_node = if let Some(end_results) = self.matched_vars.get(&end_var) {
-                    if let Some(QueryResult::Node(node)) = end_results.first() {
-                        node.clone()
-                    } else {
-                        return Err(ImplicaError::InvalidQuery {
-                            message: format!("End variable '{}' does not contain a node", end_var),
-                            context: Some("edge merge".to_string()),
-                        }
-                        .into());
-                    }
-                } else {
-                    return Err(ImplicaError::InvalidQuery {
-                        message: format!("End variable '{}' not found", end_var),
-                        context: Some("edge merge".to_string()),
-                    }
-                    .into());
-                };
-
-                let mut found = false;
-
-                // Optimized: Use tree-based index to find edges by term type
-                let candidate_edges = if let Some(ref term) = edge_pattern.term {
-                    // Use the optimized find_edges_by_term_type for O(log n) lookup
-                    self.graph.find_edges_by_term_type(&term.r#type, py)?
-                } else if let Some(ref schema) = edge_pattern.term_type_schema {
-                    // For wildcard or complex schemas, get all edges
-                    if schema.pattern == "$*$" {
-                        self.graph.find_all_edges(py)?
-                    } else {
-                        // For specific schemas, we still need to check all edges
-                        // but retrieve them efficiently from the index
-                        self.graph.find_all_edges(py)?
-                    }
-                } else {
-                    // No term type specified - get all edges
-                    self.graph.find_all_edges(py)?
-                };
-
-                // Check if edge already exists with matching start, end, and pattern
-                for edge in candidate_edges {
-                    if edge.start.uid() == start_node.uid()
-                        && edge.end.uid() == end_node.uid()
-                        && edge_pattern.matches(&edge, py)?
-                    {
-                        // Edge exists, add to matched_vars
-                        if let Some(ref var) = edge_pattern.variable {
-                            let matches = self.matched_vars.entry(var.clone()).or_default();
-                            matches.push(QueryResult::Edge(edge));
-                        }
-                        found = true;
-                        break;
-                    }
-                }
-
-                // If edge not found, create it
-                if !found {
-                    if let Some(term_obj) = edge_pattern.term {
-                        let props = PyDict::new(py);
-                        for (k, v) in edge_pattern.properties {
-                            props.set_item(k, v)?;
-                        }
-
-                        // Create the term in Python and convert to PyAny
-                        let term_py: Py<PyAny> = Py::new(py, term_obj.clone())?.into();
-                        let start_py: Py<PyAny> = Py::new(py, start_node.clone())?.into();
-                        let end_py: Py<PyAny> = Py::new(py, end_node.clone())?.into();
-
-                        // Create the edge
-                        let edge = Edge::new(term_py, start_py, end_py, Some(props.into()))?;
-
-                        // Use the optimized add_edge method which updates the index
-                        self.graph.add_edge(&edge, py)?;
-
-                        if let Some(var) = edge_pattern.variable {
-                            // Note: If variable already exists, it will be overwritten
-                            if self.matched_vars.contains_key(&var) {
-                                // Variable already exists - this is allowed but may be unintentional
-                            }
-                            self.matched_vars.insert(var, vec![QueryResult::Edge(edge)]);
-                        }
-                    }
-                }
-            }
-        }
-        Ok(())
-    }
-
-    fn execute_delete(&mut self, py: Python, vars: Vec<String>, detach: bool) -> PyResult<()> {
-        // Delete nodes/edges that were matched
-        for var in vars {
-            if let Some(results) = self.matched_vars.get(&var) {
-                // Clone results to avoid borrow issues
-                let results_clone = results.clone();
-
-                for result in results_clone {
-                    match result {
-                        QueryResult::Node(node) => {
-                            let node_uid = node.uid();
-
-                            // If detach is true, delete all connected edges first
-                            if detach {
-                                let edges_dict = self.graph.edges.bind(py);
-                                let mut edges_to_delete = Vec::new();
-
-                                // Find all edges connected to this node
-                                for (uid_obj, edge_obj) in edges_dict.iter() {
-                                    let edge: Edge = edge_obj.extract()?;
-                                    if edge.start.uid() == node_uid || edge.end.uid() == node_uid {
-                                        let edge_uid: String = uid_obj.extract()?;
-                                        edges_to_delete.push(edge_uid);
-                                    }
-                                }
-
-                                // Delete the connected edges
-                                for edge_uid in edges_to_delete {
-                                    let _ = self.graph.remove_edge(&edge_uid, py);
-                                }
-                            }
-
-                            // Use the optimized remove_node method which updates the index
-                            let _ = self.graph.remove_node(&node_uid, py);
-                        }
-                        QueryResult::Edge(edge) => {
-                            let uid = edge.uid();
-                            // Use the optimized remove_edge method which updates the index
-                            let _ = self.graph.remove_edge(&uid, py);
-                        }
-                    }
-                }
-            }
-        }
-
-        Ok(())
-    }
 
     fn execute_set(&mut self, py: Python, var: String, props: Py<PyDict>) -> PyResult<()> {
         // Set properties on matched nodes and edges
