@@ -217,32 +217,25 @@ impl std::hash::Hash for Application {
     }
 }
 
-#[pymethods]
 impl Application {
-    #[new]
-    fn new(py: Python, function: Py<PyAny>, argument: Py<PyAny>) -> PyResult<Self> {
-        let function_term = python_to_term(function.bind(py))?;
-        let argument_term = python_to_term(argument.bind(py))?;
-
-        match function_term.r#type().as_ref() {
+    pub fn new(function: Term, argument: Term) -> Result<Self, ImplicaError> {
+        match function.r#type().as_ref() {
             Type::Variable(_) => Err(ImplicaError::TypeMismatch {
                 expected: "Application Type".to_string(),
                 got: "Variable Type".to_string(),
                 context: Some("application creation".to_string()),
-            }
-            .into()),
+            }),
             Type::Arrow(arr) => {
-                if arr.left != argument_term.r#type() {
+                if arr.left != argument.r#type() {
                     Err(ImplicaError::TypeMismatch {
                         expected: arr.left.to_string(),
-                        got: argument_term.r#type().to_string(),
+                        got: argument.r#type().to_string(),
                         context: Some("application creation".to_string()),
-                    }
-                    .into())
+                    })
                 } else {
                     Ok(Application {
-                        function: Arc::new(function_term),
-                        argument: Arc::new(argument_term),
+                        function: Arc::new(function),
+                        argument: Arc::new(argument),
                         r#type: arr.right.clone(),
                         uid_cache: Arc::new(RwLock::new(None)),
                     })
@@ -250,7 +243,10 @@ impl Application {
             }
         }
     }
+}
 
+#[pymethods]
+impl Application {
     #[getter]
     pub fn get_type(&self, py: Python) -> PyResult<Py<PyAny>> {
         type_to_python(py, self.r#type.as_ref())

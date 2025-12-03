@@ -241,7 +241,7 @@ impl Graph {
         Ok(result)
     }
 
-    pub fn add_node(&self, node: &Node) -> PyResult<()> {
+    pub fn add_node(&self, node: &Node) -> Result<(), ImplicaError> {
         let uid = node.uid();
 
         if let Some(existing) = self.nodes.read().unwrap().get(&uid) {
@@ -249,8 +249,7 @@ impl Graph {
                 message: "Tried to add a node with a type that already exists.".to_string(),
                 existing: existing.read().unwrap().clone(),
                 new: node.clone(),
-            }
-            .into());
+            });
         }
 
         self.nodes
@@ -290,11 +289,31 @@ impl Graph {
     pub fn add_edge(
         &self,
         term: Arc<Term>,
-        start: Arc<RwLock<Node>>,
-        end: Arc<RwLock<Node>>,
+        start: Node,
+        end: Node,
         properties: Option<SharedPropertyMap>,
-    ) -> PyResult<()> {
-        let edge = Edge::new(term, start, end, properties);
+    ) -> Result<Edge, ImplicaError> {
+        let nodes = self.nodes.read().unwrap();
+        let start_ptr = match nodes.get(&start.uid()) {
+            Some(ptr) => ptr.clone(),
+            None => {
+                return Err(ImplicaError::NodeNotFound {
+                    uid: start.uid(),
+                    context: Some("add edge".to_string()),
+                });
+            }
+        };
+        let end_ptr = match nodes.get(&end.uid()) {
+            Some(ptr) => ptr.clone(),
+            None => {
+                return Err(ImplicaError::NodeNotFound {
+                    uid: end.uid(),
+                    context: Some("add edge".to_string()),
+                });
+            }
+        };
+
+        let edge = Edge::new(term, start_ptr, end_ptr, properties);
         let uid = edge.uid();
 
         if let Some(existing) = self.edges.read().unwrap().get(&uid) {
@@ -302,16 +321,15 @@ impl Graph {
                 message: "Tried to add a node that already exists.".to_string(),
                 existing: existing.read().unwrap().clone(),
                 new: edge.clone(),
-            }
-            .into());
+            });
         }
 
         self.edges
             .write()
             .unwrap()
-            .insert(uid, Arc::new(RwLock::new(edge)));
+            .insert(uid, Arc::new(RwLock::new(edge.clone())));
 
-        Ok(())
+        Ok(edge)
     }
 
     /// Removes an edge from the graph and updates the type index.

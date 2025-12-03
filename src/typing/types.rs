@@ -261,39 +261,18 @@ pub struct Arrow {
     uid_cache: Arc<RwLock<Option<String>>>,
 }
 
+impl Arrow {
+    pub fn new(left: Arc<Type>, right: Arc<Type>) -> Self {
+        Arrow {
+            left,
+            right,
+            uid_cache: Arc::new(RwLock::new(None)),
+        }
+    }
+}
+
 #[pymethods]
 impl Arrow {
-    /// Creates a new Arrow type (function type).
-    ///
-    /// # Arguments
-    ///
-    /// * `left` - The input type (can be Variable or Arrow)
-    /// * `right` - The output type (can be Variable or Arrow)
-    ///
-    /// # Returns
-    ///
-    /// A new `Arrow` representing the function type `left -> right`
-    ///
-    /// # Examples
-    ///
-    /// ```python
-    /// A = implica.Variable("A")
-    /// B = implica.Variable("B")
-    /// func = implica.Arrow(A, B)  # A -> B
-    /// ```
-    #[new]
-    pub fn new(left: Py<PyAny>, right: Py<PyAny>) -> PyResult<Self> {
-        Python::attach(|py| {
-            let left_type = python_to_type(left.bind(py))?;
-            let right_type = python_to_type(right.bind(py))?;
-            Ok(Arrow {
-                left: Arc::new(left_type),
-                right: Arc::new(right_type),
-                uid_cache: Arc::new(RwLock::new(None)),
-            })
-        })
-    }
-
     /// Gets the left (input) type of this Arrow.
     ///
     /// # Returns

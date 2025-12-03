@@ -1,6 +1,6 @@
 use crate::context::{Context, ContextElement};
 use crate::errors::ImplicaError;
-use crate::typing::Type;
+use crate::typing::{Arrow, Type, Variable};
 use crate::utils::validate_variable_name;
 use pyo3::prelude::*;
 
@@ -105,6 +105,10 @@ impl TypeSchema {
 
     pub fn matches(&self, r#type: &Type, context: Arc<Context>) -> Result<bool, ImplicaError> {
         Self::match_pattern(&self.compiled, r#type, context)
+    }
+
+    pub fn as_type(&self, context: Arc<Context>) -> Result<Type, ImplicaError> {
+        Self::generate_type(&self.compiled, context)
     }
 
     /// Parses a pattern string into a compiled TypePattern.
@@ -288,6 +292,44 @@ impl TypeSchema {
                     }
                 } else {
                     Ok(false)
+                }
+            }
+        }
+    }
+
+    fn generate_type(pattern: &TypePattern, context: Arc<Context>) -> Result<Type, ImplicaError> {
+        match pattern {
+            TypePattern::Wildcard => Err(ImplicaError::InvalidPattern {
+                pattern: "*".to_string(),
+                reason: "cannot use a wild card when describing a type in a create operation"
+                    .to_string(),
+            }),
+            TypePattern::Capture { .. } => Err(ImplicaError::InvalidPattern {
+                pattern: "()".to_string(),
+                reason: "cannot use a capture when describing a type in a create operation"
+                    .to_string(),
+            }),
+            TypePattern::Arrow { left, right } => {
+                let left_type = Self::generate_type(left, context.clone())?;
+                let right_type = Self::generate_type(right, context.clone())?;
+
+                Ok(Type::Arrow(Arrow::new(
+                    Arc::new(left_type),
+                    Arc::new(right_type),
+                )))
+            }
+            TypePattern::Variable(name) => {
+                if let Ok(ref element) = context.get(name) {
+                    match element {
+                        ContextElement::Type(r#type) => Ok(r#type.clone()),
+                        ContextElement::Term(_) => Err(ImplicaError::ContextConflict {
+                            message: "Tried to access a type variable but it was a term variable."
+                                .to_string(),
+                            context: Some("generate_type".to_string()),
+                        }),
+                    }
+                } else {
+                    Ok(Type::Variable(Variable::new(name.clone())?))
                 }
             }
         }

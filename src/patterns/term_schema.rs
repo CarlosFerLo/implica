@@ -4,7 +4,7 @@ use std::{fmt::Display, sync::Arc};
 
 use crate::context::{Context, ContextElement};
 use crate::errors::ImplicaError;
-use crate::typing::Term;
+use crate::typing::{Application, Term};
 
 #[derive(Clone, Debug, PartialEq)]
 enum TermPattern {
@@ -50,6 +50,10 @@ impl TermSchema {
 
     pub fn matches(&self, term: &Term, context: Arc<Context>) -> Result<bool, ImplicaError> {
         Self::match_pattern(&self.compiled, term, context)
+    }
+
+    pub fn as_term(&self, context: Arc<Context>) -> Result<Term, ImplicaError> {
+        Self::generate_term(&self.compiled, context)
     }
 
     fn parse_pattern(input: &str) -> Result<TermPattern, ImplicaError> {
@@ -133,6 +137,42 @@ impl TermSchema {
                     Ok(argument_matches)
                 } else {
                     Ok(false)
+                }
+            }
+        }
+    }
+
+    fn generate_term(pattern: &TermPattern, context: Arc<Context>) -> Result<Term, ImplicaError> {
+        match pattern {
+            TermPattern::Wildcard => Err(ImplicaError::InvalidPattern {
+                pattern: "*".to_string(),
+                reason: "cannot use a wild card when describing a term in a create operation"
+                    .to_string(),
+            }),
+            TermPattern::Application { function, argument } => {
+                let function_term = Self::generate_term(function, context.clone())?;
+                let argument_term = Self::generate_term(argument, context.clone())?;
+
+                Ok(Term::Application(Application::new(
+                    function_term,
+                    argument_term,
+                )?))
+            }
+            TermPattern::Variable(name) => {
+                if let Ok(ref element) = context.get(name) {
+                    match element {
+                        ContextElement::Term(t) => Ok(t.clone()),
+                        ContextElement::Type(_) => Err(ImplicaError::ContextConflict {
+                            message: "Tried to access a term variable but it was a type variable."
+                                .to_string(),
+                            context: Some("generate_term".to_string()),
+                        }),
+                    }
+                } else {
+                    Err(ImplicaError::VariableNotFound {
+                        name: name.clone(),
+                        context: Some("generate_term".to_string()),
+                    })
                 }
             }
         }

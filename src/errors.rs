@@ -237,6 +237,15 @@ pub enum ImplicaError {
         message: String,
         context: Option<String>,
     },
+    IndexOutOfRange {
+        idx: usize,
+        length: usize,
+        context: Option<String>,
+    },
+    MissingIdentifier {
+        message: String,
+        context: Option<String>,
+    },
 }
 
 impl Display for ImplicaError {
@@ -350,6 +359,28 @@ impl Display for ImplicaError {
                 }
                 Ok(())
             }
+            ImplicaError::IndexOutOfRange {
+                idx,
+                length,
+                context,
+            } => {
+                write!(
+                    f,
+                    "Index out of range. Tried to access index {} in where length was {}",
+                    idx, length
+                )?;
+                if let Some(context) = context {
+                    write!(f, " ({})", context)?;
+                }
+                Ok(())
+            }
+            ImplicaError::MissingIdentifier { message, context } => {
+                write!(f, "Missing Identifier: '{}'", message)?;
+                if let Some(context) = context {
+                    write!(f, " ({})", context)?;
+                }
+                Ok(())
+            }
         }
     }
 }
@@ -403,6 +434,12 @@ impl From<ImplicaError> for PyErr {
             }
             ImplicaError::ContextConflict { .. } => {
                 exceptions::PyValueError::new_err(err.to_string())
+            }
+            ImplicaError::IndexOutOfRange { .. } => {
+                exceptions::PyIndexError::new_err(err.to_string())
+            }
+            ImplicaError::MissingIdentifier { .. } => {
+                exceptions::PyIndexError::new_err(err.to_string())
             }
         }
     }

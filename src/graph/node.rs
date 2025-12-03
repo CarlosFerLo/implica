@@ -7,7 +7,7 @@ use std::fmt::Display;
 use std::sync::{Arc, RwLock};
 
 use crate::graph::alias::{PropertyMap, SharedPropertyMap};
-use crate::typing::{python_to_term, python_to_type, term_to_python, type_to_python, Term, Type};
+use crate::typing::{term_to_python, type_to_python, Term, Type};
 
 /// Represents a node in the graph (a type in the model).
 ///
@@ -83,66 +83,23 @@ impl PartialEq for Node {
 
 impl Eq for Node {}
 
+impl Node {
+    pub fn new(
+        r#type: Arc<Type>,
+        term: Option<Arc<RwLock<Term>>>,
+        properties: Option<HashMap<String, Py<PyAny>>>,
+    ) -> Self {
+        Node {
+            r#type,
+            term,
+            properties: Arc::new(RwLock::new(properties.unwrap_or_default())),
+            uid_cache: Arc::new(RwLock::new(None)),
+        }
+    }
+}
+
 #[pymethods]
 impl Node {
-    /// Creates a new node with the given type, optional term, and optional properties.
-    ///
-    /// # Arguments
-    ///
-    /// * `type` - The type for this node (Variable or Arrow)
-    /// * `term` - Optional term for this node
-    /// * `properties` - Optional dictionary of properties (default: empty dict)
-    ///
-    /// # Returns
-    ///
-    /// A new `Node` instance
-    ///
-    /// # Examples
-    ///
-    /// ```python
-    /// # Simple node
-    /// node = implica.Node(implica.Variable("Person"));
-    ///
-    /// # Node with term
-    /// term = implica.Term("alice", implica.Variable("Person"));
-    /// node = implica.Node(implica.Variable("Person"), term);
-    ///
-    /// # Node with properties
-    /// node = implica.Node(
-    ///     implica.Variable("Person"),
-    ///     None,
-    ///     {"name": "Alice", "age": 25}
-    /// );
-    /// ```
-    #[new]
-    #[pyo3(signature = (r#type, term=None, properties=None))]
-    pub fn new(
-        r#type: Py<PyAny>,
-        term: Option<Py<PyAny>>,
-        properties: Option<Py<PyDict>>,
-    ) -> PyResult<Self> {
-        Python::attach(|py| {
-            let type_obj = python_to_type(r#type.bind(py))?;
-            let term_obj = if let Some(t) = term {
-                let term: Term = python_to_term(t.bind(py))?;
-                Some(Arc::new(RwLock::new(term)))
-            } else {
-                None
-            };
-            let props = properties
-                .unwrap_or_else(|| PyDict::new(py).into())
-                .bind(py)
-                .extract::<HashMap<String, Py<PyAny>>>()?;
-
-            Ok(Node {
-                r#type: Arc::new(type_obj),
-                term: term_obj,
-                properties: Arc::new(RwLock::new(props)),
-                uid_cache: Arc::new(RwLock::new(None)),
-            })
-        })
-    }
-
     /// Gets the type of this node.
     ///
     /// # Returns

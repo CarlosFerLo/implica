@@ -20,7 +20,7 @@ enum CompiledTypeNodeMatcher {
     /// Match any node (no type constraint)
     Any,
     /// Match nodes with a specific type
-    ExactType(Type),
+    ExactType(Arc<Type>),
     /// Match nodes with a type schema pattern
     SchemaType(TypeSchema),
 }
@@ -28,7 +28,7 @@ enum CompiledTypeNodeMatcher {
 #[derive(Clone, Debug)]
 enum CompiledTermNodeMatcher {
     Any,
-    ExactTerm(Term),
+    ExactTerm(Arc<Term>),
     SchemaTerm(TermSchema),
 }
 
@@ -40,12 +40,12 @@ pub struct NodePattern {
 
     pub properties: HashMap<String, Py<PyAny>>,
     // Keep these for backward compatibility and introspection
-    pub type_obj: Option<Type>,
+    pub r#type: Option<Arc<Type>>,
     pub type_schema: Option<TypeSchema>,
 
     compiled_type_matcher: CompiledTypeNodeMatcher,
     /// Optional term to set when creating nodes
-    pub term_obj: Option<Term>,
+    pub term: Option<Arc<Term>>,
     pub term_schema: Option<TermSchema>,
 
     compiled_term_matcher: CompiledTermNodeMatcher,
@@ -61,10 +61,10 @@ impl Clone for NodePattern {
             NodePattern {
                 variable: self.variable.clone(),
                 properties: props,
-                type_obj: self.type_obj.clone(),
+                r#type: self.r#type.clone(),
                 type_schema: self.type_schema.clone(),
                 compiled_type_matcher: self.compiled_type_matcher.clone(),
-                term_obj: self.term_obj.clone(),
+                term: self.term.clone(),
                 term_schema: self.term_schema.clone(),
                 compiled_term_matcher: self.compiled_term_matcher.clone(),
             }
@@ -75,7 +75,7 @@ impl Clone for NodePattern {
 #[pymethods]
 impl NodePattern {
     fn __repr__(&self) -> String {
-        let type_info = if self.type_obj.is_some() {
+        let type_info = if self.r#type.is_some() {
             ", type=<specified>"
         } else if self.type_schema.is_some() {
             ", type_schema=<specified>"
@@ -89,9 +89,9 @@ impl NodePattern {
 impl NodePattern {
     pub fn new(
         variable: Option<String>,
-        r#type: Option<Type>,
+        r#type: Option<Arc<Type>>,
         type_schema: Option<TypeSchema>,
-        term: Option<Term>,
+        term: Option<Arc<Term>>,
         term_schema: Option<TermSchema>,
         properties: Option<HashMap<String, Py<PyAny>>>,
     ) -> PyResult<Self> {
@@ -131,9 +131,9 @@ impl NodePattern {
         Ok(NodePattern {
             variable,
             properties: properties.unwrap_or_default(),
-            type_obj: r#type,
+            r#type,
             type_schema,
-            term_obj: term,
+            term,
             term_schema,
             compiled_type_matcher,
             compiled_term_matcher,
@@ -160,7 +160,7 @@ impl NodePattern {
                 // No type constraint, continue to property check
             }
             CompiledTypeNodeMatcher::ExactType(type_obj) => {
-                if &*node.r#type != type_obj {
+                if node.r#type.as_ref() != type_obj.as_ref() {
                     return Ok(false);
                 }
             }
@@ -176,7 +176,7 @@ impl NodePattern {
             CompiledTermNodeMatcher::ExactTerm(term_obj) => {
                 if let Some(ref term_lock) = node.term {
                     let term = term_lock.read().unwrap();
-                    if &*term != term_obj {
+                    if &*term != term_obj.as_ref() {
                         return Ok(false);
                     }
                 } else {

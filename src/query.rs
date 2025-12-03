@@ -10,12 +10,12 @@ use crate::context::Context;
 use crate::errors::ImplicaError;
 use crate::graph::{Edge, Graph, Node};
 use crate::patterns::{EdgePattern, NodePattern, PathPattern, TermSchema, TypeSchema};
-use crate::typing::{python_to_term, python_to_type, Term};
+use crate::typing::{python_to_term, python_to_type, Arrow, Term, Type};
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
 use std::collections::HashMap;
 use std::iter::zip;
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 use uuid::Uuid;
 
 /// Cypher-like query builder for the graph.
@@ -257,9 +257,9 @@ impl Query {
                 // Match node
                 let node_pattern = NodePattern::new(
                     node,
-                    type_obj,
+                    type_obj.map(Arc::new),
                     type_schema_obj,
-                    term_obj,
+                    term_obj.map(Arc::new),
                     term_schema_obj,
                     properties_map,
                 )?;
@@ -405,14 +405,15 @@ impl Query {
     }
 
     #[allow(clippy::too_many_arguments)]
-    #[pyo3(signature = (pattern=None, *, node=None, edge=None, r#type=None, term=None, start=None, end=None, properties=None))]
     pub fn create(
         &mut self,
         pattern: Option<String>,
         node: Option<String>,
         edge: Option<String>,
         r#type: Option<Py<PyAny>>,
+        type_schema: Option<Py<PyAny>>,
         term: Option<Py<PyAny>>,
+        term_schema: Option<Py<PyAny>>,
         start: Option<Py<PyAny>>,
         end: Option<Py<PyAny>>,
         properties: Option<Py<PyDict>>,
@@ -430,8 +431,20 @@ impl Query {
                     None
                 };
 
+                let type_schema = if let Some(schema) = type_schema {
+                    Some(schema.bind(py).extract::<TypeSchema>()?)
+                } else {
+                    None
+                };
+
                 let term_obj = if let Some(t) = term {
                     Some(python_to_term(t.bind(py))?)
+                } else {
+                    None
+                };
+
+                let term_schema = if let Some(schema) = term_schema {
+                    Some(schema.bind(py).extract::<TermSchema>()?)
                 } else {
                     None
                 };
@@ -442,8 +455,14 @@ impl Query {
                     None
                 };
 
-                let node_pattern =
-                    NodePattern::new(node, type_obj, None, term_obj, None, properties_map)?;
+                let node_pattern = NodePattern::new(
+                    node,
+                    type_obj.map(Arc::new),
+                    type_schema,
+                    term_obj.map(Arc::new),
+                    term_schema,
+                    properties_map,
+                )?;
                 self.operations
                     .push(QueryOperation::Create(CreateOp::Node(node_pattern)));
                 Ok(())
@@ -451,8 +470,26 @@ impl Query {
         } else if edge.is_some() {
             Python::attach(|py| -> PyResult<()> {
                 // Convert Python types to Rust types
+                let type_obj = if let Some(t) = r#type {
+                    Some(Arc::new(python_to_type(t.bind(py))?))
+                } else {
+                    None
+                };
+
+                let type_schema = if let Some(schema) = type_schema {
+                    Some(schema.bind(py).extract::<TypeSchema>()?)
+                } else {
+                    None
+                };
+
                 let term_obj = if let Some(t) = term {
                     Some(Arc::new(python_to_term(t.bind(py))?))
+                } else {
+                    None
+                };
+
+                let term_schema = if let Some(schema) = term_schema {
+                    Some(schema.bind(py).extract::<TermSchema>()?)
                 } else {
                     None
                 };
@@ -465,10 +502,10 @@ impl Query {
 
                 let edge_pattern = EdgePattern::new(
                     edge.clone(),
-                    None,
-                    None,
+                    type_obj,
+                    type_schema,
                     term_obj,
-                    None,
+                    term_schema,
                     properties_map,
                     "forward".to_string(),
                 )?;
@@ -548,9 +585,9 @@ impl Query {
 
                 let node_pattern = NodePattern::new(
                     node,
-                    type_obj,
+                    type_obj.map(Arc::new),
                     type_schema_obj,
-                    term_obj,
+                    term_obj.map(Arc::new),
                     None,
                     properties_map,
                 )?;
@@ -675,8 +712,7 @@ impl Query {
                     self.execute_match(match_op)?;
                 }
                 QueryOperation::Create(create_op) => {
-                    todo!("Implement this!");
-                    // self.execute_create(py, create_op)?;
+                    self.execute_create(create_op)?;
                 }
                 QueryOperation::Merge(merge_op) => {
                     todo!("Implement this!");
@@ -811,7 +847,6 @@ impl Query {
                             }
                         } else {
                             let mut results = Vec::new();
-                            let mut preserved = Vec::new();
                             let mut contained = false;
 
                             if let Some(ref var) = edge_pattern.variable {
@@ -1070,32 +1105,37 @@ impl Query {
 
                                             contained = true;
                                         }
-                                        (None, None, None) => {
-                                            preserved.push(m.clone());
-                                        }
+                                        (None, None, None) => (),
                                     }
                                 }
 
                                 if contained {
-                                    results.append(&mut preserved);
                                     self.matches = results;
                                 } else {
+                                    // Cartesian product
+                                    let mut results = Vec::new();
                                     for m in potential_matches {
-                                        let dict = HashMap::from([
-                                            (var.clone(), QueryResult::Edge(m.clone())),
-                                            (
-                                                start.clone(),
-                                                QueryResult::Node(
-                                                    (*m.start.read().unwrap()).clone(),
+                                        for old_match in self.matches.iter() {
+                                            let mut dict = old_match.clone();
+                                            dict.extend([
+                                                (var.clone(), QueryResult::Edge(m.clone())),
+                                                (
+                                                    start.clone(),
+                                                    QueryResult::Node(
+                                                        (*m.start.read().unwrap()).clone(),
+                                                    ),
                                                 ),
-                                            ),
-                                            (
-                                                end.clone(),
-                                                QueryResult::Node((*m.end.read().unwrap()).clone()),
-                                            ),
-                                        ]);
-                                        self.matches.push(dict);
+                                                (
+                                                    end.clone(),
+                                                    QueryResult::Node(
+                                                        (*m.end.read().unwrap()).clone(),
+                                                    ),
+                                                ),
+                                            ]);
+                                            results.push(dict);
+                                        }
                                     }
+                                    self.matches = results;
                                 }
                             } else {
                                 for m in self.matches.iter() {
@@ -1185,31 +1225,36 @@ impl Query {
                                                     }.into());
                                             }
                                         },
-                                        (None, None) => {
-                                            preserved.push(m.clone());
-                                        }
+                                        (None, None) => (),
                                     }
                                 }
 
                                 if contained {
-                                    results.append(&mut preserved);
                                     self.matches = results;
                                 } else {
+                                    // Cartesian Product
+                                    let mut results = Vec::new();
                                     for m in potential_matches {
-                                        let dict = HashMap::from([
-                                            (
-                                                start.clone(),
-                                                QueryResult::Node(
-                                                    (*m.start.read().unwrap()).clone(),
+                                        for old_match in self.matches.iter() {
+                                            let mut dict = old_match.clone();
+                                            dict.extend([
+                                                (
+                                                    start.clone(),
+                                                    QueryResult::Node(
+                                                        (*m.start.read().unwrap()).clone(),
+                                                    ),
                                                 ),
-                                            ),
-                                            (
-                                                end.clone(),
-                                                QueryResult::Node((*m.end.read().unwrap()).clone()),
-                                            ),
-                                        ]);
-                                        self.matches.push(dict);
+                                                (
+                                                    end.clone(),
+                                                    QueryResult::Node(
+                                                        (*m.end.read().unwrap()).clone(),
+                                                    ),
+                                                ),
+                                            ]);
+                                            results.push(dict);
+                                        }
                                     }
+                                    self.matches = results;
                                 }
                             }
                         }
@@ -1229,7 +1274,6 @@ impl Query {
                             }
                         } else {
                             let mut results = Vec::new();
-                            let mut preserved = Vec::new();
                             let mut contained = false;
 
                             if let Some(ref var) = edge_pattern.variable {
@@ -1317,25 +1361,29 @@ impl Query {
                                             }
                                             contained = true;
                                         }
-                                        (None, None) => {
-                                            preserved.push(m.clone());
-                                        }
+                                        (None, None) => (),
                                     }
                                 }
 
                                 if contained {
-                                    results.append(&mut preserved);
                                     self.matches = results;
                                 } else {
+                                    // Cartesian product
+                                    let mut results = Vec::new();
                                     for m in potential_matches {
-                                        let dict = HashMap::from([
-                                            (
-                                                start.clone(),
-                                                QueryResult::Node((*m.end.read().unwrap()).clone()),
-                                            ),
-                                            (var.clone(), QueryResult::Edge(m.clone())),
-                                        ]);
-                                        self.matches.push(dict);
+                                        for old_match in self.matches.iter() {
+                                            let mut dict = old_match.clone();
+                                            dict.extend([
+                                                (
+                                                    start.clone(),
+                                                    QueryResult::Node(
+                                                        (*m.end.read().unwrap()).clone(),
+                                                    ),
+                                                ),
+                                                (var.clone(), QueryResult::Edge(m.clone())),
+                                            ]);
+                                            results.push(dict);
+                                        }
                                     }
                                 }
                             } else {
@@ -1358,22 +1406,26 @@ impl Query {
                                             }
                                         }
                                         contained = true;
-                                    } else {
-                                        preserved.push(m.clone());
                                     }
                                 }
 
                                 if contained {
-                                    results.append(&mut preserved);
                                     self.matches = results;
                                 } else {
+                                    let mut results = Vec::new();
                                     for m in potential_matches {
-                                        let dict = HashMap::from([(
-                                            start.clone(),
-                                            QueryResult::Node((*m.start.read().unwrap()).clone()),
-                                        )]);
-                                        self.matches.push(dict);
+                                        for old_match in self.matches.iter() {
+                                            let mut dict = old_match.clone();
+                                            dict.extend([(
+                                                start.clone(),
+                                                QueryResult::Node(
+                                                    (*m.start.read().unwrap()).clone(),
+                                                ),
+                                            )]);
+                                            results.push(dict);
+                                        }
                                     }
+                                    self.matches = results;
                                 }
                             }
                         }
@@ -1393,7 +1445,6 @@ impl Query {
                             }
                         } else {
                             let mut results = Vec::new();
-                            let mut preserved = Vec::new();
                             let mut contained = false;
 
                             if let Some(ref var) = edge_pattern.variable {
@@ -1481,26 +1532,30 @@ impl Query {
 
                                             contained = true;
                                         }
-                                        (None, None) => {
-                                            preserved.push(m.clone());
-                                        }
+                                        (None, None) => (),
                                     }
                                 }
 
                                 if contained {
-                                    results.append(&mut preserved);
                                     self.matches = results;
                                 } else {
+                                    let mut results = Vec::new();
                                     for m in potential_matches {
-                                        let dict = HashMap::from([
-                                            (
-                                                end.clone(),
-                                                QueryResult::Node((*m.end.read().unwrap()).clone()),
-                                            ),
-                                            (var.clone(), QueryResult::Edge(m.clone())),
-                                        ]);
-                                        self.matches.push(dict);
+                                        for old_match in self.matches.iter() {
+                                            let mut dict = old_match.clone();
+                                            dict.extend([
+                                                (
+                                                    end.clone(),
+                                                    QueryResult::Node(
+                                                        (*m.end.read().unwrap()).clone(),
+                                                    ),
+                                                ),
+                                                (var.clone(), QueryResult::Edge(m.clone())),
+                                            ]);
+                                            results.push(dict);
+                                        }
                                     }
+                                    self.matches = results;
                                 }
                             } else {
                                 for m in self.matches.iter() {
@@ -1522,22 +1577,24 @@ impl Query {
                                             }
                                         }
                                         contained = true;
-                                    } else {
-                                        preserved.push(m.clone());
                                     }
                                 }
 
                                 if contained {
-                                    results.append(&mut preserved);
                                     self.matches = results;
                                 } else {
+                                    let mut results = Vec::new();
                                     for m in potential_matches {
-                                        let dict = HashMap::from([(
-                                            end.clone(),
-                                            QueryResult::Node((*m.end.read().unwrap()).clone()),
-                                        )]);
-                                        self.matches.push(dict);
+                                        for old_match in self.matches.iter() {
+                                            let mut dict = old_match.clone();
+                                            dict.extend([(
+                                                end.clone(),
+                                                QueryResult::Node((*m.end.read().unwrap()).clone()),
+                                            )]);
+                                            results.push(dict);
+                                        }
                                     }
+                                    self.matches = results;
                                 }
                             }
                         }
@@ -1551,7 +1608,6 @@ impl Query {
                                 }
                             } else {
                                 let mut results = Vec::new();
-                                let mut preserved = Vec::new();
                                 let mut contained = false;
 
                                 for m in self.matches.iter() {
@@ -1573,20 +1629,24 @@ impl Query {
                                         }
 
                                         contained = true;
-                                    } else {
-                                        preserved.push(m.clone());
                                     }
                                 }
 
                                 if contained {
-                                    results.append(&mut preserved);
                                     self.matches = results;
                                 } else {
+                                    let mut results = Vec::new();
                                     for m in potential_matches {
-                                        let dict =
-                                            HashMap::from([(var.clone(), QueryResult::Edge(m))]);
-                                        self.matches.push(dict);
+                                        for old_match in self.matches.iter() {
+                                            let mut dict = old_match.clone();
+                                            dict.extend([(
+                                                var.clone(),
+                                                QueryResult::Edge(m.clone()),
+                                            )]);
+                                            results.push(dict);
+                                        }
                                     }
+                                    self.matches = results;
                                 }
                             }
                         }
@@ -1634,112 +1694,631 @@ impl Query {
         Ok(())
     }
 
-    /*  TODO: Finish this
+    fn execute_create(&mut self, create_op: CreateOp) -> Result<(), ImplicaError> {
+        if self.matches.is_empty() {
+            self.matches.push(HashMap::new());
+        }
 
-    fn execute_create(&mut self, py: Python, create_op: CreateOp) -> PyResult<()> {
         match create_op {
             CreateOp::Node(node_pattern) => {
-                if let Some(type_obj) = node_pattern.type_obj {
-                    let type_py = type_to_python(py, &type_obj)?;
-                    let props = PyDict::new(py);
-                    for (k, v) in node_pattern.properties {
-                        props.set_item(k, v)?;
+                for m in self.matches.iter_mut() {
+                    if let Some(var) = &node_pattern.variable {
+                        if m.contains_key(var) {
+                            return Err(ImplicaError::VariableAlreadyExists {
+                                name: var.clone(),
+                                context: Some("create node".to_string()),
+                            });
+                        }
                     }
 
-                    let node = Node::new(type_py, None, Some(props.into()))?;
+                    let r#type = if let Some(type_obj) = &node_pattern.r#type {
+                        type_obj.clone()
+                    } else if let Some(type_schema) = &node_pattern.type_schema {
+                        Arc::new(type_schema.as_type(self.context.clone())?)
+                    } else {
+                        return Err(ImplicaError::InvalidQuery {
+                            message:
+                                "To create a node you must provide either a 'type' or 'type_schema'"
+                                    .to_string(),
+                            context: Some("create node".to_string()),
+                        });
+                    };
 
-                    // Use the optimized add_node method which updates the index
-                    self.graph.add_node(&node, py)?;
+                    let term = if let Some(term_obj) = &node_pattern.term {
+                        Some(term_obj.clone())
+                    } else if let Some(term_schema) = &node_pattern.term_schema {
+                        Some(Arc::new(term_schema.as_term(self.context.clone())?))
+                    } else {
+                        None
+                    };
 
-                    if let Some(var) = node_pattern.variable {
-                        // Note: If variable already exists, it will be overwritten
-                        if self.matched_vars.contains_key(&var) {
-                            // Variable already exists - this is allowed but may be unintentional
+                    let mut props = HashMap::new();
+
+                    Python::attach(|py| {
+                        for (k, v) in node_pattern.properties.iter() {
+                            props.insert(k.clone(), v.clone_ref(py));
                         }
-                        self.matched_vars.insert(var, vec![QueryResult::Node(node)]);
+                    });
+
+                    let node = Node::new(
+                        r#type,
+                        term.map(|t| Arc::new(RwLock::new((*t).clone()))),
+                        Some(props),
+                    );
+
+                    self.graph.add_node(&node)?;
+
+                    if let Some(var) = &node_pattern.variable {
+                        m.insert(var.clone(), QueryResult::Node(node));
                     }
                 }
             }
-            CreateOp::Edge(edge_pattern, start_var, end_var) => {
-                // Extract start and end nodes from matched_vars
-                let start_node = if let Some(start_results) = self.matched_vars.get(&start_var) {
-                    if let Some(QueryResult::Node(node)) = start_results.first() {
-                        node.clone()
+            CreateOp::Edge(edge_pattern, start, end) => {
+                for m in self.matches.iter_mut() {
+                    if let Some(ref var) = edge_pattern.variable {
+                        if m.contains_key(var) {
+                            return Err(ImplicaError::VariableAlreadyExists {
+                                name: var.clone(),
+                                context: Some("create edge".to_string()),
+                            });
+                        }
+                    }
+
+                    let start_node = if let Some(qr) = m.get(&start) {
+                        match qr {
+                            QueryResult::Node(n) => n.clone(),
+                            QueryResult::Edge(_) => {
+                                return Err(ImplicaError::InvalidQuery {
+                                    message: format!(
+                                        "start node identifier '{}' matches as an edge.",
+                                        &start
+                                    ),
+                                    context: Some("create_edge".to_string()),
+                                });
+                            }
+                        }
                     } else {
                         return Err(ImplicaError::InvalidQuery {
                             message: format!(
-                                "Start variable '{}' does not contain a node",
-                                start_var
+                                "start node identifier '{}' did not appear in the match.",
+                                &start
                             ),
-                            context: Some("edge creation".to_string()),
-                        }
-                        .into());
-                    }
-                } else {
-                    return Err(ImplicaError::InvalidQuery {
-                        message: format!("Start variable '{}' not found", start_var),
-                        context: Some("edge creation".to_string()),
-                    }
-                    .into());
-                };
+                            context: Some("create edge".to_string()),
+                        });
+                    };
 
-                let end_node = if let Some(end_results) = self.matched_vars.get(&end_var) {
-                    if let Some(QueryResult::Node(node)) = end_results.first() {
-                        node.clone()
+                    let end_node = if let Some(qr) = m.get(&end) {
+                        match qr {
+                            QueryResult::Node(n) => n.clone(),
+                            QueryResult::Edge(_) => {
+                                return Err(ImplicaError::InvalidQuery {
+                                    message: format!(
+                                        "end node identifier '{}' matches as an edge.",
+                                        &start
+                                    ),
+                                    context: Some("create_edge".to_string()),
+                                });
+                            }
+                        }
                     } else {
                         return Err(ImplicaError::InvalidQuery {
-                            message: format!("End variable '{}' does not contain a node", end_var),
-                            context: Some("edge creation".to_string()),
+                            message: format!(
+                                "end node identifier '{}' did not appear in the match.",
+                                &start
+                            ),
+                            context: Some("create edge".to_string()),
+                        });
+                    };
+
+                    let term = if let Some(term_obj) = &edge_pattern.term {
+                        (**term_obj).clone()
+                    } else if let Some(term_schema) = &edge_pattern.term_schema {
+                        term_schema.as_term(self.context.clone())?
+                    } else {
+                        return Err(ImplicaError::InvalidQuery {
+                            message: "To create an edge you must provide either a 'term' or 'term_schema'".to_string(),
+                            context: Some("create edge".to_string())
+                        });
+                    };
+
+                    let mut props = HashMap::new();
+
+                    Python::attach(|py| {
+                        for (k, v) in edge_pattern.properties.iter() {
+                            props.insert(k.clone(), v.clone_ref(py));
                         }
-                        .into());
-                    }
-                } else {
-                    return Err(ImplicaError::InvalidQuery {
-                        message: format!("End variable '{}' not found", end_var),
-                        context: Some("edge creation".to_string()),
-                    }
-                    .into());
-                };
+                    });
 
-                // Create the term for the edge
-                if let Some(term_obj) = edge_pattern.term {
-                    let props = PyDict::new(py);
-                    for (k, v) in edge_pattern.properties {
-                        props.set_item(k, v)?;
-                    }
+                    let edge = self.graph.add_edge(
+                        Arc::new(term),
+                        start_node,
+                        end_node,
+                        Some(Arc::new(RwLock::new(props))),
+                    )?;
 
-                    // Create the term in Python and convert to PyAny
-                    let term_py: Py<PyAny> = Py::new(py, term_obj.clone())?.into();
-                    let start_py: Py<PyAny> = Py::new(py, start_node.clone())?.into();
-                    let end_py: Py<PyAny> = Py::new(py, end_node.clone())?.into();
-
-                    // Create the edge
-                    let edge = Edge::new(term_py, start_py, end_py, Some(props.into()))?;
-
-                    // Use the optimized add_edge method which updates the index
-                    self.graph.add_edge(&edge, py)?;
-
-                    if let Some(var) = edge_pattern.variable {
-                        // Note: If variable already exists, it will be overwritten
-                        if self.matched_vars.contains_key(&var) {
-                            // Variable already exists - this is allowed but may be unintentional
-                        }
-                        self.matched_vars.insert(var, vec![QueryResult::Edge(edge)]);
+                    if let Some(ref var) = edge_pattern.variable {
+                        m.insert(var.clone(), QueryResult::Edge(edge));
                     }
                 }
             }
-            CreateOp::Path(path) => {
-                // Create nodes and edges in path
-                // This is a simplified implementation
-                for node_pattern in path.nodes {
-                    if node_pattern.type_obj.is_some() {
-                        self.execute_create(py, CreateOp::Node(node_pattern))?;
+            CreateOp::Path(mut path) => {
+                if path.edges.len() != path.nodes.len() + 1 {
+                    return Err(ImplicaError::InvalidQuery {
+                        message: format!(
+                            "Expected number of edges {} for {} nodes, actual number of edges {}",
+                            path.nodes.len() + 1,
+                            path.nodes.len(),
+                            path.edges.len()
+                        ),
+                        context: Some("create path".to_string()),
+                    });
+                }
+
+                let nodes_len = path.nodes.len();
+
+                let mut placeholder_variables = Vec::new();
+
+                for np in path.nodes.iter_mut() {
+                    if np.variable.is_none() {
+                        let var_name = Uuid::new_v4().to_string();
+                        np.variable = Some(var_name.clone());
+                        placeholder_variables.push(var_name);
+                    }
+
+                    if let Some(ref type_schema) = np.type_schema {
+                        np.r#type = Some(Arc::new(type_schema.as_type(self.context.clone())?));
+                        np.type_schema = None;
+                    }
+
+                    if let Some(ref term_schema) = np.term_schema {
+                        np.term = Some(Arc::new(term_schema.as_term(self.context.clone())?));
+                        np.term_schema = None;
+                    }
+
+                    if np.r#type.is_none() {
+                        if let Some(ref term) = np.term {
+                            np.r#type = Some(term.r#type().clone());
+                        }
+                    }
+                }
+                for ep in path.edges.iter_mut() {
+                    if ep.variable.is_none() {
+                        let var_name = Uuid::new_v4().to_string();
+                        ep.variable = Some(var_name.clone());
+                        placeholder_variables.push(var_name);
+                    }
+
+                    if let Some(ref type_schema) = ep.type_schema {
+                        ep.r#type = Some(Arc::new(type_schema.as_type(self.context.clone())?));
+                        ep.type_schema = None;
+                    }
+
+                    if let Some(ref term_schema) = ep.term_schema {
+                        ep.r#term = Some(Arc::new(term_schema.as_term(self.context.clone())?));
+                        ep.term_schema = None;
+                    }
+
+                    if ep.r#type.is_none() {
+                        if let Some(ref term) = ep.term {
+                            ep.r#type = Some(term.r#type().clone());
+                        }
+                    }
+                }
+
+                for m in self.matches.iter_mut() {
+                    for np in path.nodes.iter_mut() {
+                        if let Some(ref var) = np.variable {
+                            if let Some(qr) = m.get(var) {
+                                match qr {
+                                    QueryResult::Node(node) => {
+                                        np.r#type = Some(node.r#type.clone());
+                                        np.term = node
+                                            .term
+                                            .clone()
+                                            .map(|t| Arc::new(t.read().unwrap().clone()));
+                                    }
+                                    QueryResult::Edge(_) => {
+                                        return Err(ImplicaError::InvalidQuery {
+                                            message: format!("Variable '{}' previously assigned to an edge has been assigned to a node", var),
+                                            context: Some("create path".to_string())
+                                        });
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    for ep in path.edges.iter_mut() {
+                        if let Some(ref var) = ep.variable {
+                            if let Some(qr) = m.get(var) {
+                                match qr {
+                                    QueryResult::Edge(edge) => {
+                                        ep.r#type = Some(edge.term.r#type());
+                                        ep.term = Some(edge.term.clone())
+                                    }
+                                    QueryResult::Node(_) => {
+                                        return Err(ImplicaError::InvalidQuery {
+                                            message: format!("Variable '{}' previously assigned to a node has been assigned to an edge", var),
+                                            context: Some("create path".to_string())
+                                        });
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    let mut queue: Vec<(usize, bool)> = Vec::new();
+
+                    queue.extend(zip(0..nodes_len, vec![true; nodes_len]));
+                    queue.extend(zip(0..(nodes_len - 1), vec![false; nodes_len - 1]));
+
+                    // Process the queue
+                    while let Some((idx, is_node)) = queue.pop() {
+                        if is_node {
+                            // First, collect the values we need from other nodes/edges before mutably borrowing
+                            let left_edge_type_update = if idx > 0 {
+                                if let Some(left_edge) = path.edges.get(idx - 1) {
+                                    if let Some(ref edge_type) = left_edge.r#type {
+                                        if let Some(arr) = edge_type.as_arrow() {
+                                            Some(arr.right.clone())
+                                        } else {
+                                            return Err(ImplicaError::InvalidQuery {
+                                                message:
+                                                    "The type of an edge must be an arrow type."
+                                                        .to_string(),
+                                                context: Some("create path node".to_string()),
+                                            });
+                                        }
+                                    } else {
+                                        None
+                                    }
+                                } else {
+                                    return Err(ImplicaError::IndexOutOfRange {
+                                        idx,
+                                        length: nodes_len - 1,
+                                        context: Some("create path node".to_string()),
+                                    });
+                                }
+                            } else {
+                                None
+                            };
+
+                            let left_edge_term_update = if idx > 0 {
+                                if let Some(left_edge) = path.edges.get(idx - 1) {
+                                    if let Some(ref edge_term) = left_edge.term {
+                                        if let Some(left_node) = path.nodes.get(idx - 1) {
+                                            if let Some(ref left_node_term) = left_node.term {
+                                                Some(edge_term.apply(left_node_term)?)
+                                            } else {
+                                                None
+                                            }
+                                        } else {
+                                            return Err(ImplicaError::IndexOutOfRange {
+                                                idx,
+                                                length: nodes_len,
+                                                context: Some("create path node".to_string()),
+                                            });
+                                        }
+                                    } else {
+                                        None
+                                    }
+                                } else {
+                                    return Err(ImplicaError::IndexOutOfRange {
+                                        idx,
+                                        length: nodes_len - 1,
+                                        context: Some("create path node".to_string()),
+                                    });
+                                }
+                            } else {
+                                None
+                            };
+
+                            let right_edge_type_update = if idx < nodes_len - 1 {
+                                if let Some(right_edge) = path.edges.get(idx) {
+                                    if let Some(ref edge_type) = right_edge.r#type {
+                                        if let Some(arr) = edge_type.as_arrow() {
+                                            Some(arr.right.clone())
+                                        } else {
+                                            return Err(ImplicaError::InvalidQuery {
+                                                message:
+                                                    "The type of an edge must be an arrow type."
+                                                        .to_string(),
+                                                context: Some("create path node".to_string()),
+                                            });
+                                        }
+                                    } else {
+                                        None
+                                    }
+                                } else {
+                                    return Err(ImplicaError::IndexOutOfRange {
+                                        idx,
+                                        length: nodes_len - 1,
+                                        context: Some("create path node".to_string()),
+                                    });
+                                }
+                            } else {
+                                None
+                            };
+
+                            let right_edge_term_update = if idx < nodes_len - 1 {
+                                if let Some(right_edge) = path.edges.get(idx) {
+                                    if let Some(ref edge_term) = right_edge.term {
+                                        if let Some(right_node) = path.nodes.get(idx + 1) {
+                                            if let Some(ref right_node_term) = right_node.term {
+                                                Some(edge_term.apply(right_node_term)?)
+                                            } else {
+                                                None
+                                            }
+                                        } else {
+                                            return Err(ImplicaError::IndexOutOfRange {
+                                                idx,
+                                                length: nodes_len,
+                                                context: Some("create path node".to_string()),
+                                            });
+                                        }
+                                    } else {
+                                        None
+                                    }
+                                } else {
+                                    return Err(ImplicaError::IndexOutOfRange {
+                                        idx,
+                                        length: nodes_len - 1,
+                                        context: Some("create path node".to_string()),
+                                    });
+                                }
+                            } else {
+                                None
+                            };
+
+                            // Now we can safely borrow the node mutably
+                            if let Some(node) = path.nodes.get_mut(idx) {
+                                let mut changed = false;
+
+                                if idx > 0 {
+                                    // Apply type update
+                                    if node.r#type.is_none() {
+                                        if let Some(type_result) = left_edge_type_update {
+                                            node.r#type = Some(type_result);
+                                            changed = true;
+                                        }
+                                    }
+
+                                    // Apply term update
+                                    if node.term.is_none() {
+                                        if let Some(term_result) = left_edge_term_update {
+                                            node.term = Some(Arc::new(term_result));
+                                            changed = true;
+                                        }
+                                    }
+                                }
+
+                                if idx < nodes_len - 1 {
+                                    if node.r#type.is_none() {
+                                        if let Some(type_result) = right_edge_type_update {
+                                            node.r#type = Some(type_result);
+                                            changed = true;
+                                        }
+                                    }
+
+                                    if node.term.is_none() {
+                                        if let Some(term_result) = right_edge_term_update {
+                                            node.term = Some(Arc::new(term_result));
+                                            changed = true;
+                                        }
+                                    }
+                                }
+
+                                if changed {
+                                    queue.extend([(idx - 1, false), (idx, false)]);
+                                }
+                            } else {
+                                return Err(ImplicaError::IndexOutOfRange {
+                                    idx,
+                                    length: nodes_len,
+                                    context: Some("create path node".to_string()),
+                                });
+                            }
+                        } else {
+                            let left_node = match path.nodes.get(idx) {
+                                Some(n) => n,
+                                None => {
+                                    return Err(ImplicaError::IndexOutOfRange {
+                                        idx,
+                                        length: nodes_len,
+                                        context: Some("create path node".to_string()),
+                                    });
+                                }
+                            };
+
+                            let right_node = match path.nodes.get(idx + 1) {
+                                Some(n) => n,
+                                None => {
+                                    return Err(ImplicaError::IndexOutOfRange {
+                                        idx,
+                                        length: nodes_len,
+                                        context: Some("create path node".to_string()),
+                                    });
+                                }
+                            };
+
+                            let type_update = match (&left_node.r#type, &right_node.r#type) {
+                                (Some(left_type), Some(right_type)) => Some(Type::Arrow(
+                                    Arrow::new(left_type.clone(), right_type.clone()),
+                                )),
+                                _ => None,
+                            };
+
+                            let term_update = match (&left_node.term, &right_node.term) {
+                                (Some(left_term), Some(right_term)) => {
+                                    if let Some(right_term) = right_term.as_application() {
+                                        if left_term.as_ref() == right_term.argument.as_ref() {
+                                            Some(right_term.function.clone())
+                                        } else {
+                                            None
+                                        }
+                                    } else {
+                                        None
+                                    }
+                                }
+                                _ => None,
+                            };
+
+                            if let Some(edge) = path.edges.get_mut(idx) {
+                                let mut changed = false;
+                                if edge.r#type.is_none() {
+                                    edge.r#type = type_update.map(Arc::new);
+                                    changed = true;
+                                }
+                                if edge.term.is_none() {
+                                    edge.term = term_update;
+                                    changed = true;
+                                }
+
+                                if changed {
+                                    queue.extend([(idx, true), (idx + 1, true)]);
+                                }
+                            } else {
+                                return Err(ImplicaError::IndexOutOfRange {
+                                    idx,
+                                    length: nodes_len,
+                                    context: Some("create path edge".to_string()),
+                                });
+                            }
+                        }
+                    }
+
+                    let mut nodes = Vec::new();
+
+                    for np in path.nodes.iter() {
+                        if let Some(ref var) = np.variable {
+                            if let Some(qr) = m.get(var) {
+                                match qr {
+                                    QueryResult::Node(n) => {
+                                        nodes.push(n.clone());
+                                    }
+                                    QueryResult::Edge(_) => {
+                                        return Err(ImplicaError::InvalidQuery {
+                                            message: format!("Variable '{}' previously assigned to an edge has been assigned to a node", var),
+                                            context: Some("create path".to_string())
+                                        });
+                                    }
+                                }
+
+                                continue;
+                            }
+                        }
+
+                        let r#type = match &np.r#type {
+                            Some(t) => t.clone(),
+                            None => {
+                                return Err(ImplicaError::InvalidQuery {
+                                    message: "could not resolve the type of a node from the provided pattern".to_string(),
+                                    context: Some("create path".to_string())
+                                });
+                            }
+                        };
+                        let term = np.term.clone().map(|t| Arc::new(RwLock::new((*t).clone())));
+
+                        let mut props = HashMap::new();
+
+                        Python::attach(|py| {
+                            for (k, v) in np.properties.iter() {
+                                props.insert(k.clone(), v.clone_ref(py));
+                            }
+                        });
+
+                        let mut node = Node::new(r#type, term, Some(props));
+
+                        match self.graph.add_node(&node) {
+                            Ok(()) => (),
+                            Err(e) => match e {
+                                ImplicaError::NodeAlreadyExists {
+                                    message: _,
+                                    existing,
+                                    new: _,
+                                } => node = existing.clone(),
+                                _ => {
+                                    return Err(e);
+                                }
+                            },
+                        }
+
+                        if let Some(ref var) = np.variable {
+                            m.insert(var.clone(), QueryResult::Node(node.clone()));
+                            nodes.push(node);
+                        }
+                    }
+
+                    for (idx, ep) in path.edges.iter().enumerate() {
+                        if let Some(ref var) = ep.variable {
+                            if m.contains_key(var) {
+                                continue;
+                            }
+                        }
+
+                        let term = match &ep.term {
+                            Some(t) => t.clone(),
+                            None => {
+                                return Err(ImplicaError::InvalidQuery {
+                                    message: "could not resolve the term of an edge from the provided pattern".to_string(),
+                                    context: Some("create path".to_string())
+                                });
+                            }
+                        };
+
+                        let mut props = HashMap::new();
+
+                        Python::attach(|py| {
+                            for (k, v) in ep.properties.iter() {
+                                props.insert(k.clone(), v.clone_ref(py));
+                            }
+                        });
+
+                        let start = match nodes.get(idx) {
+                            Some(n) => n.clone(),
+                            None => {
+                                return Err(ImplicaError::IndexOutOfRange {
+                                    idx,
+                                    length: nodes_len,
+                                    context: Some("create path".to_string()),
+                                });
+                            }
+                        };
+
+                        let end = match nodes.get(idx + 1) {
+                            Some(n) => n.clone(),
+                            None => {
+                                return Err(ImplicaError::IndexOutOfRange {
+                                    idx: idx + 1,
+                                    length: nodes_len,
+                                    context: Some("create path".to_string()),
+                                });
+                            }
+                        };
+
+                        let edge = self.graph.add_edge(
+                            term,
+                            start,
+                            end,
+                            Some(Arc::new(RwLock::new(props))),
+                        )?;
+
+                        if let Some(ref var) = ep.variable {
+                            m.insert(var.clone(), QueryResult::Edge(edge));
+                        }
+                    }
+
+                    for ph in placeholder_variables.iter() {
+                        m.remove(ph);
                     }
                 }
             }
         }
         Ok(())
     }
+
+    /*  TODO: Finish this
+
 
     fn execute_merge(&mut self, py: Python, merge_op: MergeOp) -> PyResult<()> {
         match merge_op {
