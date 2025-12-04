@@ -631,8 +631,7 @@ impl Query {
                     self.execute_where(condition)?;
                 }
                 QueryOperation::With(vars) => {
-                    todo!("Implement this!");
-                    //self.execute_with(vars)?;
+                    self.execute_with(vars)?;
                 }
                 QueryOperation::OrderBy(var, key, ascending) => {
                     todo!("Implement this!");
@@ -2329,20 +2328,32 @@ impl Query {
         Ok(())
     }
 
-    /*
     fn execute_with(&mut self, vars: Vec<String>) -> PyResult<()> {
-        // WITH passes through only the specified variables
-        // Remove all other variables from matched_vars
-        let keys: Vec<String> = self.matched_vars.keys().cloned().collect();
-        for key in keys {
-            if !vars.contains(&key) {
-                self.matched_vars.remove(&key);
+        for m in self.matches.iter_mut() {
+            let mut dict = HashMap::new();
+
+            for v in vars.iter() {
+                match m.get(v) {
+                    Some(qr) => {
+                        dict.insert(v.clone(), qr.clone());
+                    }
+                    None => {
+                        return Err(ImplicaError::VariableNotFound {
+                            name: v.clone(),
+                            context: Some("with".to_string()),
+                        }
+                        .into());
+                    }
+                }
             }
+
+            *m = dict;
         }
+
         Ok(())
     }
 
-
+    /*
     fn execute_order_by(
         &mut self,
         py: Python,
