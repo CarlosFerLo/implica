@@ -246,6 +246,9 @@ pub enum ImplicaError {
         message: String,
         context: Option<String>,
     },
+    EvaluationError {
+        message: String,
+    },
 }
 
 impl Display for ImplicaError {
@@ -381,6 +384,9 @@ impl Display for ImplicaError {
                 }
                 Ok(())
             }
+            ImplicaError::EvaluationError { message } => {
+                write!(f, "Evaluation Error: '{}'", message)
+            }
         }
     }
 }
@@ -440,6 +446,9 @@ impl From<ImplicaError> for PyErr {
             }
             ImplicaError::MissingIdentifier { .. } => {
                 exceptions::PyIndexError::new_err(err.to_string())
+            }
+            ImplicaError::EvaluationError { .. } => {
+                exceptions::PyRuntimeError::new_err(err.to_string())
             }
         }
     }

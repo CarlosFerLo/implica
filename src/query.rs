@@ -11,8 +11,10 @@ use crate::errors::ImplicaError;
 use crate::graph::{Edge, Graph, Node};
 use crate::patterns::{EdgePattern, NodePattern, PathPattern, TermSchema, TypeSchema};
 use crate::typing::{python_to_term, python_to_type, Arrow, Type};
+use crate::utils::{props_as_map, Evaluator};
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
+use rhai::Scope;
 use std::collections::HashMap;
 use std::iter::zip;
 use std::sync::{Arc, RwLock};
@@ -626,8 +628,7 @@ impl Query {
                     self.execute_set(var, props, overwrite)?;
                 }
                 QueryOperation::Where(condition) => {
-                    todo!("Implement this!");
-                    //self.execute_where(py, condition)?;
+                    self.execute_where(condition)?;
                 }
                 QueryOperation::With(vars) => {
                     todo!("Implement this!");
@@ -2301,489 +2302,34 @@ impl Query {
         Ok(())
     }
 
-    /*  TODO: Finish this
+    fn execute_where(&mut self, condition: String) -> Result<(), ImplicaError> {
+        let mut results = Vec::new();
 
-    fn execute_set(&mut self, py: Python, var: String, props: Py<PyDict>) -> PyResult<()> {
-        // Set properties on matched nodes and edges
-        if let Some(results) = self.matched_vars.get_mut(&var) {
-            // Clone results to avoid borrow issues during re-indexing
-            let results_clone = results.clone();
+        let evaluator = Evaluator::new()?;
 
-            for result in results_clone {
-                match result {
-                    QueryResult::Node(node) => {
-                        // Update node properties by merging new props into existing
-                        let mut node_props = node.properties.write().unwrap();
-                        let new_props = props.bind(py).extract::<HashMap<String, Py<PyAny>>>()?;
-                        for (key, value) in new_props.iter() {
-                            node_props.insert(key.clone(), value.clone_ref(py));
-                        }
-                    }
-                    QueryResult::Edge(edge) => {
-                        // Update edge properties by merging new props into existing
-                        let mut edge_props = edge.properties.write().unwrap();
-                        let new_props = props.bind(py).extract::<HashMap<String, Py<PyAny>>>()?;
-                        for (key, value) in new_props.iter() {
-                            edge_props.insert(key.clone(), value.clone_ref(py));
-                        }
-                    }
-                }
+        for m in self.matches.iter() {
+            let mut scope = Scope::new();
+            for (var, qr) in m.iter() {
+                let props = match qr {
+                    QueryResult::Node(n) => n.properties.read().unwrap(),
+                    QueryResult::Edge(e) => e.properties.read().unwrap(),
+                };
+
+                let map = props_as_map(&props)?;
+                scope.push(var.clone(), map);
+            }
+
+            if evaluator.eval(&mut scope, &condition)? {
+                results.push(m.clone());
             }
         }
-        Ok(())
-    }
 
-    fn execute_set_term(&mut self, py: Python, var: String, term: Term) -> PyResult<()> {
-        if let Some(results) = self.matched_vars.get_mut(&var) {
-            let results_clone = results.clone();
-
-            for result in results_clone {
-                match result {
-                    QueryResult::Node(node) => {
-                        // Check node term type matches new term type
-                        if node.r#type != term.r#type {
-                            return Err(ImplicaError::InvalidQuery {
-                                message: format!(
-                                    "Cannot set term: node term type '{}' does not match new term type '{}'",
-                                    node.r#type, term.r#type
-                                ),
-                                context: Some("set term".to_string()),
-                            }.into());
-                        }
-
-                        // Update node term
-                        match node.term {
-                            Some(term_lock) => {
-                                let mut node_term = term_lock.write().unwrap();
-                                *node_term = term.clone();
-                            }
-                            None => {
-                                node.term = Some(Arc::new(RwLock::new(term.clone())));
-                            }
-                        }
-                    }
-                    QueryResult::Edge(edge) => {}
-                }
-            }
-        }
-        Ok(())
-    }
-
-    fn execute_where(&mut self, py: Python, condition: String) -> PyResult<()> {
-        // Parse and evaluate WHERE conditions with logical expressions
-        // Supports: AND, OR, NOT, and parentheses
-        // Examples: "n.age > 25 AND n.name = 'Alice'"
-        //           "n.age < 18 OR n.age > 65"
-        //           "NOT n.active = true"
-        //           "(n.age > 20 AND n.age < 30) OR n.status = 'VIP'"
-
-        let condition = condition.trim().to_string();
-
-        // Collect all variables referenced in the condition
-        let var_names = Self::extract_variables_from_condition(&condition);
-
-        // For each variable, filter its results
-        for var_name in var_names {
-            if let Some(results) = self.matched_vars.get_mut(&var_name) {
-                let cond_clone = condition.clone();
-                let var_clone = var_name.clone();
-                results.retain(|result| {
-                    if let QueryResult::Node(node) = result {
-                        Self::evaluate_logical_expression(py, &cond_clone, &var_clone, node)
-                    } else {
-                        false
-                    }
-                });
-            }
-        }
+        self.matches = results;
 
         Ok(())
     }
 
-    /// Extract all variable names referenced in a condition string
-    fn extract_variables_from_condition(condition: &str) -> Vec<String> {
-        let mut vars = std::collections::HashSet::new();
-        let mut current = String::new();
-        let mut chars = condition.chars().peekable();
-
-        while let Some(ch) = chars.next() {
-            if ch.is_alphanumeric() || ch == '_' {
-                current.push(ch);
-            } else if ch == '.' && !current.is_empty() {
-                // This is a variable reference
-                vars.insert(current.clone());
-                current.clear();
-                // Skip the property name
-                while let Some(&next_ch) = chars.peek() {
-                    if next_ch.is_alphanumeric() || next_ch == '_' {
-                        chars.next();
-                    } else {
-                        break;
-                    }
-                }
-            } else {
-                current.clear();
-            }
-        }
-
-        vars.into_iter().collect()
-    }
-
-    /// Evaluate a logical expression for a given node
-    fn evaluate_logical_expression(py: Python, expr: &str, var_name: &str, node: &Node) -> bool {
-        Self::parse_or_expression(py, expr, var_name, node)
-    }
-
-    /// Parse OR expression (lowest precedence, right-associative)
-    fn parse_or_expression(py: Python, expr: &str, var_name: &str, node: &Node) -> bool {
-        let parts = Self::split_by_operator(expr, " OR ");
-        if parts.len() > 1 {
-            // Right-associative: evaluate from right to left
-            let last_idx = parts.len() - 1;
-            let left = parts[..last_idx].join(" OR ");
-            let right = parts[last_idx];
-
-            let left_result = Self::parse_or_expression(py, &left, var_name, node);
-            let right_result = Self::parse_and_expression(py, right, var_name, node);
-
-            return left_result || right_result;
-        }
-
-        Self::parse_and_expression(py, expr, var_name, node)
-    }
-
-    /// Parse AND expression (higher precedence than OR, right-associative)
-    fn parse_and_expression(py: Python, expr: &str, var_name: &str, node: &Node) -> bool {
-        let parts = Self::split_by_operator(expr, " AND ");
-        if parts.len() > 1 {
-            // Right-associative: evaluate from right to left
-            let last_idx = parts.len() - 1;
-            let left = parts[..last_idx].join(" AND ");
-            let right = parts[last_idx];
-
-            let left_result = Self::parse_and_expression(py, &left, var_name, node);
-            let right_result = Self::parse_not_expression(py, right, var_name, node);
-
-            return left_result && right_result;
-        }
-
-        Self::parse_not_expression(py, expr, var_name, node)
-    }
-
-    /// Parse NOT expression (highest precedence)
-    fn parse_not_expression(py: Python, expr: &str, var_name: &str, node: &Node) -> bool {
-        let expr = expr.trim();
-
-        if let Some(inner) = expr.strip_prefix("NOT ") {
-            return !Self::parse_primary_expression(py, inner, var_name, node);
-        }
-
-        Self::parse_primary_expression(py, expr, var_name, node)
-    }
-
-    /// Parse primary expression (comparison or parenthesized expression)
-    fn parse_primary_expression(py: Python, expr: &str, var_name: &str, node: &Node) -> bool {
-        let expr = expr.trim();
-
-        // Handle parentheses
-        if expr.starts_with('(') && expr.ends_with(')') {
-            let inner = &expr[1..expr.len() - 1];
-            return Self::evaluate_logical_expression(py, inner, var_name, node);
-        }
-
-        // Parse simple comparison: var.property op value
-        Self::evaluate_simple_condition(py, expr, var_name, node)
-    }
-
-    /// Split expression by operator, respecting parentheses
-    fn split_by_operator<'a>(expr: &'a str, op: &str) -> Vec<&'a str> {
-        let mut parts = Vec::new();
-        let mut current_start = 0;
-        let mut paren_depth = 0;
-        let mut i = 0;
-        let bytes = expr.as_bytes();
-
-        while i < expr.len() {
-            if bytes[i] == b'(' {
-                paren_depth += 1;
-                i += 1;
-            } else if bytes[i] == b')' {
-                paren_depth -= 1;
-                i += 1;
-            } else if paren_depth == 0 && i + op.len() <= expr.len() && &expr[i..i + op.len()] == op
-            {
-                parts.push(&expr[current_start..i]);
-                i += op.len();
-                current_start = i;
-            } else {
-                i += 1;
-            }
-        }
-
-        if current_start < expr.len() {
-            parts.push(&expr[current_start..]);
-        }
-
-        if parts.is_empty() {
-            vec![expr]
-        } else {
-            parts
-        }
-    }
-
-    /// Evaluate a simple comparison condition
-    ///
-    /// Supports:
-    /// - Basic comparisons: =, !=, <, >, <=, >=
-    /// - IN operator: n.status IN ['active', 'pending']
-    /// - String operators: STARTS WITH, CONTAINS, ENDS WITH
-    /// - Null checks: IS NULL, IS NOT NULL
-    fn evaluate_simple_condition(py: Python, condition: &str, var_name: &str, node: &Node) -> bool {
-        let condition = condition.trim();
-
-        // Check for IS NULL / IS NOT NULL
-        if condition.contains(" IS NOT NULL") {
-            let parts: Vec<&str> = condition.split(" IS NOT NULL").collect();
-            if parts.len() == 2 && parts[1].trim().is_empty() {
-                let left = parts[0].trim();
-                let left_parts: Vec<&str> = left.split('.').collect();
-                if left_parts.len() == 2 && left_parts[0] == var_name {
-                    let prop_name = left_parts[1];
-                    let props = node.properties.read().unwrap();
-                    return props.get(prop_name).is_some();
-                }
-            }
-            return false;
-        }
-
-        if condition.contains(" IS NULL") {
-            let parts: Vec<&str> = condition.split(" IS NULL").collect();
-            if parts.len() == 2 && parts[1].trim().is_empty() {
-                let left = parts[0].trim();
-                let left_parts: Vec<&str> = left.split('.').collect();
-                if left_parts.len() == 2 && left_parts[0] == var_name {
-                    let prop_name = left_parts[1];
-                    let props = node.properties.read().unwrap();
-                    return props.get(prop_name).is_none();
-                }
-            }
-            return false;
-        }
-
-        // Check for IN operator
-        if condition.contains(" IN ") {
-            return Self::evaluate_in_condition(py, condition, var_name, node);
-        }
-
-        // Check for string operators
-        if condition.contains(" STARTS WITH ") {
-            return Self::evaluate_string_operator(py, condition, var_name, node, "STARTS WITH");
-        }
-        if condition.contains(" ENDS WITH ") {
-            return Self::evaluate_string_operator(py, condition, var_name, node, "ENDS WITH");
-        }
-        if condition.contains(" CONTAINS ") {
-            return Self::evaluate_string_operator(py, condition, var_name, node, "CONTAINS");
-        }
-
-        // Standard comparison operators
-        let (left, op, right) = if let Some(pos) = condition.find(">=") {
-            (&condition[..pos], ">=", &condition[pos + 2..])
-        } else if let Some(pos) = condition.find("<=") {
-            (&condition[..pos], "<=", &condition[pos + 2..])
-        } else if let Some(pos) = condition.find("!=") {
-            (&condition[..pos], "!=", &condition[pos + 2..])
-        } else if let Some(pos) = condition.find('=') {
-            (&condition[..pos], "=", &condition[pos + 1..])
-        } else if let Some(pos) = condition.find('>') {
-            (&condition[..pos], ">", &condition[pos + 1..])
-        } else if let Some(pos) = condition.find('<') {
-            (&condition[..pos], "<", &condition[pos + 1..])
-        } else {
-            return false;
-        };
-
-        let left = left.trim();
-        let right = right.trim().trim_matches(|c| c == '\'' || c == '"');
-
-        // Extract variable and property from left side (e.g., "n.age")
-        let left_parts: Vec<&str> = left.split('.').collect();
-        if left_parts.len() != 2 {
-            return false;
-        }
-
-        let cond_var_name = left_parts[0];
-        if cond_var_name != var_name {
-            return false;
-        }
-
-        let prop_name = left_parts[1];
-
-        // Get property value from node
-        let props = node.properties.read().unwrap();
-        let value = match props.get(prop_name) {
-            Some(v) => v,
-            _ => return false,
-        };
-
-        // Evaluate the comparison
-        match op {
-            "=" => {
-                // Try string comparison first
-                if let Ok(val_str) = value.extract::<String>(py) {
-                    return val_str == right;
-                }
-                // Try numeric comparison
-                if let (Ok(val_num), Ok(right_num)) =
-                    (value.extract::<f64>(py), right.parse::<f64>())
-                {
-                    return (val_num - right_num).abs() < f64::EPSILON;
-                }
-                // Try boolean comparison
-                if let (Ok(val_bool), Ok(right_bool)) =
-                    (value.extract::<bool>(py), right.parse::<bool>())
-                {
-                    return val_bool == right_bool;
-                }
-            }
-            "!=" => {
-                if let Ok(val_str) = value.extract::<String>(py) {
-                    return val_str != right;
-                }
-                if let (Ok(val_num), Ok(right_num)) =
-                    (value.extract::<f64>(py), right.parse::<f64>())
-                {
-                    return (val_num - right_num).abs() >= f64::EPSILON;
-                }
-                if let (Ok(val_bool), Ok(right_bool)) =
-                    (value.extract::<bool>(py), right.parse::<bool>())
-                {
-                    return val_bool != right_bool;
-                }
-            }
-            ">" | ">=" | "<" | "<=" => {
-                if let (Ok(val_num), Ok(right_num)) =
-                    (value.extract::<f64>(py), right.parse::<f64>())
-                {
-                    return match op {
-                        ">" => val_num > right_num,
-                        ">=" => val_num >= right_num,
-                        "<" => val_num < right_num,
-                        "<=" => val_num <= right_num,
-                        _ => false,
-                    };
-                }
-            }
-            _ => {}
-        }
-
-        false
-    }
-
-    /// Evaluate IN operator: n.property IN ['value1', 'value2', 'value3']
-    fn evaluate_in_condition(py: Python, condition: &str, var_name: &str, node: &Node) -> bool {
-        let parts: Vec<&str> = condition.split(" IN ").collect();
-        if parts.len() != 2 {
-            return false;
-        }
-
-        let left = parts[0].trim();
-        let right = parts[1].trim();
-
-        // Extract variable and property from left side
-        let left_parts: Vec<&str> = left.split('.').collect();
-        if left_parts.len() != 2 || left_parts[0] != var_name {
-            return false;
-        }
-
-        let prop_name = left_parts[1];
-
-        // Get property value from node
-        let props = node.properties.read().unwrap();
-        let value = match props.get(prop_name) {
-            Some(v) => v,
-            _ => return false,
-        };
-
-        // Parse the list: ['value1', 'value2'] or ["value1", "value2"]
-        let list_str = right.trim_matches(|c| c == '[' || c == ']').trim();
-        if list_str.is_empty() {
-            return false;
-        }
-
-        // Split by comma and check each value
-        for item in list_str.split(',') {
-            let item = item.trim().trim_matches(|c| c == '\'' || c == '"');
-
-            // Try string comparison
-            if let Ok(val_str) = value.extract::<String>(py) {
-                if val_str == item {
-                    return true;
-                }
-            }
-            // Try numeric comparison
-            if let (Ok(val_num), Ok(item_num)) = (value.extract::<f64>(py), item.parse::<f64>()) {
-                if (val_num - item_num).abs() < f64::EPSILON {
-                    return true;
-                }
-            }
-            // Try boolean comparison
-            if let (Ok(val_bool), Ok(item_bool)) = (value.extract::<bool>(py), item.parse::<bool>())
-            {
-                if val_bool == item_bool {
-                    return true;
-                }
-            }
-        }
-
-        false
-    }
-
-    /// Evaluate string operators: STARTS WITH, ENDS WITH, CONTAINS
-    fn evaluate_string_operator(
-        py: Python,
-        condition: &str,
-        var_name: &str,
-        node: &Node,
-        operator: &str,
-    ) -> bool {
-        let sep = format!(" {} ", operator);
-        let parts: Vec<&str> = condition.split(&sep).collect();
-        if parts.len() != 2 {
-            return false;
-        }
-
-        let left = parts[0].trim();
-        let right = parts[1].trim().trim_matches(|c| c == '\'' || c == '"');
-
-        // Extract variable and property from left side
-        let left_parts: Vec<&str> = left.split('.').collect();
-        if left_parts.len() != 2 || left_parts[0] != var_name {
-            return false;
-        }
-
-        let prop_name = left_parts[1];
-
-        // Get property value from node
-        let props = node.properties.read().unwrap();
-        let value = match props.get(prop_name) {
-            Some(v) => v,
-            _ => return false,
-        };
-
-        // Only works with strings
-        if let Ok(val_str) = value.extract::<String>(py) {
-            return match operator {
-                "STARTS WITH" => val_str.starts_with(right),
-                "ENDS WITH" => val_str.ends_with(right),
-                "CONTAINS" => val_str.contains(right),
-                _ => false,
-            };
-        }
-
-        false
-    }
-
+    /*
     fn execute_with(&mut self, vars: Vec<String>) -> PyResult<()> {
         // WITH passes through only the specified variables
         // Remove all other variables from matched_vars
@@ -2795,6 +2341,7 @@ impl Query {
         }
         Ok(())
     }
+
 
     fn execute_order_by(
         &mut self,

@@ -9,6 +9,8 @@ name = "implica"
 crate-type = ["cdylib", "lib"]
 
 [dependencies]
-pyo3 = { version = "0.27.1", features = ["extension-module", "abi3-py38"] }
+fancy-regex = "0.16.2"
+pyo3 = { version = "0.27.1", features = ["extension-module", "abi3-py38", "auto-initialize"] }
+rhai = {version = "1.23.6", features = ["sync"]}
 sha2 = "0.10"
 uuid = { version = "1", features = ["v4"]}
