@@ -90,6 +90,11 @@ pub enum ImplicaError {
     InvalidType {
         reason: String,
     },
+    LockError {
+        rw: String,
+        message: String,
+        context: Option<String>,
+    },
 }
 
 impl Display for ImplicaError {
@@ -218,6 +223,17 @@ impl Display for ImplicaError {
             ImplicaError::InvalidType { reason } => {
                 write!(f, "Invalid Type: '{}'", reason)
             }
+            ImplicaError::LockError {
+                rw,
+                message,
+                context,
+            } => {
+                write!(f, "Failed to acquire {} lock: '{}'", rw, message)?;
+                if let Some(context) = context {
+                    write!(f, " ({})", context)?;
+                }
+                Ok(())
+            }
         }
     }
 }
@@ -278,6 +294,7 @@ impl From<ImplicaError> for PyErr {
                 exceptions::PyRuntimeError::new_err(err.to_string())
             }
             ImplicaError::InvalidType { .. } => exceptions::PyTypeError::new_err(err.to_string()),
+            ImplicaError::LockError { .. } => exceptions::PyRuntimeError::new_err(err.to_string()),
         }
     }
 }

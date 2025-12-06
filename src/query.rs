@@ -653,8 +653,22 @@ impl Query {
             MatchOp::Node(node_pattern) => {
                 let mut new_matches = Vec::new();
 
-                for node_lock in self.graph.nodes.read().unwrap().values() {
-                    let node = node_lock.read().unwrap();
+                let nodes = self
+                    .graph
+                    .nodes
+                    .read()
+                    .map_err(|e| ImplicaError::LockError {
+                        rw: "read".to_string(),
+                        message: e.to_string(),
+                        context: Some("execute match node".to_string()),
+                    })?;
+
+                for node_lock in nodes.values() {
+                    let node = node_lock.read().map_err(|e| ImplicaError::LockError {
+                        rw: "read".to_string(),
+                        message: e.to_string(),
+                        context: Some("execute match node".to_string()),
+                    })?;
 
                     if node_pattern.matches(&node, self.context.clone())? {
                         new_matches.push(node.clone());
@@ -711,8 +725,22 @@ impl Query {
             MatchOp::Edge(edge_pattern, start_var, end_var) => {
                 let mut potential_matches = Vec::new();
 
-                for edge_lock in self.graph.edges.read().unwrap().values() {
-                    let edge = edge_lock.read().unwrap();
+                let edges = self
+                    .graph
+                    .edges
+                    .read()
+                    .map_err(|e| ImplicaError::LockError {
+                        rw: "read".to_string(),
+                        message: e.to_string(),
+                        context: Some("execute match edge".to_string()),
+                    })?;
+
+                for edge_lock in edges.values() {
+                    let edge = edge_lock.read().map_err(|e| ImplicaError::LockError {
+                        rw: "read".to_string(),
+                        message: e.to_string(),
+                        context: Some("execute match edge".to_string()),
+                    })?;
                     if edge_pattern.matches(&edge, self.context.clone())? {
                         potential_matches.push(edge.clone());
                     }
@@ -725,11 +753,29 @@ impl Query {
                                 let mut dict = HashMap::from([
                                     (
                                         start.clone(),
-                                        QueryResult::Node((*m.start.read().unwrap()).clone()),
+                                        QueryResult::Node(
+                                            (*m.start.read().map_err(|e| {
+                                                ImplicaError::LockError {
+                                                    rw: "read".to_string(),
+                                                    message: e.to_string(),
+                                                    context: Some("execute match edge".to_string()),
+                                                }
+                                            })?)
+                                            .clone(),
+                                        ),
                                     ),
                                     (
                                         end.clone(),
-                                        QueryResult::Node((*m.end.read().unwrap()).clone()),
+                                        QueryResult::Node(
+                                            (*m.end.read().map_err(|e| {
+                                                ImplicaError::LockError {
+                                                    rw: "read".to_string(),
+                                                    message: e.to_string(),
+                                                    context: Some("execute match edge".to_string()),
+                                                }
+                                            })?)
+                                            .clone(),
+                                        ),
                                     ),
                                 ]);
                                 if let Some(ref var) = edge_pattern.variable {
@@ -758,9 +804,13 @@ impl Query {
                                                                         let new_start = new
                                                                             .start
                                                                             .read()
-                                                                            .unwrap();
+                                                                            .map_err(|e| {
+                                                                                ImplicaError::LockError { rw: "read".to_string(), message: e.to_string(), context: Some("execute match edge".to_string()) }
+                                                                            })?;
                                                                         let new_end =
-                                                                            new.end.read().unwrap();
+                                                                            new.end.read().map_err(|e| {
+                                                                                ImplicaError::LockError { rw: "read".to_string(), message: e.to_string(), context: Some("execute match edge".to_string()) }
+                                                                            })?;
                                                                         if (new == old_var_edge)
                                                                             & (&*new_start
                                                                                 == old_start_node)
@@ -803,7 +853,9 @@ impl Query {
                                                         QueryResult::Node(old_start_node) => {
                                                             for new in potential_matches.iter() {
                                                                 let new_start =
-                                                                    new.start.read().unwrap();
+                                                                    new.start.read().map_err(|e| {
+                                                                                ImplicaError::LockError { rw: "read".to_string(), message: e.to_string(), context: Some("execute match edge".to_string()) }
+                                                                            })?;
                                                                 if (new == old_var_edge)
                                                                     & (&*new_start
                                                                         == old_start_node)
@@ -831,24 +883,28 @@ impl Query {
                                         }
                                         (Some(old_var), None, Some(old_end)) => {
                                             match old_var {
-                                                QueryResult::Edge(old_var_edge) => match old_end {
-                                                    QueryResult::Node(old_end_node) => {
-                                                        for new in potential_matches.iter() {
-                                                            let new_end = new.end.read().unwrap();
-                                                            if (new == old_var_edge)
-                                                                & (&*new_end == old_end_node)
-                                                            {
-                                                                results.push(m.clone());
+                                                QueryResult::Edge(old_var_edge) => {
+                                                    match old_end {
+                                                        QueryResult::Node(old_end_node) => {
+                                                            for new in potential_matches.iter() {
+                                                                let new_end = new.end.read().map_err(|e| {
+                                                                                ImplicaError::LockError { rw: "read".to_string(), message: e.to_string(), context: Some("execute match edge".to_string()) }
+                                                                            })?;
+                                                                if (new == old_var_edge)
+                                                                    & (&*new_end == old_end_node)
+                                                                {
+                                                                    results.push(m.clone());
+                                                                }
                                                             }
                                                         }
-                                                    }
-                                                    QueryResult::Edge(old_end_edge) => {
-                                                        return Err(ImplicaError::InvalidQuery {
+                                                        QueryResult::Edge(old_end_edge) => {
+                                                            return Err(ImplicaError::InvalidQuery {
                                                                 message: format!("Variable '{}' previously assigned to an edge has been assigned to a node", end),
                                                                 context: Some("match variable".to_string())
                                                             }.into());
+                                                        }
                                                     }
-                                                },
+                                                }
                                                 QueryResult::Node(old_var_node) => {
                                                     return Err(ImplicaError::InvalidQuery {
                                                         message: format!("Variable '{}' previously assigned to a node has been assigned to an edge", var),
@@ -866,9 +922,13 @@ impl Query {
                                                         QueryResult::Node(old_end_node) => {
                                                             for new in potential_matches.iter() {
                                                                 let new_start =
-                                                                    new.start.read().unwrap();
+                                                                    new.start.read().map_err(|e| {
+                                                                                ImplicaError::LockError { rw: "read".to_string(), message: e.to_string(), context: Some("execute match edge".to_string()) }
+                                                                            })?;
                                                                 let new_end =
-                                                                    new.end.read().unwrap();
+                                                                    new.end.read().map_err(|e| {
+                                                                                ImplicaError::LockError { rw: "read".to_string(), message: e.to_string(), context: Some("execute match edge".to_string()) }
+                                                                            })?;
                                                                 if (&*new_start == old_start_node)
                                                                     & (&*new_end == old_end_node)
                                                                 {
@@ -909,14 +969,18 @@ impl Query {
                                                             dict.insert(
                                                                 start.clone(),
                                                                 QueryResult::Node(
-                                                                    (*new.start.read().unwrap())
+                                                                    (*new.start.read().map_err(|e| {
+                                                                                ImplicaError::LockError { rw: "read".to_string(), message: e.to_string(), context: Some("execute match edge".to_string()) }
+                                                                            })?)
                                                                         .clone(),
                                                                 ),
                                                             );
                                                             dict.insert(
                                                                 end.clone(),
                                                                 QueryResult::Node(
-                                                                    (*new.end.read().unwrap())
+                                                                    (*new.end.read().map_err(|e| {
+                                                                                ImplicaError::LockError { rw: "read".to_string(), message: e.to_string(), context: Some("execute match edge".to_string()) }
+                                                                            })?)
                                                                         .clone(),
                                                                 ),
                                                             );
@@ -938,7 +1002,17 @@ impl Query {
                                             match old_start {
                                                 QueryResult::Node(old_start_node) => {
                                                     for new in potential_matches.iter() {
-                                                        let new_start = new.start.read().unwrap();
+                                                        let new_start =
+                                                            new.start.read().map_err(|e| {
+                                                                ImplicaError::LockError {
+                                                                    rw: "read".to_string(),
+                                                                    message: e.to_string(),
+                                                                    context: Some(
+                                                                        "execute match edge"
+                                                                            .to_string(),
+                                                                    ),
+                                                                }
+                                                            })?;
                                                         if &*new_start == old_start_node {
                                                             let mut dict = m.clone();
                                                             dict.insert(
@@ -948,7 +1022,9 @@ impl Query {
                                                             dict.insert(
                                                                 end.clone(),
                                                                 QueryResult::Node(
-                                                                    (*new.end.read().unwrap())
+                                                                    (*new.end.read().map_err(|e| {
+                                                                                ImplicaError::LockError { rw: "read".to_string(), message: e.to_string(), context: Some("execute match edge".to_string()) }
+                                                                            })?)
                                                                         .clone(),
                                                                 ),
                                                             );
@@ -970,7 +1046,17 @@ impl Query {
                                             match old_end {
                                                 QueryResult::Node(old_end_node) => {
                                                     for new in potential_matches.iter() {
-                                                        let new_end = new.end.read().unwrap();
+                                                        let new_end =
+                                                            new.end.read().map_err(|e| {
+                                                                ImplicaError::LockError {
+                                                                    rw: "read".to_string(),
+                                                                    message: e.to_string(),
+                                                                    context: Some(
+                                                                        "execute match edge"
+                                                                            .to_string(),
+                                                                    ),
+                                                                }
+                                                            })?;
                                                         if &*new_end == old_end_node {
                                                             let mut dict = m.clone();
                                                             dict.insert(
@@ -980,7 +1066,9 @@ impl Query {
                                                             dict.insert(
                                                                 start.clone(),
                                                                 QueryResult::Node(
-                                                                    (*new.start.read().unwrap())
+                                                                    (*new.start.read().map_err(|e| {
+                                                                                ImplicaError::LockError { rw: "read".to_string(), message: e.to_string(), context: Some("execute match edge".to_string()) }
+                                                                            })?)
                                                                         .clone(),
                                                                 ),
                                                             );
@@ -1015,13 +1103,33 @@ impl Query {
                                                 (
                                                     start.clone(),
                                                     QueryResult::Node(
-                                                        (*m.start.read().unwrap()).clone(),
+                                                        (*m.start.read().map_err(|e| {
+                                                            ImplicaError::LockError {
+                                                                rw: "read".to_string(),
+                                                                message: e.to_string(),
+                                                                context: Some(
+                                                                    "execute match edge"
+                                                                        .to_string(),
+                                                                ),
+                                                            }
+                                                        })?)
+                                                        .clone(),
                                                     ),
                                                 ),
                                                 (
                                                     end.clone(),
                                                     QueryResult::Node(
-                                                        (*m.end.read().unwrap()).clone(),
+                                                        (*m.end.read().map_err(|e| {
+                                                            ImplicaError::LockError {
+                                                                rw: "read".to_string(),
+                                                                message: e.to_string(),
+                                                                context: Some(
+                                                                    "execute match edge"
+                                                                        .to_string(),
+                                                                ),
+                                                            }
+                                                        })?)
+                                                        .clone(),
                                                     ),
                                                 ),
                                             ]);
@@ -1040,9 +1148,13 @@ impl Query {
                                                         QueryResult::Node(old_end_node) => {
                                                             for new in potential_matches.iter() {
                                                                 let new_start =
-                                                                    new.start.read().unwrap();
+                                                                    new.start.read().map_err(|e| {
+                                                                                ImplicaError::LockError { rw: "read".to_string(), message: e.to_string(), context: Some("execute match edge".to_string()) }
+                                                                            })?;
                                                                 let new_end =
-                                                                    new.end.read().unwrap();
+                                                                    new.end.read().map_err(|e| {
+                                                                                ImplicaError::LockError { rw: "read".to_string(), message: e.to_string(), context: Some("execute match edge".to_string()) }
+                                                                            })?;
                                                                 if (&*new_start == old_start_node)
                                                                     & (&*new_end == old_end_node)
                                                                 {
@@ -1071,13 +1183,25 @@ impl Query {
                                             match old_start {
                                                 QueryResult::Node(old_start_node) => {
                                                     for new in potential_matches.iter() {
-                                                        let new_start = new.start.read().unwrap();
+                                                        let new_start =
+                                                            new.start.read().map_err(|e| {
+                                                                ImplicaError::LockError {
+                                                                    rw: "read".to_string(),
+                                                                    message: e.to_string(),
+                                                                    context: Some(
+                                                                        "execute match edge"
+                                                                            .to_string(),
+                                                                    ),
+                                                                }
+                                                            })?;
                                                         if &*new_start == old_start_node {
                                                             let mut dict = m.clone();
                                                             dict.insert(
                                                                 end.clone(),
                                                                 QueryResult::Node(
-                                                                    (*new.end.read().unwrap())
+                                                                    (*new.end.read().map_err(|e| {
+                                                                                ImplicaError::LockError { rw: "read".to_string(), message: e.to_string(), context: Some("execute match edge".to_string()) }
+                                                                            })?)
                                                                         .clone(),
                                                                 ),
                                                             );
@@ -1094,30 +1218,44 @@ impl Query {
                                             }
                                             contained = true;
                                         }
-                                        (None, Some(old_end)) => match old_end {
-                                            QueryResult::Node(old_end_node) => {
-                                                for new in potential_matches.iter() {
-                                                    let new_end = new.end.read().unwrap();
-                                                    if &*new_end == old_end_node {
-                                                        let mut dict = m.clone();
-                                                        dict.insert(
+                                        (None, Some(old_end)) => {
+                                            match old_end {
+                                                QueryResult::Node(old_end_node) => {
+                                                    for new in potential_matches.iter() {
+                                                        let new_end =
+                                                            new.end.read().map_err(|e| {
+                                                                ImplicaError::LockError {
+                                                                    rw: "read".to_string(),
+                                                                    message: e.to_string(),
+                                                                    context: Some(
+                                                                        "execute match edge"
+                                                                            .to_string(),
+                                                                    ),
+                                                                }
+                                                            })?;
+                                                        if &*new_end == old_end_node {
+                                                            let mut dict = m.clone();
+                                                            dict.insert(
                                                             start.clone(),
                                                             QueryResult::Node(
-                                                                (*new.start.read().unwrap())
+                                                                (*new.start.read().map_err(|e| {
+                                                                                ImplicaError::LockError { rw: "read".to_string(), message: e.to_string(), context: Some("execute match edge".to_string()) }
+                                                                            })?)
                                                                     .clone(),
                                                             ),
                                                         );
-                                                        results.push(dict);
+                                                            results.push(dict);
+                                                        }
                                                     }
                                                 }
-                                            }
-                                            QueryResult::Edge(old_end_edge) => {
-                                                return Err(ImplicaError::InvalidQuery {
+                                                QueryResult::Edge(old_end_edge) => {
+                                                    return Err(ImplicaError::InvalidQuery {
                                                         message: format!("Variable '{}' previously assigned to an edge has been assigned to a node", end),
                                                         context: Some("match variable".to_string())
                                                     }.into());
+                                                }
                                             }
-                                        },
+                                        }
                                         (None, None) => (),
                                     }
                                 }
@@ -1134,13 +1272,33 @@ impl Query {
                                                 (
                                                     start.clone(),
                                                     QueryResult::Node(
-                                                        (*m.start.read().unwrap()).clone(),
+                                                        (*m.start.read().map_err(|e| {
+                                                            ImplicaError::LockError {
+                                                                rw: "read".to_string(),
+                                                                message: e.to_string(),
+                                                                context: Some(
+                                                                    "execute match edge"
+                                                                        .to_string(),
+                                                                ),
+                                                            }
+                                                        })?)
+                                                        .clone(),
                                                     ),
                                                 ),
                                                 (
                                                     end.clone(),
                                                     QueryResult::Node(
-                                                        (*m.end.read().unwrap()).clone(),
+                                                        (*m.end.read().map_err(|e| {
+                                                            ImplicaError::LockError {
+                                                                rw: "read".to_string(),
+                                                                message: e.to_string(),
+                                                                context: Some(
+                                                                    "execute match edge"
+                                                                        .to_string(),
+                                                                ),
+                                                            }
+                                                        })?)
+                                                        .clone(),
                                                     ),
                                                 ),
                                             ]);
@@ -1157,7 +1315,14 @@ impl Query {
                             for m in potential_matches {
                                 let mut dict = HashMap::from([(
                                     start.clone(),
-                                    QueryResult::Node((*m.start.read().unwrap()).clone()),
+                                    QueryResult::Node(
+                                        (*m.start.read().map_err(|e| ImplicaError::LockError {
+                                            rw: "read".to_string(),
+                                            message: e.to_string(),
+                                            context: Some("execute match edge".to_string()),
+                                        })?)
+                                        .clone(),
+                                    ),
                                 )]);
                                 if let Some(ref var) = edge_pattern.variable {
                                     dict.insert(var.clone(), QueryResult::Edge(m));
@@ -1179,7 +1344,9 @@ impl Query {
                                                         QueryResult::Node(old_start_node) => {
                                                             for new in potential_matches.iter() {
                                                                 let new_start =
-                                                                    new.start.read().unwrap();
+                                                                    new.start.read().map_err(|e| {
+                                                                                ImplicaError::LockError { rw: "read".to_string(), message: e.to_string(), context: Some("execute match edge".to_string()) }
+                                                                            })?;
                                                                 if (new == old_var_edge)
                                                                     & (&*new_start
                                                                         == old_start_node)
@@ -1214,7 +1381,9 @@ impl Query {
                                                             dict.insert(
                                                                 start.clone(),
                                                                 QueryResult::Node(
-                                                                    (*new.start.read().unwrap())
+                                                                    (*new.start.read().map_err(|e| {
+                                                                                ImplicaError::LockError { rw: "read".to_string(), message: e.to_string(), context: Some("execute match edge".to_string()) }
+                                                                            })?)
                                                                         .clone(),
                                                                 ),
                                                             );
@@ -1235,7 +1404,17 @@ impl Query {
                                             match old_start {
                                                 QueryResult::Node(old_start_node) => {
                                                     for new in potential_matches.iter() {
-                                                        let new_start = new.start.read().unwrap();
+                                                        let new_start =
+                                                            new.start.read().map_err(|e| {
+                                                                ImplicaError::LockError {
+                                                                    rw: "read".to_string(),
+                                                                    message: e.to_string(),
+                                                                    context: Some(
+                                                                        "execute match edge"
+                                                                            .to_string(),
+                                                                    ),
+                                                                }
+                                                            })?;
                                                         if &*new_start == old_start_node {
                                                             let mut dict = m.clone();
                                                             dict.insert(
@@ -1270,7 +1449,17 @@ impl Query {
                                                 (
                                                     start.clone(),
                                                     QueryResult::Node(
-                                                        (*m.end.read().unwrap()).clone(),
+                                                        (*m.end.read().map_err(|e| {
+                                                            ImplicaError::LockError {
+                                                                rw: "read".to_string(),
+                                                                message: e.to_string(),
+                                                                context: Some(
+                                                                    "execute match edge"
+                                                                        .to_string(),
+                                                                ),
+                                                            }
+                                                        })?)
+                                                        .clone(),
                                                     ),
                                                 ),
                                                 (var.clone(), QueryResult::Edge(m.clone())),
@@ -1285,7 +1474,17 @@ impl Query {
                                         match old_start {
                                             QueryResult::Node(old_start_node) => {
                                                 for new in potential_matches.iter() {
-                                                    let new_start = new.start.read().unwrap();
+                                                    let new_start =
+                                                        new.start.read().map_err(|e| {
+                                                            ImplicaError::LockError {
+                                                                rw: "read".to_string(),
+                                                                message: e.to_string(),
+                                                                context: Some(
+                                                                    "execute match edge"
+                                                                        .to_string(),
+                                                                ),
+                                                            }
+                                                        })?;
                                                     if old_start_node == &*new_start {
                                                         results.push(m.clone());
                                                     }
@@ -1312,7 +1511,16 @@ impl Query {
                                             dict.extend([(
                                                 start.clone(),
                                                 QueryResult::Node(
-                                                    (*m.start.read().unwrap()).clone(),
+                                                    (*m.start.read().map_err(|e| {
+                                                        ImplicaError::LockError {
+                                                            rw: "read".to_string(),
+                                                            message: e.to_string(),
+                                                            context: Some(
+                                                                "execute match edge".to_string(),
+                                                            ),
+                                                        }
+                                                    })?)
+                                                    .clone(),
                                                 ),
                                             )]);
                                             results.push(dict);
@@ -1328,7 +1536,14 @@ impl Query {
                             for m in potential_matches {
                                 let mut dict = HashMap::from([(
                                     end.clone(),
-                                    QueryResult::Node((*m.end.read().unwrap()).clone()),
+                                    QueryResult::Node(
+                                        (*m.end.read().map_err(|e| ImplicaError::LockError {
+                                            rw: "read".to_string(),
+                                            message: e.to_string(),
+                                            context: Some("execute match edge".to_string()),
+                                        })?)
+                                        .clone(),
+                                    ),
                                 )]);
                                 if let Some(ref var) = edge_pattern.variable {
                                     dict.insert(var.clone(), QueryResult::Edge(m));
@@ -1345,24 +1560,28 @@ impl Query {
                                     match (m.get(var), m.get(&end)) {
                                         (Some(old_var), Some(old_end)) => {
                                             match old_var {
-                                                QueryResult::Edge(old_var_edge) => match old_end {
-                                                    QueryResult::Node(old_end_node) => {
-                                                        for new in potential_matches.iter() {
-                                                            let new_end = new.end.read().unwrap();
-                                                            if (new == old_var_edge)
-                                                                & (&*new_end == old_end_node)
-                                                            {
-                                                                results.push(m.clone());
+                                                QueryResult::Edge(old_var_edge) => {
+                                                    match old_end {
+                                                        QueryResult::Node(old_end_node) => {
+                                                            for new in potential_matches.iter() {
+                                                                let new_end = new.end.read().map_err(|e| {
+                                                                                ImplicaError::LockError { rw: "read".to_string(), message: e.to_string(), context: Some("execute match edge".to_string()) }
+                                                                            })?;
+                                                                if (new == old_var_edge)
+                                                                    & (&*new_end == old_end_node)
+                                                                {
+                                                                    results.push(m.clone());
+                                                                }
                                                             }
                                                         }
-                                                    }
-                                                    QueryResult::Edge(old_end_edge) => {
-                                                        return Err(ImplicaError::InvalidQuery {
+                                                        QueryResult::Edge(old_end_edge) => {
+                                                            return Err(ImplicaError::InvalidQuery {
                                                                 message: format!("Variable '{}' previously assigned to an edge has been assigned to a node", end),
                                                                 context: Some("match variable".to_string())
                                                             }.into());
+                                                        }
                                                     }
-                                                },
+                                                }
                                                 QueryResult::Node(old_var_node) => {
                                                     return Err(ImplicaError::InvalidQuery {
                                                         message: format!("Variable '{}' previously assigned to a node has been assigned to an edge", var),
@@ -1382,7 +1601,9 @@ impl Query {
                                                             dict.insert(
                                                                 end.clone(),
                                                                 QueryResult::Node(
-                                                                    (*new.end.read().unwrap())
+                                                                    (*new.end.read().map_err(|e| {
+                                                                                ImplicaError::LockError { rw: "read".to_string(), message: e.to_string(), context: Some("execute match edge".to_string()) }
+                                                                            })?)
                                                                         .clone(),
                                                                 ),
                                                             );
@@ -1404,7 +1625,17 @@ impl Query {
                                             match old_end {
                                                 QueryResult::Node(old_end_node) => {
                                                     for new in potential_matches.iter() {
-                                                        let new_end = new.end.read().unwrap();
+                                                        let new_end =
+                                                            new.end.read().map_err(|e| {
+                                                                ImplicaError::LockError {
+                                                                    rw: "read".to_string(),
+                                                                    message: e.to_string(),
+                                                                    context: Some(
+                                                                        "execute match edge"
+                                                                            .to_string(),
+                                                                    ),
+                                                                }
+                                                            })?;
                                                         if &*new_end == old_end_node {
                                                             let mut dict = m.clone();
                                                             dict.insert(
@@ -1440,7 +1671,17 @@ impl Query {
                                                 (
                                                     end.clone(),
                                                     QueryResult::Node(
-                                                        (*m.end.read().unwrap()).clone(),
+                                                        (*m.end.read().map_err(|e| {
+                                                            ImplicaError::LockError {
+                                                                rw: "read".to_string(),
+                                                                message: e.to_string(),
+                                                                context: Some(
+                                                                    "execute match edge"
+                                                                        .to_string(),
+                                                                ),
+                                                            }
+                                                        })?)
+                                                        .clone(),
                                                     ),
                                                 ),
                                                 (var.clone(), QueryResult::Edge(m.clone())),
@@ -1456,7 +1697,15 @@ impl Query {
                                         match old_end {
                                             QueryResult::Node(old_end_node) => {
                                                 for new in potential_matches.iter() {
-                                                    let new_end = new.end.read().unwrap();
+                                                    let new_end = new.end.read().map_err(|e| {
+                                                        ImplicaError::LockError {
+                                                            rw: "read".to_string(),
+                                                            message: e.to_string(),
+                                                            context: Some(
+                                                                "execute match edge".to_string(),
+                                                            ),
+                                                        }
+                                                    })?;
                                                     if old_end_node == &*new_end {
                                                         results.push(m.clone());
                                                     }
@@ -1482,7 +1731,18 @@ impl Query {
                                             let mut dict = old_match.clone();
                                             dict.extend([(
                                                 end.clone(),
-                                                QueryResult::Node((*m.end.read().unwrap()).clone()),
+                                                QueryResult::Node(
+                                                    (*m.end.read().map_err(|e| {
+                                                        ImplicaError::LockError {
+                                                            rw: "read".to_string(),
+                                                            message: e.to_string(),
+                                                            context: Some(
+                                                                "execute match edge".to_string(),
+                                                            ),
+                                                        }
+                                                    })?)
+                                                    .clone(),
+                                                ),
                                             )]);
                                             results.push(dict);
                                         }
@@ -1805,10 +2065,20 @@ impl Query {
                                 match qr {
                                     QueryResult::Node(node) => {
                                         np.r#type = Some(node.r#type.clone());
-                                        np.term = node
-                                            .term
-                                            .clone()
-                                            .map(|t| Arc::new(t.read().unwrap().clone()));
+                                        np.term = if let Some(t) = node.term.clone() {
+                                            Some(Arc::new(
+                                                (t.read().map_err(|e| {
+                                                    ImplicaError::LockError {
+                                                        rw: "read".to_string(),
+                                                        message: e.to_string(),
+                                                        context: Some("execute delete".to_string()),
+                                                    }
+                                                })?)
+                                                .clone(),
+                                            ))
+                                        } else {
+                                            None
+                                        };
                                     }
                                     QueryResult::Edge(_) => {
                                         return Err(ImplicaError::InvalidQuery {
@@ -2244,9 +2514,21 @@ impl Query {
             if let Some(qr) = m.get(&var) {
                 match qr {
                     QueryResult::Node(n) => {
-                        let nodes = self.graph.nodes.read().unwrap();
+                        let nodes =
+                            self.graph
+                                .nodes
+                                .read()
+                                .map_err(|e| ImplicaError::LockError {
+                                    rw: "read".to_string(),
+                                    message: e.to_string(),
+                                    context: Some("execute set".to_string()),
+                                })?;
                         if let Some(node_lock) = nodes.get(&n.uid()) {
-                            let node = node_lock.read().unwrap();
+                            let node = node_lock.read().map_err(|e| ImplicaError::LockError {
+                                rw: "read".to_string(),
+                                message: e.to_string(),
+                                context: Some("execute set".to_string()),
+                            })?;
                             let mut node_props = node.properties.write().unwrap();
 
                             if overwrite {
@@ -2266,10 +2548,29 @@ impl Query {
                         }
                     }
                     QueryResult::Edge(e) => {
-                        let edges = self.graph.nodes.read().unwrap();
+                        let edges =
+                            self.graph
+                                .nodes
+                                .read()
+                                .map_err(|e| ImplicaError::LockError {
+                                    rw: "read".to_string(),
+                                    message: e.to_string(),
+                                    context: Some("execute set".to_string()),
+                                })?;
                         if let Some(edge_lock) = edges.get(&e.uid()) {
-                            let edge = edge_lock.read().unwrap();
-                            let mut edge_props = edge.properties.write().unwrap();
+                            let edge = edge_lock.read().map_err(|e| ImplicaError::LockError {
+                                rw: "read".to_string(),
+                                message: e.to_string(),
+                                context: Some("execute set".to_string()),
+                            })?;
+                            let mut edge_props =
+                                edge.properties
+                                    .write()
+                                    .map_err(|e| ImplicaError::LockError {
+                                        rw: "read".to_string(),
+                                        message: e.to_string(),
+                                        context: Some("execute set".to_string()),
+                                    })?;
 
                             if overwrite {
                                 edge_props.clear();
@@ -2308,8 +2609,20 @@ impl Query {
             let mut scope = Scope::new();
             for (var, qr) in m.iter() {
                 let props = match qr {
-                    QueryResult::Node(n) => n.properties.read().unwrap(),
-                    QueryResult::Edge(e) => e.properties.read().unwrap(),
+                    QueryResult::Node(n) => {
+                        n.properties.read().map_err(|e| ImplicaError::LockError {
+                            rw: "read".to_string(),
+                            message: e.to_string(),
+                            context: Some("execute where".to_string()),
+                        })?
+                    }
+                    QueryResult::Edge(e) => {
+                        e.properties.read().map_err(|e| ImplicaError::LockError {
+                            rw: "read".to_string(),
+                            message: e.to_string(),
+                            context: Some("execute where".to_string()),
+                        })?
+                    }
                 };
 
                 let map = props_as_map(&props)?;
@@ -2370,27 +2683,27 @@ impl Query {
                 for (var, prop) in &props {
                     let val_a = match a.get(var) {
                         Some(qr) => match qr {
-                            QueryResult::Node(n) => {
-                                let dict = n.properties.read().unwrap();
-                                dict.get(prop).map(|v| v.clone_ref(py))
-                            }
-                            QueryResult::Edge(e) => {
-                                let dict = e.properties.read().unwrap();
-                                dict.get(prop).map(|v| v.clone_ref(py))
-                            }
+                            QueryResult::Node(n) => match n.properties.read() {
+                                Ok(dict) => dict.get(prop).map(|v| v.clone_ref(py)),
+                                Err(_) => None,
+                            },
+                            QueryResult::Edge(e) => match e.properties.read() {
+                                Ok(dict) => dict.get(prop).map(|v| v.clone_ref(py)),
+                                Err(_) => None,
+                            },
                         },
                         None => None,
                     };
                     let val_b = match b.get(var) {
                         Some(qr) => match qr {
-                            QueryResult::Node(n) => {
-                                let dict = n.properties.read().unwrap();
-                                dict.get(prop).map(|v| v.clone_ref(py))
-                            }
-                            QueryResult::Edge(e) => {
-                                let dict = e.properties.read().unwrap();
-                                dict.get(prop).map(|v| v.clone_ref(py))
-                            }
+                            QueryResult::Node(n) => match n.properties.read() {
+                                Ok(dict) => dict.get(prop).map(|v| v.clone_ref(py)),
+                                Err(_) => None,
+                            },
+                            QueryResult::Edge(e) => match e.properties.read() {
+                                Ok(dict) => dict.get(prop).map(|v| v.clone_ref(py)),
+                                Err(_) => None,
+                            },
                         },
                         None => None,
                     };
