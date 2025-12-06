@@ -1,5 +1,7 @@
+mod cmp;
 mod eval;
 mod validation;
 
+pub(crate) use cmp::compare_values;
 pub(crate) use eval::{props_as_map, Evaluator};
 pub(crate) use validation::validate_variable_name;

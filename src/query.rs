@@ -11,10 +11,11 @@ use crate::errors::ImplicaError;
 use crate::graph::{Edge, Graph, Node};
 use crate::patterns::{EdgePattern, NodePattern, PathPattern, TermSchema, TypeSchema};
 use crate::typing::{python_to_term, python_to_type, Arrow, Type};
-use crate::utils::{props_as_map, Evaluator};
+use crate::utils::{compare_values, props_as_map, Evaluator};
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
 use rhai::Scope;
+use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::iter::zip;
 use std::sync::{Arc, RwLock};
@@ -81,7 +82,7 @@ pub enum QueryOperation {
     Set(String, HashMap<String, Py<PyAny>>, bool),
     Delete(Vec<String>),
     With(Vec<String>),
-    OrderBy(String, String, bool),
+    OrderBy(Vec<String>, bool),
     Limit(usize),
     Skip(usize),
 }
@@ -105,9 +106,7 @@ impl Clone for QueryOperation {
             }
             QueryOperation::Delete(vars) => QueryOperation::Delete(vars.clone()),
             QueryOperation::With(w) => QueryOperation::With(w.clone()),
-            QueryOperation::OrderBy(v, k, asc) => {
-                QueryOperation::OrderBy(v.clone(), k.clone(), *asc)
-            }
+            QueryOperation::OrderBy(v, asc) => QueryOperation::OrderBy(v.clone(), *asc),
             QueryOperation::Limit(l) => QueryOperation::Limit(*l),
             QueryOperation::Skip(s) => QueryOperation::Skip(*s),
         })
@@ -553,10 +552,10 @@ impl Query {
         Ok(self.clone())
     }
 
-    #[pyo3(signature = (variable, key, ascending=true))]
-    pub fn order_by(&mut self, variable: String, key: String, ascending: bool) -> PyResult<Self> {
+    #[pyo3(signature = (*variables, ascending=true))]
+    pub fn order_by(&mut self, variables: Vec<String>, ascending: bool) -> PyResult<Self> {
         self.operations
-            .push(QueryOperation::OrderBy(variable, key, ascending));
+            .push(QueryOperation::OrderBy(variables, ascending));
         Ok(self.clone())
     }
 
@@ -633,9 +632,8 @@ impl Query {
                 QueryOperation::With(vars) => {
                     self.execute_with(vars)?;
                 }
-                QueryOperation::OrderBy(var, key, ascending) => {
-                    todo!("Implement this!");
-                    //self.execute_order_by(py, var, key, ascending)?;
+                QueryOperation::OrderBy(vars, ascending) => {
+                    self.execute_order_by(vars, ascending)?;
                 }
                 QueryOperation::Limit(count) => {
                     todo!("Implement this!");
@@ -2328,7 +2326,7 @@ impl Query {
         Ok(())
     }
 
-    fn execute_with(&mut self, vars: Vec<String>) -> PyResult<()> {
+    fn execute_with(&mut self, vars: Vec<String>) -> Result<(), ImplicaError> {
         for m in self.matches.iter_mut() {
             let mut dict = HashMap::new();
 
@@ -2341,8 +2339,7 @@ impl Query {
                         return Err(ImplicaError::VariableNotFound {
                             name: v.clone(),
                             context: Some("with".to_string()),
-                        }
-                        .into());
+                        });
                     }
                 }
             }
@@ -2353,76 +2350,67 @@ impl Query {
         Ok(())
     }
 
-    /*
-    fn execute_order_by(
-        &mut self,
-        py: Python,
-        var: String,
-        key: String,
-        ascending: bool,
-    ) -> PyResult<()> {
-        // Get matched bindings
-        let Some(results) = self.matched_vars.get_mut(&var) else {
-            return Ok(());
-        };
+    fn execute_order_by(&mut self, vars: Vec<String>, ascending: bool) -> Result<(), ImplicaError> {
+        let mut props: Vec<(String, String)> = Vec::new();
+        for var in &vars {
+            let parts: Vec<&str> = var.split(".").collect();
 
-        // This avoids borrowing from RwLock during sort.
-        let mut items: Vec<(Option<Py<PyAny>>, QueryResult)> = results
-            .iter()
-            .cloned()
-            .map(|qr| {
-                let k = match &qr {
-                    QueryResult::Node(node) => {
-                        let props = node.properties.read().unwrap();
-                        props.get(&key).map(|v| v.clone_ref(py)) // OWNED COPY ✔
-                    }
-                    _ => None,
-                };
-                (k, qr)
-            })
-            .collect();
-
-        items.sort_by(|(ka, _), (kb, _)| {
-            match (ka, kb) {
-                (Some(a), Some(b)) => {
-                    // Try numeric comparison
-                    if let (Ok(na), Ok(nb)) = (a.extract::<f64>(py), b.extract::<f64>(py)) {
-                        let ord = na.partial_cmp(&nb).unwrap_or(std::cmp::Ordering::Equal);
-                        return if ascending { ord } else { ord.reverse() };
-                    }
-
-                    // Try string comparison
-                    if let (Ok(sa), Ok(sb)) = (a.extract::<String>(py), b.extract::<String>(py)) {
-                        let ord = sa.cmp(&sb);
-                        return if ascending { ord } else { ord.reverse() };
-                    }
-
-                    std::cmp::Ordering::Equal
-                }
-
-                // Missing keys: always order after present ones (or before if descending)
-                (Some(_), None) => {
-                    if ascending {
-                        std::cmp::Ordering::Less
-                    } else {
-                        std::cmp::Ordering::Greater
-                    }
-                }
-                (None, Some(_)) => {
-                    if ascending {
-                        std::cmp::Ordering::Greater
-                    } else {
-                        std::cmp::Ordering::Less
-                    }
-                }
-                (None, None) => std::cmp::Ordering::Equal,
+            if parts.len() != 2 {
+                return Err(ImplicaError::InvalidQuery {
+                    message: format!("Invalid variable provided: {}", var),
+                    context: Some("order by".to_string()),
+                });
             }
+
+            props.push((parts[0].to_string(), parts[1].to_string()));
+        }
+
+        Python::attach(|py| {
+            self.matches.sort_by(|a, b| {
+                for (var, prop) in &props {
+                    let val_a = match a.get(var) {
+                        Some(qr) => match qr {
+                            QueryResult::Node(n) => {
+                                let dict = n.properties.read().unwrap();
+                                dict.get(prop).map(|v| v.clone_ref(py))
+                            }
+                            QueryResult::Edge(e) => {
+                                let dict = e.properties.read().unwrap();
+                                dict.get(prop).map(|v| v.clone_ref(py))
+                            }
+                        },
+                        None => None,
+                    };
+                    let val_b = match b.get(var) {
+                        Some(qr) => match qr {
+                            QueryResult::Node(n) => {
+                                let dict = n.properties.read().unwrap();
+                                dict.get(prop).map(|v| v.clone_ref(py))
+                            }
+                            QueryResult::Edge(e) => {
+                                let dict = e.properties.read().unwrap();
+                                dict.get(prop).map(|v| v.clone_ref(py))
+                            }
+                        },
+                        None => None,
+                    };
+
+                    let ordering = compare_values(val_a, val_b, py);
+                    if ordering != Ordering::Equal {
+                        return if ascending {
+                            ordering
+                        } else {
+                            ordering.reverse()
+                        };
+                    }
+                }
+
+                Ordering::Equal
+            });
         });
-
-        *results = items.into_iter().map(|(_, qr)| qr).collect();
-
         Ok(())
     }
+    /*
 
     fn execute_limit(&mut self, count: usize) -> PyResult<()> {
         // Limit the number of results for each variable
