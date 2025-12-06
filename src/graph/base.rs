@@ -166,7 +166,11 @@ impl Graph {
     ///
     /// A vector of nodes matching the type
     pub fn find_node_by_type(&self, typ: &Type) -> PyResult<Arc<RwLock<Node>>> {
-        let nodes = self.nodes.read().unwrap();
+        let nodes = self.nodes.read().map_err(|e| ImplicaError::LockError {
+            rw: "read".to_string(),
+            message: e.to_string(),
+            context: Some("find node by type".to_string()),
+        })?;
         match nodes.get(typ.uid()) {
             Some(node) => Ok(node.clone()),
             None => Err(ImplicaError::NodeNotFound {
@@ -189,7 +193,12 @@ impl Graph {
     pub fn find_all_nodes(&self) -> PyResult<Vec<Arc<RwLock<Node>>>> {
         let mut result = Vec::new();
 
-        for n in self.nodes.read().unwrap().values() {
+        let nodes = self.nodes.read().map_err(|e| ImplicaError::LockError {
+            rw: "read".to_string(),
+            message: e.to_string(),
+            context: Some("find all nodes".to_string()),
+        })?;
+        for n in nodes.values() {
             result.push(n.clone());
         }
 
@@ -211,8 +220,17 @@ impl Graph {
     pub fn find_edges_by_term_type(&self, typ: &Type) -> PyResult<Vec<Arc<RwLock<Edge>>>> {
         let mut result = Vec::new();
 
-        for e in self.edges.read().unwrap().values() {
-            let edge = e.read().unwrap();
+        let edges = self.edges.read().map_err(|e| ImplicaError::LockError {
+            rw: "read".to_string(),
+            message: e.to_string(),
+            context: Some("find edges by term type".to_string()),
+        })?;
+        for e in edges.values() {
+            let edge = e.read().map_err(|e| ImplicaError::LockError {
+                rw: "read".to_string(),
+                message: e.to_string(),
+                context: Some("find edges by term type".to_string()),
+            })?;
             let term = edge.term.clone();
             if term.r#type().as_ref() == typ {
                 result.push(e.clone());
@@ -234,7 +252,12 @@ impl Graph {
     pub fn find_all_edges(&self) -> PyResult<Vec<Arc<RwLock<Edge>>>> {
         let mut result = Vec::new();
 
-        for e in self.edges.read().unwrap().values() {
+        let edges = self.edges.read().map_err(|e| ImplicaError::LockError {
+            rw: "read".to_string(),
+            message: e.to_string(),
+            context: Some("find all edges".to_string()),
+        })?;
+        for e in edges.values() {
             result.push(e.clone());
         }
 
@@ -244,26 +267,49 @@ impl Graph {
     pub fn add_node(&self, node: &Node) -> Result<(), ImplicaError> {
         let uid = node.uid();
 
-        if let Some(existing) = self.nodes.read().unwrap().get(&uid) {
+        let nodes = self.nodes.read().map_err(|e| ImplicaError::LockError {
+            rw: "read".to_string(),
+            message: e.to_string(),
+            context: Some("add node".to_string()),
+        })?;
+        if let Some(existing) = nodes.get(uid) {
             return Err(ImplicaError::NodeAlreadyExists {
                 message: "Tried to add a node with a type that already exists.".to_string(),
-                existing: existing.read().unwrap().clone(),
+                existing: existing
+                    .read()
+                    .map_err(|e| ImplicaError::LockError {
+                        rw: "read".to_string(),
+                        message: e.to_string(),
+                        context: Some("add node".to_string()),
+                    })?
+                    .clone(),
                 new: node.clone(),
             });
         }
 
-        self.nodes
-            .write()
-            .unwrap()
-            .insert(uid, Arc::new(RwLock::new(node.clone())));
+        let mut nodes = self.nodes.write().map_err(|e| ImplicaError::LockError {
+            rw: "write".to_string(),
+            message: e.to_string(),
+            context: Some("add node".to_string()),
+        })?;
+        nodes.insert(uid.to_string(), Arc::new(RwLock::new(node.clone())));
 
         Ok(())
     }
 
     pub fn remove_node(&self, node_uid: &str) -> PyResult<()> {
-        match self.nodes.write().unwrap().remove(node_uid) {
+        let mut nodes = self.nodes.write().map_err(|e| ImplicaError::LockError {
+            rw: "write".to_string(),
+            message: e.to_string(),
+            context: Some("remove node".to_string()),
+        })?;
+        match nodes.remove(node_uid) {
             Some(node_lock) => {
-                let node = node_lock.read().unwrap();
+                let node = node_lock.read().map_err(|e| ImplicaError::LockError {
+                    rw: "read".to_string(),
+                    message: e.to_string(),
+                    context: Some("remove node".to_string()),
+                })?;
                 let pattern = EdgePattern::new(
                     None,
                     None,
@@ -293,21 +339,25 @@ impl Graph {
         end: Node,
         properties: Option<SharedPropertyMap>,
     ) -> Result<Edge, ImplicaError> {
-        let nodes = self.nodes.read().unwrap();
-        let start_ptr = match nodes.get(&start.uid()) {
+        let nodes = self.nodes.read().map_err(|e| ImplicaError::LockError {
+            rw: "read".to_string(),
+            message: e.to_string(),
+            context: Some("add edge".to_string()),
+        })?;
+        let start_ptr = match nodes.get(start.uid()) {
             Some(ptr) => ptr.clone(),
             None => {
                 return Err(ImplicaError::NodeNotFound {
-                    uid: start.uid(),
+                    uid: start.uid().to_string(),
                     context: Some("add edge".to_string()),
                 });
             }
         };
-        let end_ptr = match nodes.get(&end.uid()) {
+        let end_ptr = match nodes.get(end.uid()) {
             Some(ptr) => ptr.clone(),
             None => {
                 return Err(ImplicaError::NodeNotFound {
-                    uid: end.uid(),
+                    uid: end.uid().to_string(),
                     context: Some("add edge".to_string()),
                 });
             }
@@ -316,18 +366,34 @@ impl Graph {
         let edge = Edge::new(term, start_ptr, end_ptr, properties);
         let uid = edge.uid();
 
-        if let Some(existing) = self.edges.read().unwrap().get(&uid) {
+        let edges = self.edges.read().map_err(|e| ImplicaError::LockError {
+            rw: "read".to_string(),
+            message: e.to_string(),
+            context: Some("add edge".to_string()),
+        })?;
+        if let Some(existing) = edges.get(uid) {
             return Err(ImplicaError::EdgeAlreadyExists {
                 message: "Tried to add a node that already exists.".to_string(),
-                existing: existing.read().unwrap().clone(),
+                existing: existing
+                    .read()
+                    .map_err(|e| ImplicaError::LockError {
+                        rw: "read".to_string(),
+                        message: e.to_string(),
+                        context: Some("add edge".to_string()),
+                    })?
+                    .clone(),
                 new: edge.clone(),
             });
         }
 
         self.edges
             .write()
-            .unwrap()
-            .insert(uid, Arc::new(RwLock::new(edge.clone())));
+            .map_err(|e| ImplicaError::LockError {
+                rw: "write".to_string(),
+                message: e.to_string(),
+                context: Some("add edge".to_string()),
+            })?
+            .insert(uid.to_string(), Arc::new(RwLock::new(edge.clone())));
 
         Ok(edge)
     }
@@ -339,7 +405,12 @@ impl Graph {
     /// * `edge_uid` - The UID of the edge to remove
     /// * `py` - Python context
     pub fn remove_edge(&self, edge_uid: &str) -> PyResult<()> {
-        match self.edges.write().unwrap().remove(edge_uid) {
+        let mut edges = self.edges.write().map_err(|e| ImplicaError::LockError {
+            rw: "write".to_string(),
+            message: e.to_string(),
+            context: Some("remove edge".to_string()),
+        })?;
+        match edges.remove(edge_uid) {
             Some(_) => Ok(()),
             None => Err(ImplicaError::EdgeNotFound {
                 uid: edge_uid.to_string(),
@@ -352,11 +423,20 @@ impl Graph {
     pub fn remove_edges_matching(&self, pattern: EdgePattern) -> PyResult<()> {
         let mut remove_uids = Vec::new();
 
-        for edge_lock in self.edges.read().unwrap().values() {
-            let edge = edge_lock.read().unwrap();
+        let edges = self.edges.read().map_err(|e| ImplicaError::LockError {
+            rw: "read".to_string(),
+            message: e.to_string(),
+            context: Some("remove edges matching".to_string()),
+        })?;
+        for edge_lock in edges.values() {
+            let edge = edge_lock.read().map_err(|e| ImplicaError::LockError {
+                rw: "read".to_string(),
+                message: e.to_string(),
+                context: Some("remove edges matching".to_string()),
+            })?;
             let context = Arc::new(Context::new());
             if pattern.matches(&edge, context)? {
-                remove_uids.push(edge.uid());
+                remove_uids.push(edge.uid().to_string());
             }
         }
 

@@ -4,8 +4,9 @@ use pyo3::types::PyDict;
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::fmt::Display;
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, OnceLock, RwLock};
 
+use crate::errors::ImplicaError;
 use crate::graph::alias::SharedPropertyMap;
 use crate::graph::node::Node;
 use crate::typing::{term_to_python, Term};
@@ -48,7 +49,7 @@ pub struct Edge {
     pub end: Arc<RwLock<Node>>,
     pub properties: SharedPropertyMap,
     /// Cached UID for performance - computed once and reused
-    pub(in crate::graph) uid_cache: Arc<RwLock<Option<String>>>,
+    pub(in crate::graph) uid_cache: OnceLock<String>,
 }
 
 impl Clone for Edge {
@@ -113,7 +114,17 @@ impl Edge {
     /// The start node as a Python object
     #[getter]
     pub fn start(&self, py: Python) -> PyResult<Py<Node>> {
-        Py::new(py, (*self.start).read().unwrap().clone())
+        Py::new(
+            py,
+            (*self.start)
+                .read()
+                .map_err(|e| ImplicaError::LockError {
+                    rw: "read".to_string(),
+                    message: e.to_string(),
+                    context: Some("get start".to_string()),
+                })?
+                .clone(),
+        )
     }
 
     /// Gets the ending node of this edge.
@@ -123,23 +134,49 @@ impl Edge {
     /// The end node as a Python object
     #[getter]
     pub fn end(&self, py: Python) -> PyResult<Py<Node>> {
-        Py::new(py, (*self.end).read().unwrap().clone())
+        Py::new(
+            py,
+            (*self.end)
+                .read()
+                .map_err(|e| ImplicaError::LockError {
+                    rw: "read".to_string(),
+                    message: e.to_string(),
+                    context: Some("get end".to_string()),
+                })?
+                .clone(),
+        )
     }
 
     #[getter]
-    pub fn get_properties(&self, py: Python) -> Py<PyDict> {
+    pub fn get_properties(&self, py: Python) -> PyResult<Py<PyDict>> {
         let dict = PyDict::new(py);
-        for (k, v) in self.properties.read().unwrap().iter() {
-            dict.set_item(k, v.clone_ref(py)).unwrap();
+        let props = self
+            .properties
+            .read()
+            .map_err(|e| ImplicaError::LockError {
+                rw: "read".to_string(),
+                message: e.to_string(),
+                context: Some("execute match edge".to_string()),
+            })?;
+        for (k, v) in props.iter() {
+            dict.set_item(k, v.clone_ref(py))?;
         }
-        dict.into()
+        Ok(dict.into())
     }
 
     #[setter]
-    pub fn set_properties(&self, props: HashMap<String, Py<PyAny>>) {
-        let mut guard = self.properties.write().unwrap();
+    pub fn set_properties(&self, props: HashMap<String, Py<PyAny>>) -> PyResult<()> {
+        let mut guard = self
+            .properties
+            .write()
+            .map_err(|e| ImplicaError::LockError {
+                rw: "write".to_string(),
+                message: e.to_string(),
+                context: Some("edge set properties".to_string()),
+            })?;
         guard.clear();
         guard.extend(props);
+        Ok(())
     }
 
     /// Returns a unique identifier for this edge.
@@ -150,26 +187,13 @@ impl Edge {
     /// # Returns
     ///
     /// A SHA256 hash representing this edge uniquely
-    pub fn uid(&self) -> String {
-        // Check if we have a cached value
-        if let Ok(cache) = self.uid_cache.read() {
-            if let Some(cached) = cache.as_ref() {
-                return cached.clone();
-            }
-        }
-
-        // Calculate the UID
-        let mut hasher = Sha256::new();
-        hasher.update(b"edge:");
-        hasher.update(self.term.uid().as_bytes());
-        let uid = format!("{:x}", hasher.finalize());
-
-        // Cache it for future use
-        if let Ok(mut cache) = self.uid_cache.write() {
-            *cache = Some(uid.clone());
-        }
-
-        uid
+    pub fn uid(&self) -> &str {
+        self.uid_cache.get_or_init(|| {
+            let mut hasher = Sha256::new();
+            hasher.update(b"edge:");
+            hasher.update(self.term.uid().as_bytes());
+            format!("{:x}", hasher.finalize())
+        })
     }
 
     /// Returns a string representation of the edge.
@@ -205,7 +229,7 @@ impl Edge {
             start,
             end,
             properties: properties.unwrap_or(Arc::new(RwLock::new(HashMap::new()))),
-            uid_cache: Arc::new(RwLock::new(None)),
+            uid_cache: OnceLock::new(),
         }
     }
 }

@@ -291,7 +291,15 @@ impl EdgePattern {
         // Check properties if specified
         if !self.properties.is_empty() {
             for (key, value) in &self.properties {
-                if let Some(edge_value) = edge.properties.read().unwrap().get(key) {
+                let e_props = edge
+                    .properties
+                    .read()
+                    .map_err(|e| ImplicaError::LockError {
+                        rw: "read".to_string(),
+                        message: e.to_string(),
+                        context: Some("edge pattern matches".to_string()),
+                    })?;
+                if let Some(edge_value) = e_props.get(key) {
                     if Python::attach(|py| !edge_value.bind(py).eq(value.bind(py)).unwrap()) {
                         return Ok(false);
                     };

@@ -4,8 +4,9 @@ use pyo3::types::{PyAny, PyDict};
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::fmt::Display;
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, OnceLock, RwLock};
 
+use crate::errors::ImplicaError;
 use crate::graph::alias::{PropertyMap, SharedPropertyMap};
 use crate::typing::{term_to_python, type_to_python, Term, Type};
 
@@ -39,7 +40,7 @@ pub struct Node {
     pub term: Option<Arc<RwLock<Term>>>,
     pub properties: SharedPropertyMap,
     /// Cached UID for performance - computed once and reused
-    pub(in crate::graph) uid_cache: Arc<RwLock<Option<String>>>,
+    pub(in crate::graph) uid_cache: OnceLock<String>,
 }
 
 impl Clone for Node {
@@ -93,7 +94,7 @@ impl Node {
             r#type,
             term,
             properties: Arc::new(RwLock::new(properties.unwrap_or_default())),
-            uid_cache: Arc::new(RwLock::new(None)),
+            uid_cache: OnceLock::new(),
         }
     }
 }
@@ -119,7 +120,11 @@ impl Node {
     pub fn get_term(&self, py: Python) -> PyResult<Option<Py<PyAny>>> {
         match &self.term {
             Some(term_lock) => {
-                let term = term_lock.read().unwrap();
+                let term = term_lock.read().map_err(|e| ImplicaError::LockError {
+                    rw: "read".to_string(),
+                    message: e.to_string(),
+                    context: Some("get term".to_string()),
+                })?;
                 term_to_python(py, &term).map(Some)
             }
             None => Ok(None),
@@ -127,19 +132,35 @@ impl Node {
     }
 
     #[getter]
-    pub fn get_properties(&self, py: Python) -> Py<PyDict> {
+    pub fn get_properties(&self, py: Python) -> PyResult<Py<PyDict>> {
         let dict = PyDict::new(py);
-        for (k, v) in self.properties.read().unwrap().iter() {
-            dict.set_item(k, v.clone_ref(py)).unwrap();
+        let props = self
+            .properties
+            .read()
+            .map_err(|e| ImplicaError::LockError {
+                rw: "read".to_string(),
+                message: e.to_string(),
+                context: Some("get term".to_string()),
+            })?;
+        for (k, v) in props.iter() {
+            dict.set_item(k, v.clone_ref(py))?;
         }
-        dict.into()
+        Ok(dict.into())
     }
 
     #[setter]
-    pub fn set_properties(&self, props: PropertyMap) {
-        let mut guard = self.properties.write().unwrap();
+    pub fn set_properties(&self, props: PropertyMap) -> PyResult<()> {
+        let mut guard = self
+            .properties
+            .write()
+            .map_err(|e| ImplicaError::LockError {
+                rw: "write".to_string(),
+                message: e.to_string(),
+                context: Some("node set properties".to_string()),
+            })?;
         guard.clear();
         guard.extend(props);
+        Ok(())
     }
 
     /// Returns a unique identifier for this node.
@@ -150,26 +171,13 @@ impl Node {
     /// # Returns
     ///
     /// A SHA256 hash representing this node uniquely
-    pub fn uid(&self) -> String {
-        // Check if we have a cached value
-        if let Ok(cache) = self.uid_cache.read() {
-            if let Some(cached) = cache.as_ref() {
-                return cached.clone();
-            }
-        }
-
-        // Calculate the UID
-        let mut hasher = Sha256::new();
-        hasher.update(b"node:");
-        hasher.update(self.r#type.uid().as_bytes());
-        let uid = format!("{:x}", hasher.finalize());
-
-        // Cache it for future use
-        if let Ok(mut cache) = self.uid_cache.write() {
-            *cache = Some(uid.clone());
-        }
-
-        uid
+    pub fn uid(&self) -> &str {
+        self.uid_cache.get_or_init(|| {
+            let mut hasher = Sha256::new();
+            hasher.update(b"node:");
+            hasher.update(self.r#type.uid().as_bytes());
+            format!("{:x}", hasher.finalize())
+        })
     }
 
     /// Checks if two nodes are equal using UID.

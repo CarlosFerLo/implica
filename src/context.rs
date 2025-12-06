@@ -86,7 +86,11 @@ impl Context {
     }
 
     pub fn contains_key(&self, name: &str) -> Result<bool, ImplicaError> {
-        let context = self.content.read().unwrap();
+        let context = self.content.read().map_err(|e| ImplicaError::LockError {
+            rw: "read".to_string(),
+            message: e.to_string(),
+            context: Some("context add type".to_string()),
+        })?;
         Ok(context.contains_key(name))
     }
 

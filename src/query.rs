@@ -2486,10 +2486,10 @@ impl Query {
                 if let Some(qr) = m.remove(var) {
                     match qr {
                         QueryResult::Node(n) => {
-                            self.graph.remove_node(&n.uid())?;
+                            self.graph.remove_node(n.uid())?;
                         }
                         QueryResult::Edge(e) => {
-                            self.graph.remove_edge(&e.uid())?;
+                            self.graph.remove_edge(e.uid())?;
                         }
                     }
                 } else {
@@ -2523,13 +2523,20 @@ impl Query {
                                     message: e.to_string(),
                                     context: Some("execute set".to_string()),
                                 })?;
-                        if let Some(node_lock) = nodes.get(&n.uid()) {
+                        if let Some(node_lock) = nodes.get(n.uid()) {
                             let node = node_lock.read().map_err(|e| ImplicaError::LockError {
                                 rw: "read".to_string(),
                                 message: e.to_string(),
                                 context: Some("execute set".to_string()),
                             })?;
-                            let mut node_props = node.properties.write().unwrap();
+                            let mut node_props =
+                                node.properties
+                                    .write()
+                                    .map_err(|e| ImplicaError::LockError {
+                                        rw: "write".to_string(),
+                                        message: e.to_string(),
+                                        context: Some("execute set".to_string()),
+                                    })?;
 
                             if overwrite {
                                 node_props.clear();
@@ -2542,7 +2549,7 @@ impl Query {
                             })
                         } else {
                             return Err(ImplicaError::NodeNotFound {
-                                uid: n.uid(),
+                                uid: n.uid().to_string(),
                                 context: Some("execute set node".to_string()),
                             });
                         }
@@ -2557,7 +2564,7 @@ impl Query {
                                     message: e.to_string(),
                                     context: Some("execute set".to_string()),
                                 })?;
-                        if let Some(edge_lock) = edges.get(&e.uid()) {
+                        if let Some(edge_lock) = edges.get(e.uid()) {
                             let edge = edge_lock.read().map_err(|e| ImplicaError::LockError {
                                 rw: "read".to_string(),
                                 message: e.to_string(),
@@ -2583,7 +2590,7 @@ impl Query {
                             });
                         } else {
                             return Err(ImplicaError::EdgeNotFound {
-                                uid: e.uid(),
+                                uid: e.uid().to_string(),
                                 context: Some("execute set edge".to_string()),
                             });
                         }

@@ -187,7 +187,11 @@ impl NodePattern {
             CompiledTermNodeMatcher::Any => {}
             CompiledTermNodeMatcher::ExactTerm(term_obj) => {
                 if let Some(ref term_lock) = node.term {
-                    let term = term_lock.read().unwrap();
+                    let term = term_lock.read().map_err(|e| ImplicaError::LockError {
+                        rw: "read".to_string(),
+                        message: e.to_string(),
+                        context: Some("node pattern matches".to_string()),
+                    })?;
                     if &*term != term_obj.as_ref() {
                         return Ok(false);
                     }
@@ -197,7 +201,11 @@ impl NodePattern {
             }
             CompiledTermNodeMatcher::SchemaTerm(term_schema) => {
                 if let Some(ref term_lock) = node.term {
-                    let term = term_lock.read().unwrap();
+                    let term = term_lock.read().map_err(|e| ImplicaError::LockError {
+                        rw: "read".to_string(),
+                        message: e.to_string(),
+                        context: Some("node pattern matches".to_string()),
+                    })?;
                     if !term_schema.matches(&term, context.clone())? {
                         return Ok(false);
                     }
@@ -211,7 +219,15 @@ impl NodePattern {
         if !self.properties.is_empty() {
             return Python::attach(|py| -> Result<bool, ImplicaError> {
                 for (key, value) in &self.properties {
-                    if let Some(node_value) = node.properties.read().unwrap().get(key) {
+                    let n_props = node
+                        .properties
+                        .read()
+                        .map_err(|e| ImplicaError::LockError {
+                            rw: "read".to_string(),
+                            message: e.to_string(),
+                            context: Some("node pattern matches".to_string()),
+                        })?;
+                    if let Some(node_value) = n_props.get(key) {
                         if !node_value.bind(py).eq(value.bind(py))? {
                             return Ok(false);
                         }
