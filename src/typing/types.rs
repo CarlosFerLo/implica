@@ -6,7 +6,7 @@
 use pyo3::prelude::*;
 use sha2::{Digest, Sha256};
 use std::fmt;
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, OnceLock};
 
 use crate::errors::ImplicaError;
 use crate::utils::validate_variable_name;
@@ -35,7 +35,7 @@ impl Type {
     /// # Returns
     ///
     /// A SHA256 hash representing this type uniquely
-    pub fn uid(&self) -> String {
+    pub fn uid(&self) -> &str {
         match self {
             Type::Variable(v) => v.uid(),
             Type::Arrow(a) => a.uid(),
@@ -105,7 +105,7 @@ impl fmt::Display for Type {
 pub struct Variable {
     pub name: String,
     /// Cached UID for performance - computed once and reused
-    uid_cache: Arc<RwLock<Option<String>>>,
+    uid_cache: OnceLock<String>,
 }
 
 #[pymethods]
@@ -134,7 +134,7 @@ impl Variable {
 
         Ok(Variable {
             name,
-            uid_cache: Arc::new(RwLock::new(None)),
+            uid_cache: OnceLock::new(),
         })
     }
 
@@ -144,8 +144,8 @@ impl Variable {
     ///
     /// The name as a Python object
     #[getter]
-    pub fn name(&self) -> String {
-        self.name.clone()
+    pub fn name(&self) -> &str {
+        &self.name
     }
 
     /// Returns a unique identifier for this variable.
@@ -155,31 +155,18 @@ impl Variable {
     /// # Returns
     ///
     /// A SHA256 hash based on the variable name
-    pub fn uid(&self) -> String {
-        // Check if we have a cached value
-        if let Ok(cache) = self.uid_cache.read() {
-            if let Some(cached) = cache.as_ref() {
-                return cached.clone();
-            }
-        }
-
-        // Calculate the UID
-        let mut hasher = Sha256::new();
-        hasher.update(b"var:");
-        hasher.update(self.name.as_bytes());
-        let uid = format!("{:x}", hasher.finalize());
-
-        // Cache it for future use
-        if let Ok(mut cache) = self.uid_cache.write() {
-            *cache = Some(uid.clone());
-        }
-
-        uid
+    pub fn uid(&self) -> &str {
+        self.uid_cache.get_or_init(|| {
+            let mut hasher = Sha256::new();
+            hasher.update(b"var:");
+            hasher.update(self.name.as_bytes());
+            format!("{:x}", hasher.finalize())
+        })
     }
 
     /// Returns the name of the variable for string representation.
-    fn __str__(&self) -> String {
-        self.name.to_string()
+    fn __str__(&self) -> &str {
+        &self.name
     }
 
     /// Returns a detailed representation for debugging.
@@ -258,7 +245,7 @@ pub struct Arrow {
     pub left: Arc<Type>,
     pub right: Arc<Type>,
     /// Cached UID for performance - computed once and reused
-    uid_cache: Arc<RwLock<Option<String>>>,
+    uid_cache: OnceLock<String>,
 }
 
 impl Arrow {
@@ -266,7 +253,7 @@ impl Arrow {
         Arrow {
             left,
             right,
-            uid_cache: Arc::new(RwLock::new(None)),
+            uid_cache: OnceLock::new(),
         }
     }
 }
@@ -300,28 +287,15 @@ impl Arrow {
     /// # Returns
     ///
     /// A SHA256 hash based on the left and right types
-    pub fn uid(&self) -> String {
-        // Check if we have a cached value
-        if let Ok(cache) = self.uid_cache.read() {
-            if let Some(cached) = cache.as_ref() {
-                return cached.clone();
-            }
-        }
-
-        // Calculate the UID (may recursively compute UIDs of nested types)
-        let mut hasher = Sha256::new();
-        hasher.update(b"app:");
-        hasher.update(self.left.uid().as_bytes());
-        hasher.update(b":");
-        hasher.update(self.right.uid().as_bytes());
-        let uid = format!("{:x}", hasher.finalize());
-
-        // Cache it for future use
-        if let Ok(mut cache) = self.uid_cache.write() {
-            *cache = Some(uid.clone());
-        }
-
-        uid
+    pub fn uid(&self) -> &str {
+        self.uid_cache.get_or_init(|| {
+            let mut hasher = Sha256::new();
+            hasher.update(b"app:");
+            hasher.update(self.left.uid().as_bytes());
+            hasher.update(b":");
+            hasher.update(self.right.uid().as_bytes());
+            format!("{:x}", hasher.finalize())
+        })
     }
 
     /// Returns a string representation of the Arrow.
@@ -392,13 +366,28 @@ impl std::hash::Hash for Arrow {
 ///
 /// `PyTypeError` if the object is neither a Variable nor an Arrow
 pub(crate) fn python_to_type(obj: &Bound<'_, PyAny>) -> Result<Type, ImplicaError> {
-    if let Ok(var) = obj.extract::<Variable>() {
+    // Verificar que es del tipo correcto primero
+    if obj.is_instance_of::<Variable>() {
+        let var = obj.extract::<Variable>()?;
+        // Validar integridad
+        if var.name.is_empty() {
+            return Err(ImplicaError::InvalidType {
+                reason: "Variable name cannot be empty".to_string(),
+            });
+        }
         Ok(Type::Variable(var))
-    } else if let Ok(app) = obj.extract::<Arrow>() {
-        Ok(Type::Arrow(app))
+    } else if obj.is_instance_of::<Arrow>() {
+        Ok(Type::Arrow(obj.extract::<Arrow>()?))
     } else {
         Err(ImplicaError::PythonError {
-            message: format!("Error converting python object '{}' to type.", obj),
+            message: format!(
+                "Expected Variable or Arrow, got {} of type {}",
+                obj,
+                obj.get_type()
+                    .name()
+                    .map(|n| { n.to_string() })
+                    .unwrap_or("undefined".to_string())
+            ),
             context: Some("python_to_type".to_string()),
         })
     }

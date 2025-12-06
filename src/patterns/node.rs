@@ -102,10 +102,22 @@ impl NodePattern {
 
         // Validate: cannot have both type and type_schema
         if r#type.is_some() && type_schema.is_some() {
-            return Err(ImplicaError::schema_validation(
-                "NodePattern",
-                "Cannot specify both 'type' and 'type_schema' - they are mutually exclusive",
-            )
+            return Err(ImplicaError::InvalidPattern {
+                pattern: "NodePattern".to_string(),
+                reason:
+                    "Cannot specify both 'type' and 'type_schema' - they are mutually exclusive"
+                        .to_string(),
+            }
+            .into());
+        }
+
+        if term.is_some() && term_schema.is_some() {
+            return Err(ImplicaError::InvalidPattern {
+                pattern: "NodePattern".to_string(),
+                reason:
+                    "Cannot specify bothe 'term' and 'type_schema' - they are mutually exclusive"
+                        .to_string(),
+            }
             .into());
         }
 

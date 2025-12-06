@@ -167,10 +167,10 @@ impl Graph {
     /// A vector of nodes matching the type
     pub fn find_node_by_type(&self, typ: &Type) -> PyResult<Arc<RwLock<Node>>> {
         let nodes = self.nodes.read().unwrap();
-        match nodes.get(&typ.uid()) {
+        match nodes.get(typ.uid()) {
             Some(node) => Ok(node.clone()),
             None => Err(ImplicaError::NodeNotFound {
-                uid: typ.uid(),
+                uid: typ.uid().to_string(),
                 context: Some("find_node_by_type".to_string()),
             }
             .into()),

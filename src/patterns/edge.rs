@@ -9,6 +9,7 @@ use crate::graph::Edge;
 use crate::patterns::term_schema::TermSchema;
 use crate::patterns::type_schema::TypeSchema;
 use crate::typing::{Term, Type};
+use crate::utils::validate_variable_name;
 
 /// Compiled direction for efficient matching.
 #[derive(Clone, Debug, PartialEq)]
@@ -24,10 +25,10 @@ impl CompiledDirection {
             "forward" => Ok(CompiledDirection::Forward),
             "backward" => Ok(CompiledDirection::Backward),
             "any" => Ok(CompiledDirection::Any),
-            _ => Err(ImplicaError::schema_validation(
-                s,
-                "Direction must be 'forward', 'backward', or 'any'",
-            )),
+            _ => Err(ImplicaError::SchemaValidation {
+                schema: s.to_string(),
+                reason: "Direction must be 'forward', 'backward', or 'any'".to_string(),
+            }),
         }
     }
 
@@ -168,15 +169,8 @@ impl EdgePattern {
         properties: Option<HashMap<String, Py<PyAny>>>,
         direction: String,
     ) -> PyResult<Self> {
-        // Validate variable name if provided
         if let Some(ref var) = variable {
-            if var.trim().is_empty() {
-                return Err(ImplicaError::invalid_identifier(
-                    var.clone(),
-                    "variable name cannot be empty or whitespace-only",
-                )
-                .into());
-            }
+            validate_variable_name(var)?;
         }
 
         // Validate and compile direction
@@ -184,18 +178,22 @@ impl EdgePattern {
 
         // Validate: cannot have both term and term_type_schema
         if term.is_some() && term_schema.is_some() {
-            return Err(ImplicaError::schema_validation(
-                "EdgePattern",
-                "Cannot specify both 'term' and 'term_schema' - they are mutually exclusive",
-            )
+            return Err(ImplicaError::InvalidPattern {
+                pattern: "EdgePattern".to_string(),
+                reason:
+                    "Cannot specify both 'term' and 'term_schema' - they are mutually exclusive"
+                        .to_string(),
+            }
             .into());
         }
 
         if r#type.is_some() && type_schema.is_some() {
-            return Err(ImplicaError::schema_validation(
-                "EdgePattern",
-                "Cannot specify both 'type' and 'type_schema' - they are mutually exclusive",
-            )
+            return Err(ImplicaError::InvalidPattern {
+                pattern: "EdgePattern".to_string(),
+                reason:
+                    "Cannot specify both 'type' and 'type_schema' - they are mutually exclusive"
+                        .to_string(),
+            }
             .into());
         }
 

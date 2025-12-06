@@ -125,13 +125,13 @@ pub(in crate::patterns) fn tokenize_pattern(pattern: &str) -> PyResult<Vec<Token
                 } else if in_brackets > 0 {
                     edge_buffer.push(c);
                 } else {
-                    return Err(ImplicaError::invalid_pattern(
-                        pattern,
-                        format!(
+                    return Err(ImplicaError::InvalidPattern {
+                        pattern: pattern.to_string(),
+                        reason: format!(
                             "Unexpected character '{}' outside of node or edge pattern",
                             c
                         ),
-                    )
+                    }
                     .into());
                 }
             }
@@ -142,19 +142,27 @@ pub(in crate::patterns) fn tokenize_pattern(pattern: &str) -> PyResult<Vec<Token
 
     // Check for unclosed patterns
     if in_parens != 0 {
-        return Err(
-            ImplicaError::invalid_pattern(pattern, "Unmatched parentheses in pattern").into(),
-        );
+        return Err(ImplicaError::InvalidPattern {
+            pattern: pattern.to_string(),
+            reason: "Unmatched parentheses in pattern".to_string(),
+        }
+        .into());
     }
     if in_brackets != 0 {
-        return Err(ImplicaError::invalid_pattern(pattern, "Unmatched brackets in pattern").into());
+        return Err(ImplicaError::InvalidPattern {
+            pattern: pattern.to_string(),
+            reason: "Unmatched brackets in pattern".to_string(),
+        }
+        .into());
     }
 
     // Add remaining edge if any
     if !edge_buffer.is_empty() {
-        return Err(
-            ImplicaError::invalid_pattern(pattern, "Pattern cannot end with an edge").into(),
-        );
+        return Err(ImplicaError::InvalidPattern {
+            pattern: pattern.to_string(),
+            reason: "Pattern cannot end with an edge".to_string(),
+        }
+        .into());
     }
 
     Ok(tokens)
@@ -186,10 +194,10 @@ pub(in crate::patterns) fn parse_properties(
 
     // Check for proper braces
     if !props_str.starts_with('{') || !props_str.ends_with('}') {
-        return Err(ImplicaError::invalid_pattern(
-            props_str,
-            "Properties must be enclosed in braces {}",
-        )
+        return Err(ImplicaError::InvalidPattern {
+            pattern: props_str.to_string(),
+            reason: "Properties must be enclosed in braces {}".to_string(),
+        }
         .into());
     }
 
@@ -224,26 +232,28 @@ pub(in crate::patterns) fn parse_properties(
                 }
                 ':' if !in_string && depth == 0 => {
                     if after_colon {
-                        return Err(ImplicaError::invalid_pattern(
-                            props_str,
-                            "Unexpected colon in property value",
-                        )
+                        return Err(ImplicaError::InvalidPattern {
+                            pattern: props_str.to_string(),
+                            reason: "Unexpected colon in property value".to_string(),
+                        }
                         .into());
                     }
                     after_colon = true;
                     current_key = current_key.trim().to_string();
                     if current_key.is_empty() {
-                        return Err(
-                            ImplicaError::invalid_pattern(props_str, "Empty property key").into(),
-                        );
+                        return Err(ImplicaError::InvalidPattern {
+                            pattern: props_str.to_string(),
+                            reason: "Empty property key".to_string(),
+                        }
+                        .into());
                     }
                 }
                 ',' if !in_string && depth == 0 => {
                     if !after_colon {
-                        return Err(ImplicaError::invalid_pattern(
-                            props_str,
-                            "Missing colon in property definition",
-                        )
+                        return Err(ImplicaError::InvalidPattern {
+                            pattern: props_str.to_string(),
+                            reason: "Missing colon in property definition".to_string(),
+                        }
                         .into());
                     }
 
@@ -277,10 +287,10 @@ pub(in crate::patterns) fn parse_properties(
         // Handle the last property
         if !current_key.is_empty() {
             if !after_colon {
-                return Err(ImplicaError::invalid_pattern(
-                    props_str,
-                    "Missing colon in property definition",
-                )
+                return Err(ImplicaError::InvalidPattern {
+                    pattern: props_str.to_string(),
+                    reason: "Missing colon in property definition".to_string(),
+                }
                 .into());
             }
             let value = parse_property_value(py, current_value.trim())?;
@@ -317,7 +327,11 @@ fn parse_property_value(py: Python, value_str: &str) -> PyResult<Py<PyAny>> {
 
     // Check for empty value
     if value_str.is_empty() {
-        return Err(ImplicaError::invalid_pattern(value_str, "Empty property value").into());
+        return Err(ImplicaError::InvalidPattern {
+            pattern: value_str.to_string(),
+            reason: "Empty property value".to_string(),
+        }
+        .into());
     }
 
     // Try to parse as quoted string (with escape handling)
@@ -326,10 +340,10 @@ fn parse_property_value(py: Python, value_str: &str) -> PyResult<Py<PyAny>> {
 
         // Check if string is properly closed
         if value_str.len() < 2 || !value_str.ends_with(quote_char) {
-            return Err(ImplicaError::invalid_pattern(
-                value_str,
-                format!("Unclosed string literal (expected closing {})", quote_char),
-            )
+            return Err(ImplicaError::InvalidPattern {
+                pattern: value_str.to_string(),
+                reason: format!("Unclosed string literal (expected closing {})", quote_char),
+            }
             .into());
         }
 
@@ -371,10 +385,10 @@ fn parse_property_value(py: Python, value_str: &str) -> PyResult<Py<PyAny>> {
     if let Ok(float_val) = value_str.parse::<f64>() {
         // Check for special float values
         if float_val.is_nan() || float_val.is_infinite() {
-            return Err(ImplicaError::invalid_pattern(
-                value_str,
-                "Invalid numeric value (NaN or Infinity not supported)",
-            )
+            return Err(ImplicaError::InvalidPattern {
+                pattern: value_str.to_string(),
+                reason: "Invalid numeric value (NaN or Infinity not supported)".to_string(),
+            }
             .into());
         }
         let py_float = float_val.into_pyobject(py)?;
@@ -382,10 +396,11 @@ fn parse_property_value(py: Python, value_str: &str) -> PyResult<Py<PyAny>> {
     }
 
     // If nothing else works, it's an error (unquoted strings are not allowed)
-    Err(ImplicaError::invalid_pattern(
-        value_str,
-        "Invalid property value. Strings must be quoted, e.g., \"value\" or 'value'",
-    )
+    Err(ImplicaError::InvalidPattern {
+        pattern: value_str.to_string(),
+        reason: "Invalid property value. Strings must be quoted, e.g., \"value\" or 'value'"
+            .to_string(),
+    }
     .into())
 }
 
@@ -412,10 +427,10 @@ fn unescape_string(s: &str) -> PyResult<String> {
                     result.push(other);
                 }
                 None => {
-                    return Err(ImplicaError::invalid_pattern(
-                        s,
-                        "String ends with incomplete escape sequence",
-                    )
+                    return Err(ImplicaError::InvalidPattern {
+                        pattern: s.to_string(),
+                        reason: "String ends with incomplete escape sequence".to_string(),
+                    }
                     .into())
                 }
             }
@@ -454,10 +469,10 @@ fn unescape_string(s: &str) -> PyResult<String> {
 pub(in crate::patterns) fn parse_node_pattern(s: &str) -> PyResult<NodePattern> {
     let s = s.trim();
     if !s.starts_with('(') || !s.ends_with(')') {
-        return Err(ImplicaError::invalid_pattern(
-            s,
-            "Node pattern must be enclosed in parentheses",
-        )
+        return Err(ImplicaError::InvalidPattern {
+            pattern: s.to_string(),
+            reason: "Node pattern must be enclosed in parentheses".to_string(),
+        }
         .into());
     }
 
@@ -528,10 +543,10 @@ pub(in crate::patterns) fn parse_node_pattern(s: &str) -> PyResult<NodePattern> 
         }
         _ => {
             // Too many colons
-            return Err(ImplicaError::invalid_pattern(
-                s,
-                "Node pattern has too many ':' separators. Expected format: (var:TypeSchema:TermSchema)",
-            )
+            return Err(ImplicaError::InvalidPattern{
+                pattern: s.to_string(),
+                reason: "Node pattern has too many ':' separators. Expected format: (var:TypeSchema:TermSchema)".to_string(),
+            }
             .into());
         }
     }
@@ -571,9 +586,11 @@ pub(in crate::patterns) fn parse_edge_pattern(s: &str) -> PyResult<EdgePattern> 
     // Determine direction based on arrows
     // Patterns: -[e]-> (forward), <-[e]- (backward), -[e]- (any)
     let direction = if s.starts_with('<') && s.contains("->") {
-        return Err(
-            ImplicaError::invalid_pattern(s, "Cannot have both <- and -> in same edge").into(),
-        );
+        return Err(ImplicaError::InvalidPattern {
+            pattern: s.to_string(),
+            reason: "Cannot have both <- and -> in same edge".to_string(),
+        }
+        .into());
     } else if s.starts_with("<-") || (s.starts_with('<') && s.contains('-')) {
         "backward"
     } else if s.contains("->") || s.ends_with('>') {
@@ -583,15 +600,21 @@ pub(in crate::patterns) fn parse_edge_pattern(s: &str) -> PyResult<EdgePattern> 
     };
 
     // Extract the part inside brackets
-    let bracket_start = s
-        .find('[')
-        .ok_or_else(|| ImplicaError::invalid_pattern(s, "Edge pattern must contain brackets"))?;
-    let bracket_end = s.rfind(']').ok_or_else(|| {
-        ImplicaError::invalid_pattern(s, "Edge pattern must contain closing bracket")
+    let bracket_start = s.find('[').ok_or_else(|| ImplicaError::InvalidPattern {
+        pattern: s.to_string(),
+        reason: "Edge pattern must contain brackets".to_string(),
+    })?;
+    let bracket_end = s.rfind(']').ok_or_else(|| ImplicaError::InvalidPattern {
+        pattern: s.to_string(),
+        reason: "Edge pattern must contain closing bracket".to_string(),
     })?;
 
     if bracket_end <= bracket_start {
-        return Err(ImplicaError::invalid_pattern(s, "Brackets are mismatched").into());
+        return Err(ImplicaError::InvalidPattern {
+            pattern: s.to_string(),
+            reason: "Brackets are mismatched".to_string(),
+        }
+        .into());
     }
 
     let inner = &s[bracket_start + 1..bracket_end].trim();
@@ -656,10 +679,10 @@ pub(in crate::patterns) fn parse_edge_pattern(s: &str) -> PyResult<EdgePattern> 
             }
             _ => {
                 // Too many colons
-                return Err(ImplicaError::invalid_pattern(
-                    s,
-                    "Edge pattern has too many ':' separators. Expected format: [var:TypeSchema:TermSchema]",
-                )
+                return Err(ImplicaError::InvalidPattern{
+                    pattern: s.to_string(),
+                    reason: "Edge pattern has too many ':' separators. Expected format: [var:TypeSchema:TermSchema]".to_string(),
+                }
                 .into());
             }
         }

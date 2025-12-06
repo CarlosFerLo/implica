@@ -172,7 +172,11 @@ impl PathPattern {
 
         let pattern = pattern.trim();
         if pattern.is_empty() {
-            return Err(ImplicaError::invalid_pattern(pattern, "Pattern cannot be empty").into());
+            return Err(ImplicaError::InvalidPattern {
+                pattern: pattern.to_string(),
+                reason: "Pattern cannot be empty".to_string(),
+            }
+            .into());
         }
 
         let mut nodes = Vec::new();
@@ -200,19 +204,19 @@ impl PathPattern {
 
         // Validate: should have at least one node
         if nodes.is_empty() {
-            return Err(ImplicaError::invalid_pattern(
-                pattern,
-                "Pattern must contain at least one node",
-            )
+            return Err(ImplicaError::InvalidPattern {
+                pattern: pattern.to_string(),
+                reason: "Pattern must contain at least one node".to_string(),
+            }
             .into());
         }
 
         // Validate: edges should be between nodes
         if edges.len() >= nodes.len() {
-            return Err(ImplicaError::invalid_pattern(
-                pattern,
-                "Invalid pattern: too many edges for the number of nodes",
-            )
+            return Err(ImplicaError::InvalidPattern {
+                pattern: pattern.to_string(),
+                reason: "Invalid pattern: too many edges for the number of nodes".to_string(),
+            }
             .into());
         }
 

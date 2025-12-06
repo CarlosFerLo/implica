@@ -133,10 +133,11 @@ impl TypeSchema {
                 ')' => {
                     depth -= 1;
                     if depth < 0 {
-                        return Err(ImplicaError::schema_validation(
-                            input,
-                            "Unbalanced parentheses: too many closing parentheses",
-                        ));
+                        return Err(ImplicaError::SchemaValidation {
+                            schema: input.to_string(),
+                            reason: "Unbalanced parentheses: too many closing parentheses"
+                                .to_string(),
+                        });
                     }
                 }
                 _ => {}
@@ -144,10 +145,10 @@ impl TypeSchema {
         }
 
         if depth > 0 {
-            return Err(ImplicaError::schema_validation(
-                input,
-                "Unbalanced parentheses: too many opening parentheses",
-            ));
+            return Err(ImplicaError::SchemaValidation {
+                schema: input.to_string(),
+                reason: "Unbalanced parentheses: too many opening parentheses".to_string(),
+            });
         }
 
         Ok(())
@@ -158,7 +159,10 @@ impl TypeSchema {
 
         // Empty pattern is invalid
         if input.is_empty() {
-            return Err(ImplicaError::schema_validation(input, "Empty pattern"));
+            return Err(ImplicaError::SchemaValidation {
+                schema: input.to_string(),
+                reason: "Empty pattern".to_string(),
+            });
         }
 
         // Wildcard
@@ -217,10 +221,10 @@ impl TypeSchema {
         // If no special syntax, treat as variable name
         // Variable names should not be empty
         if input.is_empty() {
-            return Err(ImplicaError::schema_validation(
-                input,
-                "Empty variable name",
-            ));
+            return Err(ImplicaError::SchemaValidation {
+                schema: input.to_string(),
+                reason: "Empty variable name".to_string(),
+            });
         }
 
         Ok(TypePattern::Variable(input.to_string()))

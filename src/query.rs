@@ -577,7 +577,7 @@ impl Query {
 
 impl Query {
     #[allow(unused_variables)]
-    fn extract_var(obj: Option<Py<PyAny>>) -> PyResult<String> {
+    fn extract_var(obj: Option<Py<PyAny>>) -> Result<String, ImplicaError> {
         Python::attach(|py| {
             if let Some(o) = obj {
                 if let Ok(s) = o.bind(py).extract::<String>() {
@@ -586,16 +586,18 @@ impl Query {
                     Err(ImplicaError::InvalidQuery {
                         message: "Expected string variable name".to_string(),
                         context: Some("variable extraction".to_string()),
-                    }
-                    .into())
+                    })
                 }
             } else {
-                Err(ImplicaError::invalid_query("Variable name required").into())
+                Err(ImplicaError::InvalidQuery {
+                    message: "variable name required".to_string(),
+                    context: Some("extract_var".to_string()),
+                })
             }
         })
     }
 
-    fn extract_var_or_none(obj: Option<Py<PyAny>>) -> PyResult<Option<String>> {
+    fn extract_var_or_none(obj: Option<Py<PyAny>>) -> Result<Option<String>, ImplicaError> {
         Python::attach(|py| {
             if let Some(o) = obj {
                 if let Ok(s) = o.bind(py).extract::<String>() {

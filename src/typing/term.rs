@@ -2,7 +2,7 @@ use pyo3::prelude::*;
 use sha2::{Digest, Sha256};
 use std::{
     fmt::Display,
-    sync::{Arc, RwLock},
+    sync::{Arc, OnceLock},
 };
 
 use crate::{
@@ -42,7 +42,7 @@ impl Term {
         }
     }
 
-    pub fn uid(&self) -> String {
+    pub fn uid(&self) -> &str {
         match self {
             Term::Basic(b) => b.uid(),
             Term::Application(a) => a.uid(),
@@ -68,7 +68,7 @@ impl Term {
                         function: Arc::new(self.clone()),
                         argument: Arc::new(other.clone()),
                         r#type: arr.right.clone(),
-                        uid_cache: Arc::new(RwLock::new(None)),
+                        uid_cache: OnceLock::new(),
                     }))
                 }
             }
@@ -91,7 +91,7 @@ pub struct BasicTerm {
     #[pyo3(get)]
     pub name: String,
     pub r#type: Arc<Type>,
-    uid_cache: Arc<RwLock<Option<String>>>,
+    uid_cache: OnceLock<String>,
 }
 
 impl Display for BasicTerm {
@@ -126,7 +126,7 @@ impl BasicTerm {
         Ok(BasicTerm {
             name,
             r#type: type_arc,
-            uid_cache: Arc::new(RwLock::new(None)),
+            uid_cache: OnceLock::new(),
         })
     }
 
@@ -135,27 +135,13 @@ impl BasicTerm {
         type_to_python(py, self.r#type.as_ref())
     }
 
-    pub fn uid(&self) -> String {
-        if let Ok(cache) = self.uid_cache.read() {
-            if let Some(cached) = cache.as_ref() {
-                return cached.clone();
-            }
-        }
-
-        let mut hasher = Sha256::new();
-
-        hasher.update(b"term");
-        hasher.update(self.name.as_bytes());
-        hasher.update(b":");
-        hasher.update(self.r#type.uid().as_bytes());
-
-        let uid = format!("{:x}", hasher.finalize());
-
-        if let Ok(mut cache) = self.uid_cache.write() {
-            *cache = Some(uid.clone());
-        }
-
-        uid
+    pub fn uid(&self) -> &str {
+        self.uid_cache.get_or_init(|| {
+            let mut hasher = Sha256::new();
+            hasher.update(b"var:");
+            hasher.update(self.name.as_bytes());
+            format!("{:x}", hasher.finalize())
+        })
     }
 
     fn __str__(&self) -> String {
@@ -171,7 +157,7 @@ impl BasicTerm {
         use std::hash::{Hash, Hasher};
         let mut hasher = DefaultHasher::new();
         // Hash based on name (not the cache)
-        self.name.hash(&mut hasher);
+        self.uid().hash(&mut hasher);
         hasher.finish()
     }
 
@@ -193,7 +179,7 @@ pub struct Application {
     pub function: Arc<Term>,
     pub argument: Arc<Term>,
     pub r#type: Arc<Type>,
-    uid_cache: Arc<RwLock<Option<String>>>,
+    uid_cache: OnceLock<String>,
 }
 
 impl Display for Application {
@@ -237,7 +223,7 @@ impl Application {
                         function: Arc::new(function),
                         argument: Arc::new(argument),
                         r#type: arr.right.clone(),
-                        uid_cache: Arc::new(RwLock::new(None)),
+                        uid_cache: OnceLock::new(),
                     })
                 }
             }
@@ -262,29 +248,19 @@ impl Application {
         term_to_python(py, &self.argument)
     }
 
-    pub fn uid(&self) -> String {
-        if let Ok(cache) = self.uid_cache.read() {
-            if let Some(cached) = cache.as_ref() {
-                return cached.clone();
-            }
-        }
+    pub fn uid(&self) -> &str {
+        self.uid_cache.get_or_init(|| {
+            let mut hasher = Sha256::new();
 
-        let mut hasher = Sha256::new();
+            hasher.update(b"app:");
+            hasher.update(self.function.uid().as_bytes());
+            hasher.update(b":");
+            hasher.update(self.argument.uid().as_bytes());
+            hasher.update(b":");
+            hasher.update(self.r#type.uid().as_bytes());
 
-        hasher.update(b"app:");
-        hasher.update(self.function.uid().as_bytes());
-        hasher.update(b":");
-        hasher.update(self.argument.uid().as_bytes());
-        hasher.update(b":");
-        hasher.update(self.r#type.uid().as_bytes());
-
-        let uid = format!("{:x}", hasher.finalize());
-
-        if let Ok(mut cache) = self.uid_cache.write() {
-            *cache = Some(uid.clone());
-        }
-
-        uid
+            format!("{:x}", hasher.finalize())
+        })
     }
 
     fn __str__(&self) -> String {
@@ -299,9 +275,7 @@ impl Application {
         use std::collections::hash_map::DefaultHasher;
         use std::hash::{Hash, Hasher};
         let mut hasher = DefaultHasher::new();
-        // Hash based on left and right (not the cache)
-        self.function.hash(&mut hasher);
-        self.argument.hash(&mut hasher);
+        self.uid().hash(&mut hasher);
         hasher.finish()
     }
 
