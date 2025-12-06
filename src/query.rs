@@ -636,12 +636,10 @@ impl Query {
                     self.execute_order_by(vars, ascending)?;
                 }
                 QueryOperation::Limit(count) => {
-                    todo!("Implement this!");
-                    //self.execute_limit(count)?;
+                    self.execute_limit(count)?;
                 }
                 QueryOperation::Skip(count) => {
-                    todo!("Implement this!");
-                    //self.execute_skip(count)?;
+                    self.execute_skip(count)?;
                 }
             }
         }
@@ -2410,26 +2408,20 @@ impl Query {
         });
         Ok(())
     }
-    /*
 
     fn execute_limit(&mut self, count: usize) -> PyResult<()> {
         // Limit the number of results for each variable
-        for results in self.matched_vars.values_mut() {
-            results.truncate(count);
-        }
+        self.matches.truncate(count);
         Ok(())
     }
 
     fn execute_skip(&mut self, count: usize) -> PyResult<()> {
         // Skip the first N results for each variable
-        for results in self.matched_vars.values_mut() {
-            if count < results.len() {
-                *results = results.split_off(count);
-            } else {
-                results.clear();
-            }
+        if count < self.matches.len() {
+            self.matches.drain(0..count);
+        } else {
+            self.matches.clear();
         }
         Ok(())
     }
-    */
 }
