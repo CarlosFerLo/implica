@@ -1449,7 +1449,7 @@ impl Query {
                                                 (
                                                     start.clone(),
                                                     QueryResult::Node(
-                                                        (*m.end.read().map_err(|e| {
+                                                        (*m.start.read().map_err(|e| {
                                                             ImplicaError::LockError {
                                                                 rw: "read".to_string(),
                                                                 message: e.to_string(),

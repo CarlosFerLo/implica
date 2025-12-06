@@ -59,7 +59,7 @@ impl Clone for Node {
                     })
                     .collect(),
             )),
-            uid_cache: self.uid_cache.clone(),
+            uid_cache: OnceLock::new(),
         })
     }
 }

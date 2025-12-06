@@ -69,7 +69,7 @@ impl Clone for Edge {
                     })
                     .collect(),
             )),
-            uid_cache: self.uid_cache.clone(),
+            uid_cache: OnceLock::new(),
         })
     }
 }

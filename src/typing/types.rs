@@ -370,11 +370,9 @@ pub(crate) fn python_to_type(obj: &Bound<'_, PyAny>) -> Result<Type, ImplicaErro
     if obj.is_instance_of::<Variable>() {
         let var = obj.extract::<Variable>()?;
         // Validar integridad
-        if var.name.is_empty() {
-            return Err(ImplicaError::InvalidType {
-                reason: "Variable name cannot be empty".to_string(),
-            });
-        }
+
+        validate_variable_name(&var.name)?;
+
         Ok(Type::Variable(var))
     } else if obj.is_instance_of::<Arrow>() {
         Ok(Type::Arrow(obj.extract::<Arrow>()?))
