@@ -267,8 +267,8 @@ impl Graph {
     pub fn add_node(&self, node: &Node) -> Result<(), ImplicaError> {
         let uid = node.uid();
 
-        let nodes = self.nodes.read().map_err(|e| ImplicaError::LockError {
-            rw: "read".to_string(),
+        let mut nodes = self.nodes.write().map_err(|e| ImplicaError::LockError {
+            rw: "write".to_string(),
             message: e.to_string(),
             context: Some("add node".to_string()),
         })?;
@@ -287,11 +287,6 @@ impl Graph {
             });
         }
 
-        let mut nodes = self.nodes.write().map_err(|e| ImplicaError::LockError {
-            rw: "write".to_string(),
-            message: e.to_string(),
-            context: Some("add node".to_string()),
-        })?;
         nodes.insert(uid.to_string(), Arc::new(RwLock::new(node.clone())));
 
         Ok(())
@@ -366,8 +361,8 @@ impl Graph {
         let edge = Edge::new(term, start_ptr, end_ptr, properties);
         let uid = edge.uid();
 
-        let edges = self.edges.read().map_err(|e| ImplicaError::LockError {
-            rw: "read".to_string(),
+        let mut edges = self.edges.write().map_err(|e| ImplicaError::LockError {
+            rw: "write".to_string(),
             message: e.to_string(),
             context: Some("add edge".to_string()),
         })?;
@@ -386,14 +381,7 @@ impl Graph {
             });
         }
 
-        self.edges
-            .write()
-            .map_err(|e| ImplicaError::LockError {
-                rw: "write".to_string(),
-                message: e.to_string(),
-                context: Some("add edge".to_string()),
-            })?
-            .insert(uid.to_string(), Arc::new(RwLock::new(edge.clone())));
+        edges.insert(uid.to_string(), Arc::new(RwLock::new(edge.clone())));
 
         Ok(edge)
     }

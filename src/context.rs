@@ -36,8 +36,8 @@ impl Context {
     pub fn add_term(&self, name: String, term: Term) -> Result<(), ImplicaError> {
         validate_variable_name(&name)?;
 
-        let context = self.content.read().map_err(|e| ImplicaError::LockError {
-            rw: "read".to_string(),
+        let mut context = self.content.write().map_err(|e| ImplicaError::LockError {
+            rw: "write".to_string(),
             message: e.to_string(),
             context: Some("context add term".to_string()),
         })?;
@@ -49,11 +49,6 @@ impl Context {
             });
         }
 
-        let mut context = self.content.write().map_err(|e| ImplicaError::LockError {
-            rw: "write".to_string(),
-            message: e.to_string(),
-            context: Some("context add term".to_string()),
-        })?;
         context.insert(name, ContextElement::Term(term));
 
         Ok(())
@@ -62,8 +57,8 @@ impl Context {
     pub fn add_type(&self, name: String, r#type: Type) -> Result<(), ImplicaError> {
         validate_variable_name(&name)?;
 
-        let context = self.content.read().map_err(|e| ImplicaError::LockError {
-            rw: "read".to_string(),
+        let mut context = self.content.write().map_err(|e| ImplicaError::LockError {
+            rw: "write".to_string(),
             message: e.to_string(),
             context: Some("context add type".to_string()),
         })?;
@@ -75,11 +70,6 @@ impl Context {
             });
         }
 
-        let mut context = self.content.write().map_err(|e| ImplicaError::LockError {
-            rw: "write".to_string(),
-            message: e.to_string(),
-            context: Some("context add type".to_string()),
-        })?;
         context.insert(name, ContextElement::Type(r#type));
 
         Ok(())
