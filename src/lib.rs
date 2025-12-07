@@ -9,7 +9,7 @@ pub mod typing;
 pub mod utils;
 
 use graph::{Edge, Graph, Node};
-use patterns::{EdgePattern, NodePattern, PathPattern, TypeSchema};
+use patterns::{EdgePattern, NodePattern, PathPattern, TermSchema, TypeSchema};
 use query::Query;
 use typing::{Application, Arrow, BasicTerm, Variable};
 
@@ -47,6 +47,7 @@ fn implica(m: &Bound<'_, PyModule>) -> PyResult<()> {
 
     // Query system
     m.add_class::<TypeSchema>()?;
+    m.add_class::<TermSchema>()?;
     m.add_class::<NodePattern>()?;
     m.add_class::<EdgePattern>()?;
     m.add_class::<PathPattern>()?;

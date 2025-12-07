@@ -3,9 +3,11 @@ use std::{
     sync::{Arc, RwLock},
 };
 
+use pyo3::{prelude::*, types::PyDict};
+
 use crate::{
     errors::ImplicaError,
-    typing::{Term, Type},
+    typing::{python_to_term, python_to_type, term_to_python, type_to_python, Term, Type},
     utils::validate_variable_name,
 };
 
@@ -17,7 +19,7 @@ pub enum ContextElement {
 
 #[derive(Clone, Debug)]
 pub struct Context {
-    content: Arc<RwLock<HashMap<String, ContextElement>>>,
+    pub(crate) content: Arc<RwLock<HashMap<String, ContextElement>>>,
 }
 
 impl Default for Context {
@@ -98,4 +100,61 @@ impl Context {
             }),
         }
     }
+}
+
+pub fn python_to_context(obj: &Bound<'_, PyAny>) -> Result<Context, ImplicaError> {
+    let context = Context::new();
+
+    let dict = obj
+        .cast::<PyDict>()
+        .map_err(|_| ImplicaError::PythonError {
+            message: "Expected a dictionary".to_string(),
+            context: Some("python_to_context".to_string()),
+        })?;
+
+    for item in dict.iter() {
+        let key = item
+            .0
+            .extract::<String>()
+            .map_err(|_| ImplicaError::PythonError {
+                message: "Dictionary keys must be strings".to_string(),
+                context: Some("python_to_context".to_string()),
+            })?;
+
+        // Try to parse as Term first, then as Type
+        if let Ok(term) = python_to_term(&item.1) {
+            context.add_term(key, term)?;
+        } else if let Ok(typ) = python_to_type(&item.1) {
+            context.add_type(key, typ)?;
+        } else {
+            return Err(ImplicaError::PythonError {
+                message: format!("Value for key '{}' must be a Term or Type", key),
+                context: Some("python_to_context".to_string()),
+            });
+        }
+    }
+
+    Ok(context)
+}
+
+pub fn context_to_python(py: Python, context: Context) -> PyResult<Py<PyDict>> {
+    let dict = PyDict::new(py);
+    let content = context
+        .content
+        .read()
+        .map_err(|e| ImplicaError::LockError {
+            rw: "read".to_string(),
+            message: e.to_string(),
+            context: Some("context to python".to_string()),
+        })?;
+    for (k, e) in content.iter() {
+        let t_obj = match e {
+            ContextElement::Type(t) => type_to_python(py, t)?,
+            ContextElement::Term(t) => term_to_python(py, t)?,
+        };
+
+        dict.set_item(k, t_obj)?;
+    }
+
+    Ok(dict.unbind())
 }

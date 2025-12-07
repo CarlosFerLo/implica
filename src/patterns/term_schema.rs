@@ -1,10 +1,12 @@
 use pyo3::prelude::*;
+use pyo3::types::PyDict;
 
 use std::{fmt::Display, sync::Arc};
 
-use crate::context::{Context, ContextElement};
+use crate::context::{python_to_context, Context, ContextElement};
 use crate::errors::ImplicaError;
-use crate::typing::{Application, Term};
+use crate::typing::{python_to_term, term_to_python, type_to_python, Application, Term};
+use crate::utils::validate_variable_name;
 
 #[derive(Clone, Debug, PartialEq)]
 enum TermPattern {
@@ -32,6 +34,50 @@ impl Display for TermSchema {
 
 #[pymethods]
 impl TermSchema {
+    #[new]
+    pub fn py_new(pattern: String) -> PyResult<Self> {
+        TermSchema::new(pattern).map_err(|e| e.into())
+    }
+
+    #[pyo3(name = "matches", signature=(term, context = None))]
+    pub fn py_matches(
+        &self,
+        py: Python,
+        term: Py<PyAny>,
+        context: Option<Py<PyAny>>,
+    ) -> PyResult<bool> {
+        let context_obj = match context.as_ref() {
+            Some(c) => Arc::new(python_to_context(c.bind(py))?),
+            None => Arc::new(Context::new()),
+        };
+        let term_obj = python_to_term(term.bind(py))?;
+
+        let result = self.matches(&term_obj, context_obj.clone())?;
+
+        if let Some(c) = context {
+            let dict = c.bind(py).cast::<PyDict>()?;
+
+            dict.clear();
+            let content = context_obj
+                .content
+                .read()
+                .map_err(|e| ImplicaError::LockError {
+                    rw: "read".to_string(),
+                    message: e.to_string(),
+                    context: Some("py matches type schema".to_string()),
+                })?;
+            for (k, v) in content.iter() {
+                let t_obj = match v {
+                    ContextElement::Type(t) => type_to_python(py, t)?,
+                    ContextElement::Term(t) => term_to_python(py, t)?,
+                };
+                dict.set_item(k.clone(), t_obj)?;
+            }
+        }
+
+        Ok(result)
+    }
+
     fn __str__(&self) -> String {
         self.to_string()
     }
@@ -94,6 +140,7 @@ impl TermSchema {
             });
         }
 
+        validate_variable_name(trimmed)?;
         Ok(TermPattern::Variable(trimmed.to_string()))
     }
 

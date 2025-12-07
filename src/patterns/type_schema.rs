@@ -1,8 +1,9 @@
-use crate::context::{Context, ContextElement};
+use crate::context::{python_to_context, Context, ContextElement};
 use crate::errors::ImplicaError;
-use crate::typing::{Arrow, Type, Variable};
+use crate::typing::{python_to_type, term_to_python, type_to_python, Arrow, Type, Variable};
 use crate::utils::validate_variable_name;
 use pyo3::prelude::*;
+use pyo3::types::PyDict;
 
 use std::fmt::Display;
 use std::sync::Arc;
@@ -38,6 +39,50 @@ impl Display for TypeSchema {
 
 #[pymethods]
 impl TypeSchema {
+    #[new]
+    pub fn py_new(pattern: String) -> PyResult<Self> {
+        TypeSchema::new(pattern).map_err(|e| e.into())
+    }
+
+    #[pyo3(name = "matches", signature = (r#type, context = None))]
+    pub fn py_matches(
+        &self,
+        py: Python,
+        r#type: Py<PyAny>,
+        context: Option<Py<PyAny>>,
+    ) -> PyResult<bool> {
+        let context_obj = match context.as_ref() {
+            Some(c) => Arc::new(python_to_context(c.bind(py))?),
+            None => Arc::new(Context::new()),
+        };
+        let type_obj = python_to_type(r#type.bind(py))?;
+
+        let result = self.matches(&type_obj, context_obj.clone())?;
+
+        if let Some(c) = context {
+            let dict = c.bind(py).cast::<PyDict>()?;
+
+            dict.clear();
+            let content = context_obj
+                .content
+                .read()
+                .map_err(|e| ImplicaError::LockError {
+                    rw: "read".to_string(),
+                    message: e.to_string(),
+                    context: Some("py matches type schema".to_string()),
+                })?;
+            for (k, v) in content.iter() {
+                let t_obj = match v {
+                    ContextElement::Type(t) => type_to_python(py, t)?,
+                    ContextElement::Term(t) => term_to_python(py, t)?,
+                };
+                dict.set_item(k.clone(), t_obj)?;
+            }
+        }
+
+        Ok(result)
+    }
+
     fn __str__(&self) -> String {
         self.to_string()
     }
@@ -173,6 +218,7 @@ impl TypeSchema {
             });
         }
 
+        validate_variable_name(input)?;
         Ok(TypePattern::Variable(input.to_string()))
     }
 

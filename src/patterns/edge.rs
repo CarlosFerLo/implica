@@ -190,9 +190,7 @@ impl EdgePattern {
             CompiledDirection::Backward => !forward,
         }
     }
-}
 
-impl EdgePattern {
     pub fn matches(&self, edge: &Edge, context: Arc<Context>) -> PyResult<bool> {
         // Check term using compiled matcher (most efficient path)
         match &self.compiled_type_matcher {
