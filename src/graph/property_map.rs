@@ -44,7 +44,7 @@ pub(crate) fn python_to_property_map(obj: &Bound<'_, PyAny>) -> PyResult<Propert
     Ok(props)
 }
 
-pub(crate) fn properaty_map_to_python(py: Python, props: &PropertyMap) -> PyResult<Py<PyAny>> {
+pub(crate) fn property_map_to_python(py: Python, props: &PropertyMap) -> PyResult<Py<PyAny>> {
     let dict = PyDict::new(py);
 
     // Import deepcopy from the copy module

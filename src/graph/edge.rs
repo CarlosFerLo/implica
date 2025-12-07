@@ -1,5 +1,4 @@
 use pyo3::prelude::*;
-use pyo3::types::PyDict;
 
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
@@ -8,8 +7,10 @@ use std::sync::{Arc, OnceLock, RwLock};
 
 use crate::errors::ImplicaError;
 use crate::graph::node::Node;
-use crate::graph::property_map::{clone_property_map, SharedPropertyMap};
-use crate::typing::{term_to_python, Term};
+use crate::graph::property_map::{
+    clone_property_map, property_map_to_python, python_to_property_map, SharedPropertyMap,
+};
+use crate::typing::{python_to_term, term_to_python, Term};
 
 #[pyclass]
 #[derive(Debug)]
@@ -54,8 +55,83 @@ impl PartialEq for Edge {
 
 impl Eq for Edge {}
 
+impl Edge {
+    pub fn new(
+        term: Arc<Term>,
+        start: Arc<RwLock<Node>>,
+        end: Arc<RwLock<Node>>,
+        properties: Option<SharedPropertyMap>,
+    ) -> Result<Self, ImplicaError> {
+        let term_type = term.r#type();
+        if let Some(arr) = term_type.as_arrow() {
+            let start = start.read().map_err(|e| ImplicaError::LockError {
+                rw: "read".to_string(),
+                message: e.to_string(),
+                context: Some("new edge".to_string()),
+            })?;
+
+            if arr.left != start.r#type {
+                return Err(ImplicaError::TypeMismatch {
+                    expected: arr.left.to_string(),
+                    got: start.r#type.to_string(),
+                    context: Some("new edge".to_string()),
+                });
+            }
+
+            let end = end.read().map_err(|e| ImplicaError::LockError {
+                rw: "read".to_string(),
+                message: e.to_string(),
+                context: Some("new edge".to_string()),
+            })?;
+
+            if arr.right != end.r#type {
+                return Err(ImplicaError::TypeMismatch {
+                    expected: arr.right.to_string(),
+                    got: end.r#type.to_string(),
+                    context: Some("new edge".to_string()),
+                });
+            }
+        } else {
+            return Err(ImplicaError::InvalidType {
+                reason: "Edges must contain terms of an application type".to_string(),
+            });
+        }
+
+        Ok(Edge {
+            term,
+            start,
+            end,
+            properties: properties.unwrap_or(Arc::new(RwLock::new(HashMap::new()))),
+            uid_cache: OnceLock::new(),
+        })
+    }
+}
+
 #[pymethods]
 impl Edge {
+    #[new]
+    #[pyo3(signature=(term, start, end, properties = None))]
+    pub fn py_new(
+        py: Python,
+        term: Py<PyAny>,
+        start: Node,
+        end: Node,
+        properties: Option<Py<PyAny>>,
+    ) -> PyResult<Self> {
+        let term_obj = python_to_term(term.bind(py))?;
+        let props_obj = match properties {
+            Some(props) => Some(python_to_property_map(props.bind(py))?),
+            None => None,
+        };
+
+        Ok(Edge::new(
+            Arc::new(term_obj),
+            Arc::new(RwLock::new(start.clone())),
+            Arc::new(RwLock::new(end.clone())),
+            props_obj.map(|p| Arc::new(RwLock::new(p))),
+        )?)
+    }
+
     #[getter]
     pub fn term(&self, py: Python) -> PyResult<Py<PyAny>> {
         let term = self.term.clone();
@@ -93,8 +169,7 @@ impl Edge {
     }
 
     #[getter]
-    pub fn get_properties(&self, py: Python) -> PyResult<Py<PyDict>> {
-        let dict = PyDict::new(py);
+    pub fn get_properties(&self, py: Python) -> PyResult<Py<PyAny>> {
         let props = self
             .properties
             .read()
@@ -103,25 +178,7 @@ impl Edge {
                 message: e.to_string(),
                 context: Some("execute match edge".to_string()),
             })?;
-        for (k, v) in props.iter() {
-            dict.set_item(k, v.clone_ref(py))?;
-        }
-        Ok(dict.into())
-    }
-
-    #[setter]
-    pub fn set_properties(&self, props: HashMap<String, Py<PyAny>>) -> PyResult<()> {
-        let mut guard = self
-            .properties
-            .write()
-            .map_err(|e| ImplicaError::LockError {
-                rw: "write".to_string(),
-                message: e.to_string(),
-                context: Some("edge set properties".to_string()),
-            })?;
-        guard.clear();
-        guard.extend(props);
-        Ok(())
+        property_map_to_python(py, &props)
     }
 
     pub fn uid(&self) -> &str {
@@ -150,22 +207,5 @@ impl Edge {
         let uid_str = self.uid();
         let truncated = &uid_str[..16];
         u64::from_str_radix(truncated, 16).unwrap_or(0)
-    }
-}
-
-impl Edge {
-    pub fn new(
-        term: Arc<Term>,
-        start: Arc<RwLock<Node>>,
-        end: Arc<RwLock<Node>>,
-        properties: Option<SharedPropertyMap>,
-    ) -> Self {
-        Edge {
-            term,
-            start,
-            end,
-            properties: properties.unwrap_or(Arc::new(RwLock::new(HashMap::new()))),
-            uid_cache: OnceLock::new(),
-        }
     }
 }

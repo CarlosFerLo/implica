@@ -8,7 +8,7 @@ use std::sync::{Arc, OnceLock, RwLock};
 
 use crate::errors::ImplicaError;
 use crate::graph::property_map::{
-    clone_property_map, properaty_map_to_python, python_to_property_map, SharedPropertyMap,
+    clone_property_map, property_map_to_python, python_to_property_map, SharedPropertyMap,
 };
 use crate::typing::{python_to_term, python_to_type, term_to_python, type_to_python, Term, Type};
 
@@ -141,7 +141,7 @@ impl Node {
                 message: e.to_string(),
                 context: Some("get term".to_string()),
             })?;
-        properaty_map_to_python(py, &props)
+        property_map_to_python(py, &props)
     }
 
     pub fn uid(&self) -> &str {

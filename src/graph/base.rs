@@ -214,7 +214,7 @@ impl Graph {
             }
         };
 
-        let edge = Edge::new(term, start_ptr, end_ptr, properties);
+        let edge = Edge::new(term, start_ptr, end_ptr, properties)?;
         let uid = edge.uid();
 
         let mut edges = self.edges.write().map_err(|e| ImplicaError::LockError {
