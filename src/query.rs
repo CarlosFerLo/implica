@@ -11,7 +11,9 @@ use crate::errors::ImplicaError;
 use crate::graph::{Edge, Graph, Node};
 use crate::patterns::{EdgePattern, NodePattern, PathPattern, TermSchema, TypeSchema};
 use crate::typing::{python_to_term, python_to_type, Arrow, Type};
-use crate::utils::{compare_values, props_as_map, Evaluator, PlaceholderGenerator};
+use crate::utils::{
+    compare_values, props_as_map, validate_variable_name, Evaluator, PlaceholderGenerator,
+};
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
 use rhai::Scope;
@@ -2676,6 +2678,9 @@ impl Query {
                     context: Some("order by".to_string()),
                 });
             }
+
+            validate_variable_name(parts[0])?;
+            validate_variable_name(parts[1])?;
 
             props.push((parts[0].to_string(), parts[1].to_string()));
         }
