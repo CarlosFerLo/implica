@@ -7,10 +7,9 @@ use std::fmt::Display;
 use std::sync::{Arc, OnceLock, RwLock};
 
 use crate::errors::ImplicaError;
-use crate::graph::alias::SharedPropertyMap;
 use crate::graph::node::Node;
+use crate::graph::property_map::{clone_property_map, SharedPropertyMap};
 use crate::typing::{term_to_python, Term};
-use crate::utils::clone_property_map;
 
 #[pyclass]
 #[derive(Debug)]
@@ -145,6 +144,12 @@ impl Edge {
     fn __eq__(&self, other: &Self) -> bool {
         // Equality based on uid
         self == other
+    }
+
+    fn __hash__(&self) -> u64 {
+        let uid_str = self.uid();
+        let truncated = &uid_str[..16];
+        u64::from_str_radix(truncated, 16).unwrap_or(0)
     }
 }
 

@@ -33,38 +33,6 @@ mod r#where;
 #[path = "executors/with.rs"]
 mod with;
 
-/// Cypher-like query builder for the graph.
-///
-/// The Query structure provides a fluent interface for building and executing
-/// graph queries. It supports pattern matching, node/edge creation, updates,
-/// and deletions, similar to Cypher query language.
-///
-/// # Examples
-///
-/// ```python
-/// import implica
-///
-/// graph = implica.Graph()
-/// q = graph.query()
-///
-/// # Match nodes
-/// q.match(node="n", type_schema="$Person$")
-/// results = q.return_(["n"])
-///
-/// # Create nodes
-/// q.create(node="p", type=person_type, properties={"name": "Alice"})
-///
-/// # Complex queries
-/// q.match("(a:Person)-[r:knows]->(b:Person)")
-/// q.where("a.age > 25")
-/// results = q.return_(["a", "b"])
-/// ```
-///
-/// # Fields
-///
-/// * `graph` - The graph being queried
-/// * `matched_vars` - Variables matched during query execution (internal)
-/// * `operations` - Queue of operations to execute (internal)
 #[pyclass]
 #[derive(Clone, Debug)]
 pub struct Query {
@@ -74,18 +42,12 @@ pub struct Query {
     pub context: Arc<Context>,
 }
 
-/// Result type for query matching (internal).
-///
-/// Represents either a matched node or a matched edge.
 #[derive(Clone, Debug)]
 pub enum QueryResult {
     Node(Node),
     Edge(Edge),
 }
 
-/// Query operation types (internal).
-///
-/// Represents the different operations that can be performed in a query.
 #[derive(Debug)]
 pub enum QueryOperation {
     Match(MatchOp),
@@ -127,9 +89,6 @@ impl Clone for QueryOperation {
     }
 }
 
-/// Match operation types (internal).
-///
-/// Represents different patterns that can be matched.
 #[derive(Clone, Debug)]
 pub enum MatchOp {
     Node(NodePattern),
@@ -137,9 +96,6 @@ pub enum MatchOp {
     Path(PathPattern),
 }
 
-/// Create operation types (internal).
-///
-/// Represents different elements that can be created.
 #[derive(Clone, Debug)]
 pub enum CreateOp {
     Node(NodePattern),
@@ -155,19 +111,6 @@ pub enum AddOp {
 
 #[pymethods]
 impl Query {
-    /// Creates a new query for the given graph.
-    ///
-    /// # Arguments
-    ///
-    /// * `graph` - The graph to query
-    ///
-    /// # Returns
-    ///
-    /// A new `Query` instance
-    ///
-    /// # Note
-    ///
-    /// Typically you don't create queries directly but use `graph.query()` instead.
     #[new]
     pub fn new(graph: Graph) -> Self {
         Query {
@@ -178,40 +121,6 @@ impl Query {
         }
     }
 
-    /// Matches nodes, edges, or paths in the graph.
-    ///
-    /// This is the primary method for pattern matching in queries. It supports
-    /// multiple forms: pattern strings, explicit node/edge specifications, and more.
-    ///
-    /// # Arguments
-    ///
-    /// * `pattern` - Optional Cypher-like pattern string (e.g., "(n:Person)-\[e\]->(m)")
-    /// * `node` - Optional variable name for node matching
-    /// * `edge` - Optional variable name for edge matching
-    /// * `start` - Optional start node for edge matching
-    /// * `end` - Optional end node for edge matching
-    /// * `type` - Optional specific type to match for nodes
-    /// * `type_schema` - Optional type schema pattern for nodes
-    /// * `term` - Optional specific term for edges
-    /// * `term_type_schema` - Optional type schema for edge terms
-    /// * `properties` - Optional dictionary of required properties
-    ///
-    /// # Returns
-    ///
-    /// Self (for method chaining)
-    ///
-    /// # Examples
-    ///
-    /// ```python
-    /// # Match with pattern string
-    /// q.match("(n:Person)-\[e:knows\]->(m:Person)")
-    ///
-    /// # Match node
-    /// q.match(node="n", type_schema="$Person$")
-    ///
-    /// # Match edge
-    /// q.match(edge="e", start=start_node, end=end_node)
-    /// ```
     #[allow(clippy::too_many_arguments)]
     pub fn r#match(
         &mut self,
@@ -346,42 +255,11 @@ impl Query {
         Ok(self.clone())
     }
 
-    /// Adds a WHERE clause to filter results (not fully implemented).
-    ///
-    /// # Arguments
-    ///
-    /// * `condition` - SQL-like condition string
-    ///
-    /// # Returns
-    ///
-    /// Self (for method chaining)
     pub fn r#where(&mut self, condition: String) -> PyResult<Self> {
         self.operations.push(QueryOperation::Where(condition));
         Ok(self.clone())
     }
 
-    /// Returns the specified variables from the query results.
-    ///
-    /// Executes all operations and returns the matched variables as a list of
-    /// dictionaries, where each dictionary maps variable names to their values.
-    ///
-    /// # Arguments
-    ///
-    /// * `py` - Python context
-    /// * `variables` - List of variable names to return
-    ///
-    /// # Returns
-    ///
-    /// A list of dictionaries containing the requested variables
-    ///
-    /// # Examples
-    ///
-    /// ```python
-    /// q.match(node="n", type_schema="$Person$")
-    /// results = q.return_(["n"])
-    /// for row in results:
-    ///     print(row["n"])
-    /// ```
     #[pyo3(signature = (*variables))]
     pub fn return_(&mut self, py: Python, variables: Vec<String>) -> PyResult<Vec<Py<PyAny>>> {
         // Execute all operations to build matched_vars

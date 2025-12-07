@@ -270,11 +270,9 @@ impl Application {
     }
 
     fn __hash__(&self) -> u64 {
-        use std::collections::hash_map::DefaultHasher;
-        use std::hash::{Hash, Hasher};
-        let mut hasher = DefaultHasher::new();
-        self.uid().hash(&mut hasher);
-        hasher.finish()
+        let uid_str = self.uid();
+        let truncated = &uid_str[..16];
+        u64::from_str_radix(truncated, 16).unwrap_or(0)
     }
 
     fn __eq__(&self, other: &Self) -> bool {

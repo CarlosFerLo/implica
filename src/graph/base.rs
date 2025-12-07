@@ -7,7 +7,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 
 use crate::context::Context;
-use crate::graph::{alias::SharedPropertyMap, Edge, Node};
+use crate::graph::{property_map::SharedPropertyMap, Edge, Node};
 
 #[pyclass]
 #[derive(Debug)]

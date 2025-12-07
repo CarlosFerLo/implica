@@ -61,7 +61,7 @@ impl Query {
                         r#type,
                         term.map(|t| Arc::new(RwLock::new((*t).clone()))),
                         Some(props),
-                    );
+                    )?;
 
                     self.graph.add_node(&node)?;
 
@@ -556,7 +556,7 @@ impl Query {
                             }
                         });
 
-                        let mut node = Node::new(r#type, term, Some(props));
+                        let mut node = Node::new(r#type, term, Some(props))?;
 
                         match self.graph.add_node(&node) {
                             Ok(()) => (),
