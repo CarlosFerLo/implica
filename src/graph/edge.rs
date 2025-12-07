@@ -10,6 +10,7 @@ use crate::errors::ImplicaError;
 use crate::graph::alias::SharedPropertyMap;
 use crate::graph::node::Node;
 use crate::typing::{term_to_python, Term};
+use crate::utils::clone_property_map;
 /// Represents an edge in the graph (a typed term in the model).
 ///
 /// Edges are directed connections between nodes, each representing a term.
@@ -54,23 +55,13 @@ pub struct Edge {
 
 impl Clone for Edge {
     fn clone(&self) -> Self {
-        Python::attach(|py| Edge {
+        Edge {
             term: self.term.clone(),
             start: self.start.clone(),
             end: self.end.clone(),
-            properties: Arc::new(RwLock::new(
-                self.properties
-                    .read()
-                    .unwrap()
-                    .iter()
-                    .map(|(k, v)| {
-                        let new_props = v.clone_ref(py);
-                        (k.clone(), new_props)
-                    })
-                    .collect(),
-            )),
+            properties: Arc::new(RwLock::new(clone_property_map(&self.properties).unwrap())),
             uid_cache: OnceLock::new(),
-        })
+        }
     }
 }
 

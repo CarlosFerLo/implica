@@ -9,6 +9,7 @@ use std::sync::{Arc, OnceLock, RwLock};
 use crate::errors::ImplicaError;
 use crate::graph::alias::{PropertyMap, SharedPropertyMap};
 use crate::typing::{term_to_python, type_to_python, Term, Type};
+use crate::utils::clone_property_map;
 
 /// Represents a node in the graph (a type in the model).
 ///
@@ -45,22 +46,12 @@ pub struct Node {
 
 impl Clone for Node {
     fn clone(&self) -> Self {
-        Python::attach(|py| Node {
+        Node {
             r#type: self.r#type.clone(),
             term: self.term.clone(),
-            properties: Arc::new(RwLock::new(
-                self.properties
-                    .read()
-                    .unwrap()
-                    .iter()
-                    .map(|(k, v)| {
-                        let new_props = v.clone_ref(py);
-                        (k.clone(), new_props)
-                    })
-                    .collect(),
-            )),
+            properties: Arc::new(RwLock::new(clone_property_map(&self.properties).unwrap())),
             uid_cache: OnceLock::new(),
-        })
+        }
     }
 }
 
