@@ -11,7 +11,7 @@ use crate::errors::ImplicaError;
 use crate::graph::{Edge, Graph, Node};
 use crate::patterns::{EdgePattern, NodePattern, PathPattern, TermSchema, TypeSchema};
 use crate::typing::{python_to_term, python_to_type, Arrow, Type};
-use crate::utils::{compare_values, props_as_map, Evaluator};
+use crate::utils::{compare_values, props_as_map, Evaluator, PlaceholderGenerator};
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
 use rhai::Scope;
@@ -19,7 +19,6 @@ use std::cmp::Ordering;
 use std::collections::HashMap;
 use std::iter::zip;
 use std::sync::{Arc, RwLock};
-use uuid::Uuid;
 
 /// Cypher-like query builder for the graph.
 ///
@@ -1807,20 +1806,18 @@ impl Query {
                 }
             }
             MatchOp::Path(mut path) => {
-                let mut placeholder_variables = Vec::new();
+                let ph_generator = PlaceholderGenerator::new();
 
                 for np in path.nodes.iter_mut() {
                     if np.variable.is_none() {
-                        let var_name = Uuid::new_v4().to_string();
-                        np.variable = Some(var_name.clone());
-                        placeholder_variables.push(var_name);
+                        let var_name = ph_generator.next();
+                        np.variable = Some(var_name);
                     }
                 }
                 for ep in path.edges.iter_mut() {
                     if ep.variable.is_none() {
-                        let var_name = Uuid::new_v4().to_string();
-                        ep.variable = Some(var_name.clone());
-                        placeholder_variables.push(var_name);
+                        let var_name = ph_generator.next();
+                        ep.variable = Some(var_name);
                     }
                 }
 
@@ -1838,8 +1835,8 @@ impl Query {
                 }
 
                 for res in self.matches.iter_mut() {
-                    for ph in placeholder_variables.iter() {
-                        res.remove(ph);
+                    for ph in ph_generator.prev() {
+                        res.remove(&ph);
                     }
                 }
             }
@@ -2009,13 +2006,12 @@ impl Query {
 
                 let nodes_len = path.nodes.len();
 
-                let mut placeholder_variables = Vec::new();
+                let ph_generator = PlaceholderGenerator::new();
 
                 for np in path.nodes.iter_mut() {
                     if np.variable.is_none() {
-                        let var_name = Uuid::new_v4().to_string();
-                        np.variable = Some(var_name.clone());
-                        placeholder_variables.push(var_name);
+                        let var_name = ph_generator.next();
+                        np.variable = Some(var_name);
                     }
 
                     if let Some(ref type_schema) = np.type_schema {
@@ -2036,9 +2032,8 @@ impl Query {
                 }
                 for ep in path.edges.iter_mut() {
                     if ep.variable.is_none() {
-                        let var_name = Uuid::new_v4().to_string();
-                        ep.variable = Some(var_name.clone());
-                        placeholder_variables.push(var_name);
+                        let var_name = ph_generator.next();
+                        ep.variable = Some(var_name);
                     }
 
                     if let Some(ref type_schema) = ep.type_schema {
@@ -2471,8 +2466,8 @@ impl Query {
                         }
                     }
 
-                    for ph in placeholder_variables.iter() {
-                        m.remove(ph);
+                    for ph in ph_generator.prev() {
+                        m.remove(&ph);
                     }
                 }
             }
