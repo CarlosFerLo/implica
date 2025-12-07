@@ -146,6 +146,18 @@ impl Arrow {
 
 #[pymethods]
 impl Arrow {
+    #[new]
+    pub fn py_new(py: Python, left: Py<PyAny>, right: Py<PyAny>) -> PyResult<Self> {
+        let left_obj = python_to_type(left.bind(py))?;
+        let right_obj = python_to_type(right.bind(py))?;
+
+        Ok(Arrow {
+            left: Arc::new(left_obj),
+            right: Arc::new(right_obj),
+            uid_cache: OnceLock::new(),
+        })
+    }
+
     #[getter]
     pub fn left(&self, py: Python) -> PyResult<Py<PyAny>> {
         type_to_python(py, &self.left)

@@ -1,40 +1,3 @@
-//! # Implica
-//!
-//! A Python library for type-theoretical graph modeling and querying.
-//!
-//! This library provides a framework for building and querying graphs based on type theory,
-//! with support for Cypher-like query patterns. It combines the power of Rust's performance
-//! with Python's ease of use through PyO3 bindings.
-//!
-//! ## Main Components
-//!
-//! - **Type System**: Variables and Arrows representing type theoretical types
-//! - **Terms**: Typed terms in the type theory
-//! - **Graph**: Nodes and edges forming the graph structure
-//! - **Type Schemas**: Pattern matching for types
-//! - **Query System**: Cypher-like queries with patterns for nodes, edges, and paths
-//!
-//! ## Performance Features
-//!
-//! - **SHA256 UIDs**: All elements use SHA256 hashes for unique, collision-resistant identification
-//! - **Optimized Lookups**: O(1) dictionary-based lookups for nodes and edges by UID
-//! - **Type Indexing**: Dynamic indices for efficient type-based queries
-//! - **Cached UIDs**: UIDs are computed once and cached to minimize hash operations
-//!
-//! ## Example Usage
-//!
-//! ```python
-//! import implica
-//!
-//! # Create a graph
-//! graph = implica.Graph()
-//!
-//! # Query the graph
-//! q = graph.query()
-//! q.match(node="n", type_schema="Person")
-//! results = q.return_(["n"])
-//! ```
-
 use pyo3::prelude::*;
 
 pub mod context;
@@ -48,9 +11,7 @@ pub mod utils;
 use graph::{Edge, Graph, Node};
 use patterns::{EdgePattern, NodePattern, PathPattern, TypeSchema};
 use query::Query;
-use typing::{Arrow, Variable};
-
-use crate::typing::{Application, BasicTerm};
+use typing::{Application, Arrow, BasicTerm, Variable};
 
 /// A Python module implemented in Rust for type theoretical graph modeling.
 ///

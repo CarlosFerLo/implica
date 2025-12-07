@@ -7,10 +7,7 @@ use std::{
 
 use crate::{
     errors::ImplicaError,
-    typing::{
-        type_to_python,
-        types::{python_to_type, Type},
-    },
+    typing::{python_to_type, type_to_python, Type},
     utils::validate_variable_name,
 };
 
@@ -50,29 +47,10 @@ impl Term {
     }
 
     pub fn apply(&self, other: &Term) -> Result<Term, ImplicaError> {
-        match self.r#type().as_ref() {
-            Type::Variable(_) => Err(ImplicaError::TypeMismatch {
-                expected: "Application Type".to_string(),
-                got: "Variable Type".to_string(),
-                context: Some("application creation".to_string()),
-            }),
-            Type::Arrow(arr) => {
-                if arr.left != other.r#type() {
-                    Err(ImplicaError::TypeMismatch {
-                        expected: arr.left.to_string(),
-                        got: other.r#type().to_string(),
-                        context: Some("application creation".to_string()),
-                    })
-                } else {
-                    Ok(Term::Application(Application {
-                        function: Arc::new(self.clone()),
-                        argument: Arc::new(other.clone()),
-                        r#type: arr.right.clone(),
-                        uid_cache: OnceLock::new(),
-                    }))
-                }
-            }
-        }
+        Ok(Term::Application(Application::new(
+            self.clone(),
+            other.clone(),
+        )?))
     }
 }
 
@@ -140,9 +118,9 @@ impl BasicTerm {
         })
     }
 
-    #[getter]
-    pub fn get_type(&self, py: Python) -> PyResult<Py<PyAny>> {
-        type_to_python(py, self.r#type.as_ref())
+    #[pyo3(name = "type")]
+    pub fn py_type(&self, py: Python) -> PyResult<Py<PyAny>> {
+        type_to_python(py, &self.r#type)
     }
 
     pub fn uid(&self) -> &str {
@@ -150,6 +128,8 @@ impl BasicTerm {
             let mut hasher = Sha256::new();
             hasher.update(b"var:");
             hasher.update(self.name.as_bytes());
+            hasher.update(b":");
+            hasher.update(self.r#type.to_string().as_bytes());
             format!("{:x}", hasher.finalize())
         })
     }
@@ -188,7 +168,7 @@ impl BasicTerm {
 pub struct Application {
     pub function: Arc<Term>,
     pub argument: Arc<Term>,
-    pub r#type: Arc<Type>,
+    r#type: Arc<Type>,
     uid_cache: OnceLock<String>,
 }
 
@@ -243,9 +223,12 @@ impl Application {
 
 #[pymethods]
 impl Application {
-    #[getter]
-    pub fn get_type(&self, py: Python) -> PyResult<Py<PyAny>> {
-        type_to_python(py, self.r#type.as_ref())
+    #[new]
+    pub fn py_new(py: Python, function: Py<PyAny>, argument: Py<PyAny>) -> PyResult<Self> {
+        let function_obj = python_to_term(function.bind(py))?;
+        let argument_obj = python_to_term(argument.bind(py))?;
+
+        Application::new(function_obj, argument_obj).map_err(|e| e.into())
     }
 
     #[getter]
@@ -256,6 +239,11 @@ impl Application {
     #[getter]
     pub fn get_argument(&self, py: Python) -> PyResult<Py<PyAny>> {
         term_to_python(py, &self.argument)
+    }
+
+    #[pyo3(name = "type")]
+    pub fn py_type(&self, py: Python) -> PyResult<Py<PyAny>> {
+        type_to_python(py, &self.r#type)
     }
 
     pub fn uid(&self) -> &str {
