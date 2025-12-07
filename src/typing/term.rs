@@ -114,10 +114,20 @@ impl std::hash::Hash for BasicTerm {
     }
 }
 
+impl BasicTerm {
+    pub fn new(name: String, r#type: Arc<Type>) -> Self {
+        BasicTerm {
+            name,
+            r#type,
+            uid_cache: OnceLock::new(),
+        }
+    }
+}
+
 #[pymethods]
 impl BasicTerm {
     #[new]
-    pub fn new(py: Python, name: String, r#type: Py<PyAny>) -> PyResult<Self> {
+    pub fn py_new(py: Python, name: String, r#type: Py<PyAny>) -> PyResult<Self> {
         if let Err(e) = validate_variable_name(&name) {
             return Err(e.into());
         }

@@ -1,9 +1,3 @@
-//! Graph structure for type theoretical models.
-//!
-//! This module provides the core graph components: nodes representing types,
-//! edges representing typed terms, and the graph structure itself. The graph
-//! serves as the main data structure for modeling type theoretical theories.
-
 use crate::errors::ImplicaError;
 
 use crate::patterns::{EdgePattern, TypeSchema};
@@ -15,47 +9,6 @@ use std::sync::{Arc, RwLock};
 use crate::context::Context;
 use crate::graph::{alias::SharedPropertyMap, Edge, Node};
 
-/// Represents a type theoretical theory model as a graph.
-///
-/// The Graph is the main container for nodes and edges, representing a complete
-/// type theoretical model. It stores nodes (types) and edges (terms) and provides
-/// querying capabilities through the Query interface.
-///
-/// For large graphs (>100K types), Bloom Filters can be enabled via IndexConfig
-/// for O(1) pre-filtering and faster queries.
-///
-/// # Examples
-///
-/// ```python
-/// import implica
-///
-/// # Small graph (default, no bloom filters)
-/// graph = implica.Graph()
-///
-/// # Large graph with bloom filters enabled
-/// config = implica.IndexConfig(bloom_filter_fpr=0.01, estimated_size=1_000_000)
-/// graph = implica.Graph(config)
-///
-/// # Auto-configure for expected size
-/// config = implica.IndexConfig.for_graph_size(500_000)
-/// graph = implica.Graph(config)
-///
-/// # Query the graph
-/// q = graph.query()
-/// q.match(node="n", type_schema="Person")
-/// results = q.return_(["n"])
-///
-/// print(graph)  # Graph(X nodes, Y edges)
-/// ```
-///
-/// # Fields
-///
-/// * `nodes` - Dictionary mapping node UIDs to Node objects
-/// * `edges` - Dictionary mapping edge UIDs to Edge objects
-/// * `node_type_index` - Tree-based index for fast node type lookups (internal)
-/// * `edge_type_index` - Tree-based index for fast edge term type lookups (internal)
-/// * `terms_registry` - Registry for term deduplication (internal)
-/// * `keep_term_strategy` - Strategy for resolving term conflicts
 #[pyclass]
 #[derive(Debug)]
 pub struct Graph {
@@ -74,37 +27,6 @@ impl Clone for Graph {
 
 #[pymethods]
 impl Graph {
-    /// Creates a new empty graph with optional index configuration and term strategy.
-    ///
-    /// # Arguments
-    ///
-    /// * `config` - Optional IndexConfig for optimization settings (bloom filters)
-    /// * `keep_term_strategy` - Optional strategy for resolving term conflicts (default: KeepSimplest)
-    ///
-    /// # Returns
-    ///
-    /// A new `Graph` instance with no nodes or edges
-    ///
-    /// # Examples
-    ///
-    /// ```python
-    /// # Small graph: bloom filters disabled (default)
-    /// graph = implica.Graph()
-    ///
-    /// # Large graph: enable bloom filters
-    /// config = implica.IndexConfig(bloom_filter_fpr=0.01, estimated_size=1_000_000)
-    /// graph = implica.Graph(config)
-    ///
-    /// # Graph with custom term strategy
-    /// graph = implica.Graph(None, implica.KeepTermStrategy.KeepExisting)
-    ///
-    /// # Auto-configure for graph size
-    /// config = implica.IndexConfig.for_graph_size(500_000)
-    /// graph = implica.Graph(config)
-    ///
-    /// # Check if bloom filters are enabled
-    /// print(f"Bloom filters: {config.has_bloom_filters()}")
-    /// ```
     #[new]
     pub fn new() -> PyResult<Self> {
         Ok(Graph {
@@ -113,34 +35,10 @@ impl Graph {
         })
     }
 
-    /// Creates a new query builder for this graph.
-    ///
-    /// The query builder provides a Cypher-like interface for querying the graph.
-    ///
-    /// # Arguments
-    ///
-    /// * `py` - Python context
-    ///
-    /// # Returns
-    ///
-    /// A new `Query` instance bound to this graph
-    ///
-    /// # Examples
-    ///
-    /// ```python
-    /// q = graph.query()
-    /// q.match(node="n", type_schema="$Person$")
-    /// results = q.return_(["n"])
-    /// ```
     pub fn query(&self, py: Python) -> PyResult<Py<crate::query::Query>> {
         Py::new(py, crate::query::Query::new(self.clone()))
     }
 
-    /// Returns a string representation of the graph.
-    ///
-    /// Shows the number of nodes and edges.
-    ///
-    /// Format: "Graph(X nodes, Y edges)"
     fn __str__(&self) -> String {
         let node_count = self.nodes.read().unwrap().len();
         let edge_count = self.edges.read().unwrap().len();
@@ -153,18 +51,6 @@ impl Graph {
 }
 
 impl Graph {
-    /// Finds nodes that match a given type using the tree-based index.
-    ///
-    /// This provides O(log n) lookup for nodes by their type structure.
-    ///
-    /// # Arguments
-    ///
-    /// * `typ` - The type to match against
-    /// * `py` - Python context
-    ///
-    /// # Returns
-    ///
-    /// A vector of nodes matching the type
     pub fn find_node_by_type(&self, typ: &Type) -> PyResult<Arc<RwLock<Node>>> {
         let nodes = self.nodes.read().map_err(|e| ImplicaError::LockError {
             rw: "read".to_string(),
@@ -181,15 +67,6 @@ impl Graph {
         }
     }
 
-    /// Finds nodes that match a wildcard (any type).
-    ///
-    /// # Arguments
-    ///
-    /// * `py` - Python context
-    ///
-    /// # Returns
-    ///
-    /// A vector of all nodes
     pub fn find_all_nodes(&self) -> PyResult<Vec<Arc<RwLock<Node>>>> {
         let mut result = Vec::new();
 
@@ -205,18 +82,6 @@ impl Graph {
         Ok(result)
     }
 
-    /// Finds edges by the type of their term using the tree-based index.
-    ///
-    /// This provides O(log n) lookup for edges by their term's type structure.
-    ///
-    /// # Arguments
-    ///
-    /// * `typ` - The term type to match against
-    /// * `py` - Python context
-    ///
-    /// # Returns
-    ///
-    /// A vector of edges whose term has the matching type
     pub fn find_edges_by_term_type(&self, typ: &Type) -> PyResult<Vec<Arc<RwLock<Edge>>>> {
         let mut result = Vec::new();
 
@@ -240,15 +105,6 @@ impl Graph {
         Ok(result)
     }
 
-    /// Finds all edges (for wildcard matching).
-    ///
-    /// # Arguments
-    ///
-    /// * `py` - Python context
-    ///
-    /// # Returns
-    ///
-    /// A vector of all edges
     pub fn find_all_edges(&self) -> PyResult<Vec<Arc<RwLock<Edge>>>> {
         let mut result = Vec::new();
 

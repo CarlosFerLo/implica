@@ -1,8 +1,3 @@
-//! Type system for type theoretical modeling.
-//!
-//! This module provides the core type system with variables and Arrow types.
-//! Types form the foundation for the type theoretical graph model.
-
 use pyo3::prelude::*;
 use sha2::{Digest, Sha256};
 use std::fmt;
@@ -11,16 +6,6 @@ use std::sync::{Arc, OnceLock};
 use crate::errors::ImplicaError;
 use crate::utils::validate_variable_name;
 
-/// Represents a type in the type theory.
-///
-/// A type can be either a variable (atomic type) or an Arrow (function type).
-/// This enum is the core of the type system and is used throughout the library
-/// to represent types of nodes and terms.
-///
-/// # Variants
-///
-/// * `Variable` - An atomic type variable (e.g., "A", "Person", "Number")
-/// * `Arrow` - A function type (e.g., "A -> B", "(Person -> Number) -> String")
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum Type {
     Variable(Variable),
@@ -28,13 +13,6 @@ pub enum Type {
 }
 
 impl Type {
-    /// Returns a unique identifier for this type.
-    ///
-    /// The UID is constructed using SHA256 hash based on the type structure.
-    ///
-    /// # Returns
-    ///
-    /// A SHA256 hash representing this type uniquely
     pub fn uid(&self) -> &str {
         match self {
             Type::Variable(v) => v.uid(),
@@ -42,11 +20,6 @@ impl Type {
         }
     }
 
-    /// Returns a reference to the inner Variable if this is a Variable type.
-    ///
-    /// # Returns
-    ///
-    /// `Some(&Variable)` if this is a Variable, `None` otherwise
     pub fn as_variable(&self) -> Option<&Variable> {
         match self {
             Type::Variable(v) => Some(v),
@@ -54,11 +27,6 @@ impl Type {
         }
     }
 
-    /// Returns a reference to the inner Arrow if this is an Arrow type.
-    ///
-    /// # Returns
-    ///
-    /// `Some(&Arrow)` if this is an Arrow, `None` otherwise
     pub fn as_arrow(&self) -> Option<&Arrow> {
         match self {
             Type::Arrow(a) => Some(a),
@@ -68,9 +36,6 @@ impl Type {
 }
 
 impl fmt::Display for Type {
-    /// Formats the type for display.
-    ///
-    /// Variables are shown as their name, Arrows as "(left -> right)".
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Type::Variable(v) => write!(f, "{}", v),
@@ -79,27 +44,6 @@ impl fmt::Display for Type {
     }
 }
 
-/// Represents an atomic type variable.
-///
-/// Variables are the basic building blocks of the type system. They represent
-/// simple, atomic types like "A", "Person", "Number", etc.
-///
-/// # Examples
-///
-/// ```python
-/// import implica
-///
-/// # Create type variables
-/// person = implica.Variable("Person")
-/// number = implica.Variable("Number")
-///
-/// print(person)  # "Person"
-/// print(person.uid())  # "var_Person"
-/// ```
-///
-/// # Fields
-///
-/// * `name` - The name of the type variable
 #[pyclass]
 #[derive(Clone, Debug)]
 pub struct Variable {
@@ -110,21 +54,6 @@ pub struct Variable {
 
 #[pymethods]
 impl Variable {
-    /// Creates a new type variable with the given name.
-    ///
-    /// # Arguments
-    ///
-    /// * `name` - The name of the type variable
-    ///
-    /// # Returns
-    ///
-    /// A new `Variable` instance
-    ///
-    /// # Examples
-    ///
-    /// ```python
-    /// person_type = implica.Variable("Person")
-    /// ```
     #[new]
     pub fn new(name: String) -> PyResult<Self> {
         // Validate that the name is not empty or whitespace-only
@@ -138,23 +67,11 @@ impl Variable {
         })
     }
 
-    /// Gets the name of this variable.
-    ///
-    /// # Returns
-    ///
-    /// The name as a Python object
     #[getter]
     pub fn name(&self) -> &str {
         &self.name
     }
 
-    /// Returns a unique identifier for this variable.
-    ///
-    /// This result is cached to maintain consistent performance.
-    ///
-    /// # Returns
-    ///
-    /// A SHA256 hash based on the variable name
     pub fn uid(&self) -> &str {
         self.uid_cache.get_or_init(|| {
             let mut hasher = Sha256::new();
@@ -164,14 +81,10 @@ impl Variable {
         })
     }
 
-    /// Returns the name of the variable for string representation.
     fn __str__(&self) -> &str {
         &self.name
     }
 
-    /// Returns a detailed representation for debugging.
-    ///
-    /// Format: Variable("name")
     fn __repr__(&self) -> String {
         format!("Variable(\"{}\")", self.name)
     }
@@ -212,33 +125,6 @@ impl std::hash::Hash for Variable {
     }
 }
 
-/// Represents a function type (Arrow type).
-///
-/// An Arrow represents a function type `left -> right`, where `left` is
-/// the input type and `right` is the output type. Arrows can be nested
-/// to create complex function types.
-///
-/// # Examples
-///
-/// ```python
-/// import implica
-///
-/// # Create A -> B
-/// A = implica.Variable("A")
-/// B = implica.Variable("B")
-/// func_type = implica.Arrow(A, B)
-/// print(func_type)  # "(A -> B)"
-///
-/// # Create (A -> B) -> C (higher-order function type)
-/// C = implica.Variable("C")
-/// higher_order = implica.Arrow(func_type, C)
-/// print(higher_order)  # "((A -> B) -> C)"
-/// ```
-///
-/// # Fields (accessible via getters)
-///
-/// * `left` - The input type of the function
-/// * `right` - The output type of the function
 #[pyclass]
 #[derive(Clone, Debug)]
 pub struct Arrow {
@@ -260,33 +146,16 @@ impl Arrow {
 
 #[pymethods]
 impl Arrow {
-    /// Gets the left (input) type of this Arrow.
-    ///
-    /// # Returns
-    ///
-    /// The input type as a Python object
     #[getter]
     pub fn left(&self, py: Python) -> PyResult<Py<PyAny>> {
         type_to_python(py, &self.left)
     }
 
-    /// Gets the right (output) type of this Arrow.
-    ///
-    /// # Returns
-    ///
-    /// The output type as a Python object
     #[getter]
     pub fn right(&self, py: Python) -> PyResult<Py<PyAny>> {
         type_to_python(py, &self.right)
     }
 
-    /// Returns a unique identifier for this Arrow.
-    ///
-    /// This result is cached to avoid recalculating for complex recursive types.
-    ///
-    /// # Returns
-    ///
-    /// A SHA256 hash based on the left and right types
     pub fn uid(&self) -> &str {
         self.uid_cache.get_or_init(|| {
             let mut hasher = Sha256::new();
@@ -298,16 +167,10 @@ impl Arrow {
         })
     }
 
-    /// Returns a string representation of the Arrow.
-    ///
-    /// Format: "(left -> right)"
     fn __str__(&self) -> String {
         format!("({} -> {})", self.left, self.right)
     }
 
-    /// Returns a detailed representation for debugging.
-    ///
-    /// Format: Arrow(left, right)
     fn __repr__(&self) -> String {
         format!("Arrow({}, {})", self.left, self.right)
     }
@@ -329,9 +192,6 @@ impl Arrow {
 }
 
 impl fmt::Display for Arrow {
-    /// Formats the Arrow for display.
-    ///
-    /// Shows as "(left -> right)".
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "({} -> {})", self.left, self.right)
     }
@@ -352,19 +212,6 @@ impl std::hash::Hash for Arrow {
     }
 }
 
-/// Converts a Python object to a Rust Type.
-///
-/// # Arguments
-///
-/// * `obj` - A Python object that should be either a Variable or Arrow
-///
-/// # Returns
-///
-/// `Ok(Type)` if conversion succeeds
-///
-/// # Errors
-///
-/// `PyTypeError` if the object is neither a Variable nor an Arrow
 pub(crate) fn python_to_type(obj: &Bound<'_, PyAny>) -> Result<Type, ImplicaError> {
     // Verificar que es del tipo correcto primero
     if obj.is_instance_of::<Variable>() {
@@ -391,20 +238,6 @@ pub(crate) fn python_to_type(obj: &Bound<'_, PyAny>) -> Result<Type, ImplicaErro
     }
 }
 
-/// Converts a Rust Type to a Python object.
-///
-/// # Arguments
-///
-/// * `py` - Python context
-/// * `typ` - The Type to convert
-///
-/// # Returns
-///
-/// A Python object representing the type (Variable or Arrow)
-///
-/// # Errors
-///
-/// Returns an error if the Python object creation fails
 pub(crate) fn type_to_python(py: Python, typ: &Type) -> PyResult<Py<PyAny>> {
     match typ {
         Type::Variable(v) => Ok(Py::new(py, v.clone())?.into()),

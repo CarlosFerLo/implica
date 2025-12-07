@@ -11,29 +11,6 @@ use crate::graph::alias::{PropertyMap, SharedPropertyMap};
 use crate::typing::{term_to_python, type_to_python, Term, Type};
 use crate::utils::clone_property_map;
 
-/// Represents a node in the graph (a type in the model).
-///
-/// Nodes are the vertices of the graph, each representing a type. They can have
-/// associated properties stored as a Python dictionary.
-///
-/// # Examples
-///
-/// ```python
-/// import implica
-///
-/// # Create a node with a type
-/// person_type = implica.Variable("Person")
-/// node = implica.Node(person_type)
-///
-/// # Create a node with properties
-/// node = implica.Node(person_type, {"name": "John", "age": 30})
-/// ```
-///
-/// # Fields
-///
-/// * `type` - The type this node represents (accessible via get_type())
-/// * `term` - Optional term for this node (accessible via get_term())
-/// * `properties` - A dictionary of node properties
 #[pyclass]
 #[derive(Debug)]
 pub struct Node {
@@ -92,21 +69,11 @@ impl Node {
 
 #[pymethods]
 impl Node {
-    /// Gets the type of this node.
-    ///
-    /// # Returns
-    ///
-    /// The type as a Python object (Variable or Arrow)
     #[getter]
     pub fn get_type(&self, py: Python) -> PyResult<Py<PyAny>> {
         type_to_python(py, &self.r#type)
     }
 
-    /// Gets the term of this node.
-    ///
-    /// # Returns
-    ///
-    /// The term as a Python object, or None if no term is set
     #[getter]
     pub fn get_term(&self, py: Python) -> PyResult<Option<Py<PyAny>>> {
         match &self.term {
@@ -154,14 +121,6 @@ impl Node {
         Ok(())
     }
 
-    /// Returns a unique identifier for this node.
-    ///
-    /// The UID is based on the node's type UID using SHA256.
-    /// This result is cached to avoid recalculating for complex recursive types.
-    ///
-    /// # Returns
-    ///
-    /// A SHA256 hash representing this node uniquely
     pub fn uid(&self) -> &str {
         self.uid_cache.get_or_init(|| {
             let mut hasher = Sha256::new();
@@ -171,22 +130,15 @@ impl Node {
         })
     }
 
-    /// Checks if two nodes are equal using UID.
     fn __eq__(&self, other: &Self) -> bool {
         // Equality based on uid
         self == other
     }
 
-    /// Returns a string representation of the node.
-    ///
-    /// Format: "Node(type)" or "Node(type, term)" if term is present
     fn __str__(&self) -> String {
         self.to_string()
     }
 
-    /// Returns a detailed representation for debugging.
-    ///
-    /// Format: "Node(type)" or "Node(type, term)" if term is present
     fn __repr__(&self) -> String {
         self.to_string()
     }

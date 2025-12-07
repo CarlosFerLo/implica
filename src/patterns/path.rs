@@ -7,46 +7,6 @@ use crate::patterns::{
     parsing::{parse_edge_pattern, parse_node_pattern, tokenize_pattern, TokenKind},
 };
 
-/// Represents a path pattern in a Cypher-like query.
-///
-/// Path patterns describe sequences of nodes and edges, allowing complex
-/// graph traversals to be specified. They can be created programmatically
-/// or parsed from Cypher-like pattern strings.
-///
-/// # Pattern Syntax
-///
-/// - Nodes: `(variable)`, `(variable:Type)`, `(variable:Type:Term)`, `(:Type:Term)`, `(:Type)`, `()`
-/// - Edges: `-[variable]->` (forward), `<-[variable]-` (backward), `-[variable]-` (any)
-/// - Typed edges: `-[var:schema]->`
-///
-/// # Examples
-///
-/// ```python
-/// import implica
-///
-/// # Parse from string
-/// pattern = implica.PathPattern("(n:Person)-[e:knows]->(m:Person)")
-///
-/// # Parse with term schemas
-/// pattern = implica.PathPattern("(n:Person:name)-[e:knows]->(m:Person:age)")
-///
-/// # Parse complex path
-/// pattern = implica.PathPattern("(a:A)-[r1]->(b:B)-[r2]->(c:C)")
-///
-/// # Anonymous nodes with type and term
-/// pattern = implica.PathPattern("(:Person:name)-[e:relation]->(:Company:industry)")
-///
-/// # Programmatic construction
-/// pattern = implica.PathPattern()
-/// pattern.add_node(implica.NodePattern(variable="n"))
-/// pattern.add_edge(implica.EdgePattern(variable="e"))
-/// pattern.add_node(implica.NodePattern(variable="m"))
-/// ```
-///
-/// # Fields
-///
-/// * `nodes` - List of node patterns in the path
-/// * `edges` - List of edge patterns connecting the nodes
 #[pyclass]
 #[derive(Clone, Debug)]
 pub struct PathPattern {
@@ -58,29 +18,6 @@ pub struct PathPattern {
 
 #[pymethods]
 impl PathPattern {
-    /// Creates a new path pattern, optionally from a pattern string.
-    ///
-    /// # Arguments
-    ///
-    /// * `pattern` - Optional Cypher-like pattern string to parse
-    ///
-    /// # Returns
-    ///
-    /// A new `PathPattern` instance
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the pattern string is invalid
-    ///
-    /// # Examples
-    ///
-    /// ```python
-    /// # Empty pattern
-    /// pattern = implica.PathPattern()
-    ///
-    /// # Parse from string
-    /// pattern = implica.PathPattern("(n:Person)-[e]->(m:Person)")
-    /// ```
     #[new]
     #[pyo3(signature = (pattern=None))]
     pub fn new(pattern: Option<String>) -> PyResult<Self> {
@@ -94,77 +31,16 @@ impl PathPattern {
         }
     }
 
-    /// Adds a node pattern to the path.
-    ///
-    /// # Arguments
-    ///
-    /// * `pattern` - The node pattern to add
-    ///
-    /// # Returns
-    ///
-    /// A clone of self with the added node (for method chaining)
     pub fn add_node(&mut self, pattern: NodePattern) -> Self {
         self.nodes.push(pattern);
         self.clone()
     }
 
-    /// Adds an edge pattern to the path.
-    ///
-    /// # Arguments
-    ///
-    /// * `pattern` - The edge pattern to add
-    ///
-    /// # Returns
-    ///
-    /// A clone of self with the added edge (for method chaining)
     pub fn add_edge(&mut self, pattern: EdgePattern) -> Self {
         self.edges.push(pattern);
         self.clone()
     }
 
-    /// Parses a Cypher-like pattern string into a PathPattern.
-    ///
-    /// This is the main parser for pattern strings, supporting nodes, edges,
-    /// and complete paths with types and properties.
-    ///
-    /// # Supported Syntax
-    ///
-    /// - Simple nodes: `(n)`, `(n:Type)`, `(n:Type:Term)`, `(:Type:Term)`, `(:Type)`, `()`
-    /// - Forward edges: `-[e]->`, `-[e:type]->`
-    /// - Backward edges: `<-[e]-`, `<-[e:type]-`
-    /// - Bidirectional: `-[e]-`
-    /// - Paths: `(a)-[e1]->(b)-[e2]->(c)`
-    ///
-    /// # Arguments
-    ///
-    /// * `pattern` - The pattern string to parse
-    ///
-    /// # Returns
-    ///
-    /// A `PathPattern` representing the parsed pattern
-    ///
-    /// # Errors
-    ///
-    /// * `PyValueError` if the pattern is empty, malformed, or has syntax errors
-    ///
-    /// # Examples
-    ///
-    /// ```python
-    /// # Simple path
-    /// p = implica.PathPattern.parse("(n)-[e]->(m)")
-    ///
-    /// # Typed path
-    /// p = implica.PathPattern.parse("(n:Person)-[e:knows]->(m:Person)")
-    ///
-    /// # Path with term schemas
-    /// p = implica.PathPattern.parse("(n:Person:name)-[e:knows]->(m:Person:age)")
-    ///
-    /// # Complex path
-    /// p = implica.PathPattern.parse("(a:A)-[r1]->(b:B)<-[r2]-(c:C)")
-    ///
-    /// # Anonymous nodes with terms
-    /// p = implica.PathPattern.parse("(:Employee:salary)-[works_at]->(:Company:revenue)")
-    /// ```
     #[staticmethod]
     pub fn parse(pattern: String) -> PyResult<Self> {
         // Enhanced parser for Cypher-like path patterns

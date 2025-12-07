@@ -11,7 +11,6 @@ use crate::patterns::type_schema::TypeSchema;
 use crate::typing::{Term, Type};
 use crate::utils::validate_variable_name;
 
-/// Compiled direction for efficient matching.
 #[derive(Clone, Debug, PartialEq)]
 enum CompiledDirection {
     Forward,
@@ -41,14 +40,10 @@ impl CompiledDirection {
     }
 }
 
-/// Internal compiled representation for efficient edge matching.
 #[derive(Clone, Debug)]
 enum CompiledTypeEdgeMatcher {
-    /// Match any term (no type constraint)
     Any,
-    /// Match edges with a specific term
     ExactType(Arc<Type>),
-    /// Match edges with a term matching the schema
     SchemaTerm(TypeSchema),
 }
 
@@ -59,37 +54,6 @@ enum CompiledTermEdgeMatcher {
     SchemaTerm(TermSchema),
 }
 
-/// Represents an edge pattern in a Cypher-like query.
-///
-/// Edge patterns are used to match edges in the graph based on variable names,
-/// terms, term type schemas, properties, and direction. Patterns are compiled
-/// and validated at creation time for optimal performance.
-///
-/// # Examples
-///
-/// ```python
-/// import implica
-///
-/// # Match any edge in forward direction
-/// pattern = implica.EdgePattern(variable="e", direction="forward")
-///
-/// # Match edges with a specific term type
-/// pattern = implica.EdgePattern(
-///     variable="rel",
-///     term_type_schema="Person -> Address",
-///     direction="forward"
-/// )
-///
-/// # Match in any direction
-/// pattern = implica.EdgePattern(variable="e", direction="any")
-/// ```
-///
-/// # Fields
-///
-/// * `variable` - Optional variable name to bind matched edges
-/// * `compiled_matcher` - Compiled term matcher for efficient matching
-/// * `compiled_direction` - Compiled direction for efficient checking
-/// * `properties` - Dictionary of required property values
 #[pyclass]
 #[derive(Debug)]
 pub struct EdgePattern {
@@ -132,11 +96,6 @@ impl Clone for EdgePattern {
 
 #[pymethods]
 impl EdgePattern {
-    /// Gets the direction of this edge pattern.
-    ///
-    /// # Returns
-    ///
-    /// The direction as a string: "forward", "backward", or "any"
     #[getter]
     pub fn direction(&self) -> String {
         self.compiled_direction.to_string().to_string()
@@ -173,10 +132,8 @@ impl EdgePattern {
             validate_variable_name(var)?;
         }
 
-        // Validate and compile direction
         let compiled_direction = CompiledDirection::from_string(&direction)?;
 
-        // Validate: cannot have both term and term_type_schema
         if term.is_some() && term_schema.is_some() {
             return Err(ImplicaError::InvalidPattern {
                 pattern: "EdgePattern".to_string(),
@@ -226,18 +183,6 @@ impl EdgePattern {
         })
     }
 
-    /// Checks if the direction matches for traversal.
-    ///
-    /// This is a helper method to check if the edge can be traversed
-    /// in the given direction according to the pattern.
-    ///
-    /// # Arguments
-    ///
-    /// * `forward` - true if traversing forward, false if backward
-    ///
-    /// # Returns
-    ///
-    /// `true` if the direction matches the pattern
     pub fn matches_direction(&self, forward: bool) -> bool {
         match self.compiled_direction {
             CompiledDirection::Any => true,

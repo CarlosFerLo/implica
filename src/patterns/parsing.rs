@@ -8,41 +8,18 @@ use crate::patterns::term_schema::TermSchema;
 use crate::patterns::type_schema::TypeSchema;
 use crate::patterns::{edge::EdgePattern, node::NodePattern};
 
-/// Token types for pattern parsing.
-///
-/// Represents the type of a parsed token: either a node or an edge.
 #[derive(Debug, PartialEq)]
 pub(in crate::patterns) enum TokenKind {
     Node,
     Edge,
 }
 
-/// A token from pattern parsing.
-///
-/// Contains the token type and the actual text that was parsed.
 #[derive(Debug)]
 pub(in crate::patterns) struct Token {
     pub(in crate::patterns) kind: TokenKind,
     pub(in crate::patterns) text: String,
 }
 
-/// Tokenizes a pattern string into nodes and edges.
-///
-/// This function breaks down a pattern string into individual node and edge
-/// tokens, handling parentheses and brackets correctly.
-///
-/// # Arguments
-///
-/// * `pattern` - The pattern string to tokenize
-///
-/// # Returns
-///
-/// A vector of tokens representing the parsed components
-///
-/// # Errors
-///
-/// * `PyValueError` if parentheses or brackets are unmatched
-/// * `PyValueError` if there are unexpected characters outside patterns
 pub(in crate::patterns) fn tokenize_pattern(pattern: &str) -> PyResult<Vec<Token>> {
     let mut tokens = Vec::new();
     let mut current = String::new();
@@ -168,25 +145,6 @@ pub(in crate::patterns) fn tokenize_pattern(pattern: &str) -> PyResult<Vec<Token
     Ok(tokens)
 }
 
-/// Parses properties from a string in format "{key1: value1, key2: value2}".
-///
-/// Supports the following value types:
-/// - Strings: "value" or 'value'
-/// - Numbers: 42, 3.14, -10
-/// - Booleans: true, false
-/// - Null: null
-///
-/// # Arguments
-///
-/// * `props_str` - The properties string (including braces)
-///
-/// # Returns
-///
-/// A HashMap of property key-value pairs
-///
-/// # Errors
-///
-/// * `InvalidPattern` if the properties string is malformed
 pub(in crate::patterns) fn parse_properties(
     props_str: &str,
 ) -> PyResult<HashMap<String, Py<PyAny>>> {
@@ -301,27 +259,6 @@ pub(in crate::patterns) fn parse_properties(
     })
 }
 
-/// Parses a single property value.
-///
-/// Supports the following types:
-/// - Strings: "value" or 'value' (with escape sequences)
-/// - Integers: 42, -10, 0
-/// - Floats: 3.14, -2.5, 1e10, 1.5e-3
-/// - Booleans: true, false
-/// - Null: null, None
-///
-/// # Arguments
-///
-/// * `py` - Python GIL token
-/// * `value_str` - The value string to parse
-///
-/// # Returns
-///
-/// A Python object representing the value
-///
-/// # Errors
-///
-/// Returns an error if a quoted string is not properly closed
 fn parse_property_value(py: Python, value_str: &str) -> PyResult<Py<PyAny>> {
     let value_str = value_str.trim();
 
@@ -404,9 +341,6 @@ fn parse_property_value(py: Python, value_str: &str) -> PyResult<Py<PyAny>> {
     .into())
 }
 
-/// Unescapes common escape sequences in a string.
-///
-/// Supports: \n, \t, \r, \\, \", \'
 fn unescape_string(s: &str) -> PyResult<String> {
     let mut result = String::new();
     let mut chars = s.chars();
@@ -442,30 +376,6 @@ fn unescape_string(s: &str) -> PyResult<String> {
     Ok(result)
 }
 
-/// Parses a node pattern from a token string.
-///
-/// Extracts the variable name, type schema, term schema, and properties from a node pattern
-/// like "(n:Type:Term {prop: value})".
-///
-/// # Supported Patterns
-///
-/// * `(var)` - Variable only
-/// * `(var:TypeSchema)` - Variable with type
-/// * `(var:TypeSchema:TermSchema)` - Variable with type and term
-/// * `(:TypeSchema:TermSchema)` - Type and term without variable
-/// * `(:TypeSchema)` - Type without variable
-///
-/// # Arguments
-///
-/// * `s` - The node pattern string (including parentheses)
-///
-/// # Returns
-///
-/// A `NodePattern` representing the parsed node
-///
-/// # Errors
-///
-/// * `ValueError` if the string is not properly enclosed in parentheses
 pub(in crate::patterns) fn parse_node_pattern(s: &str) -> PyResult<NodePattern> {
     let s = s.trim();
     if !s.starts_with('(') || !s.ends_with(')') {
@@ -554,32 +464,6 @@ pub(in crate::patterns) fn parse_node_pattern(s: &str) -> PyResult<NodePattern> 
     NodePattern::new(variable, None, type_schema, None, term_schema, properties)
 }
 
-/// Parses an edge pattern from a token string.
-///
-/// Extracts the variable name, type schema, term schema, direction, and properties
-/// from an edge pattern like "-[e:Type:Term]->" or "<-[e:Type]-".
-///
-/// # Supported Patterns
-///
-/// * `[var]` - Variable only
-/// * `[var:TypeSchema]` - Variable with type
-/// * `[var:TypeSchema:TermSchema]` - Variable with type and term
-/// * `[:TypeSchema:TermSchema]` - Type and term without variable
-/// * `[:TypeSchema]` - Type without variable
-///
-/// # Arguments
-///
-/// * `s` - The edge pattern string (including arrows and brackets)
-///
-/// # Returns
-///
-/// An `EdgePattern` representing the parsed edge
-///
-/// # Errors
-///
-/// * `ValueError` if the pattern doesn't contain brackets
-/// * `ValueError` if brackets are mismatched
-/// * `ValueError` if both <- and -> appear (invalid direction)
 pub(in crate::patterns) fn parse_edge_pattern(s: &str) -> PyResult<EdgePattern> {
     let s = s.trim();
 

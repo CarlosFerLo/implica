@@ -4,14 +4,16 @@ use crate::context::Context;
 use crate::errors::ImplicaError;
 use crate::graph::{Edge, Graph, Node};
 use crate::patterns::{EdgePattern, NodePattern, PathPattern, TermSchema, TypeSchema};
-use crate::typing::{python_to_term, python_to_type};
+use crate::typing::{python_to_term, python_to_type, Term, Type};
+use crate::utils::validate_variable_name;
 
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
 use std::collections::HashMap;
 use std::sync::Arc;
 
-// Include implementation modules with explicit paths
+#[path = "executors/add.rs"]
+mod add;
 #[path = "executors/create.rs"]
 mod create;
 #[path = "executors/delete.rs"]
@@ -89,6 +91,7 @@ pub enum QueryOperation {
     Match(MatchOp),
     Where(String),
     Create(CreateOp),
+    Add(AddOp),
     Set(String, HashMap<String, Py<PyAny>>, bool),
     Delete(Vec<String>),
     With(Vec<String>),
@@ -103,6 +106,7 @@ impl Clone for QueryOperation {
             QueryOperation::Match(m) => QueryOperation::Match(m.clone()),
             QueryOperation::Where(w) => QueryOperation::Where(w.clone()),
             QueryOperation::Create(c) => QueryOperation::Create(c.clone()),
+            QueryOperation::Add(a) => QueryOperation::Add(a.clone()),
             QueryOperation::Set(var, dict, overwrite) => {
                 let mut new_dict = HashMap::new();
 
@@ -141,6 +145,12 @@ pub enum CreateOp {
     Node(NodePattern),
     Edge(EdgePattern, String, String),
     Path(PathPattern),
+}
+
+#[derive(Clone, Debug)]
+pub enum AddOp {
+    Type(String, Type),
+    Term(String, Term),
 }
 
 #[pymethods]
@@ -529,6 +539,54 @@ impl Query {
         Ok(self.clone())
     }
 
+    pub fn add(
+        &mut self,
+        variable: String,
+        r#type: Option<Py<PyAny>>,
+        term: Option<Py<PyAny>>,
+    ) -> PyResult<Self> {
+        validate_variable_name(&variable)?;
+
+        Python::attach(|py| -> PyResult<()> {
+            let type_obj = if let Some(t) = r#type {
+                Some(python_to_type(t.bind(py))?)
+            } else {
+                None
+            };
+
+            let term_obj = if let Some(t) = term {
+                Some(python_to_term(t.bind(py))?)
+            } else {
+                None
+            };
+
+            match (type_obj, term_obj) {
+                (Some(typ), Some(trm)) => {
+                    return Err(ImplicaError::InvalidQuery { message: "cannot include 'term' and 'type' in an add operation - they are mutually exclusive".to_string(), context: Some("add".to_string()) }.into());
+                }
+                (Some(typ), None) => {
+                    self.operations
+                        .push(QueryOperation::Add(AddOp::Type(variable, typ)));
+                }
+                (None, Some(trm)) => {
+                    self.operations
+                        .push(QueryOperation::Add(AddOp::Term(variable, trm)));
+                }
+                (None, None) => {
+                    return Err(ImplicaError::InvalidQuery {
+                        message: "must specify at least one of 'term' or 'type'".to_string(),
+                        context: Some("add".to_string()),
+                    }
+                    .into());
+                }
+            }
+
+            Ok(())
+        })?;
+
+        Ok(self.clone())
+    }
+
     pub fn set(
         &mut self,
         variable: String,
@@ -631,6 +689,9 @@ impl Query {
                 }
                 QueryOperation::Create(create_op) => {
                     self.execute_create(create_op)?;
+                }
+                QueryOperation::Add(add_op) => {
+                    self.execute_add(add_op)?;
                 }
                 QueryOperation::Delete(vars) => {
                     self.execute_delete(vars)?;

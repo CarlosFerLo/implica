@@ -9,73 +9,24 @@ use std::sync::Arc;
 
 #[derive(Clone, Debug, PartialEq)]
 enum TypePattern {
-    /// Matches any type (*)
     Wildcard,
-
-    /// Matches a specific variable by name
     Variable(String),
-
-    /// Matches an Arrow type with sub-patterns for left and right
     Arrow {
         left: Box<TypePattern>,
         right: Box<TypePattern>,
     },
-
-    /// Captures a matched type with a given name
     Capture {
         name: String,
         pattern: Box<TypePattern>,
     },
 }
 
-/// Represents a regex-like pattern for matching types.
-///
-/// Type schemas allow flexible pattern matching on types with support for:
-/// - Wildcards: `*` matches any type
-/// - Specific variables: `Person` matches only the Variable named "Person"
-/// - Arrow patterns: `* -> *` matches Arrow types
-/// - Named captures: `(name:pattern)` matches and captures the type
-/// - Structural constraints: `(:pattern)` matches without capturing
-///
-/// # Examples
-///
-/// ```python
-/// import implica
-///
-/// # Wildcard - matches any type
-/// schema = implica.TypeSchema("*")
-///
-/// # Specific variable - matches only Person
-/// schema = implica.TypeSchema("Person")
-///
-/// # Arrow pattern - matches A -> B
-/// schema = implica.TypeSchema("A -> B")
-///
-/// # Wildcard Arrow - matches any function type
-/// schema = implica.TypeSchema("* -> *")
-///
-/// # Named capture example
-/// schema = implica.TypeSchema("(x:*) -> (y:*)")
-/// captures = schema.capture(some_type)  # Returns dict with 'x' and 'y'
-///
-/// # Structural constraint (matches A -> B -> A for any B)
-/// schema = implica.TypeSchema("A -> (B:*) -> A")
-///
-/// # Structural constraint without name (matches app types)
-/// schema = implica.TypeSchema("(:*->*) -> B")
-/// ```
-///
-/// # Fields
-///
-/// * `pattern` - The original pattern string
-/// * `compiled` - The compiled pattern for efficient matching
 #[pyclass]
 #[derive(Clone, Debug)]
 pub struct TypeSchema {
     #[pyo3(get)]
     pub pattern: String,
 
-    /// Compiled pattern for efficient matching
     compiled: TypePattern,
 }
 
@@ -111,19 +62,14 @@ impl TypeSchema {
         Self::generate_type(&self.compiled, context)
     }
 
-    /// Parses a pattern string into a compiled TypePattern.
-    ///
-    /// This is called once during TypeSchema construction for efficient matching.
     fn parse_pattern(input: &str) -> Result<TypePattern, ImplicaError> {
         let trimmed = input.trim();
 
-        // Validate balanced parentheses first
         Self::validate_balanced_parentheses(trimmed)?;
 
         Self::parse_pattern_recursive(trimmed)
     }
 
-    /// Validates that parentheses are balanced in the pattern string.
     fn validate_balanced_parentheses(input: &str) -> Result<(), ImplicaError> {
         let mut depth = 0;
 
@@ -340,18 +286,6 @@ impl TypeSchema {
     }
 }
 
-/// Finds the position of "->" at the correct nesting level (depth 0).
-///
-/// This helper function locates the arrow operator in a type pattern string,
-/// taking into account parenthesis nesting to find the top-level arrow.
-///
-/// # Arguments
-///
-/// * `s` - The string to search in
-///
-/// # Returns
-///
-/// `Some(usize)` with the position of the arrow if found, `None` otherwise
 fn find_arrow(s: &str) -> Option<usize> {
     let mut depth = 0;
     let chars: Vec<char> = s.chars().collect();
@@ -371,17 +305,6 @@ fn find_arrow(s: &str) -> Option<usize> {
     None
 }
 
-/// Finds the position of ":" at depth 0 (not inside parentheses).
-///
-/// This is used to parse capture groups like "(name:pattern)".
-///
-/// # Arguments
-///
-/// * `s` - The string to search in
-///
-/// # Returns
-///
-/// `Some(usize)` with the position of the colon if found, `None` otherwise
 fn find_colon_at_depth_zero(s: &str) -> Option<usize> {
     let mut depth = 0;
     let chars: Vec<char> = s.chars().collect();

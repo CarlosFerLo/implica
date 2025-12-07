@@ -11,37 +11,7 @@ use crate::graph::alias::SharedPropertyMap;
 use crate::graph::node::Node;
 use crate::typing::{term_to_python, Term};
 use crate::utils::clone_property_map;
-/// Represents an edge in the graph (a typed term in the model).
-///
-/// Edges are directed connections between nodes, each representing a term.
-/// An edge connects a start node to an end node and has an associated term
-/// that must have a type consistent with the node types.
-///
-/// # Examples
-///
-/// ```python
-/// import implica
-///
-/// # Create types and nodes
-/// A = implica.Variable("A")
-/// B = implica.Variable("B")
-/// node_a = implica.Node(A)
-/// node_b = implica.Node(B)
-///
-/// # Create a term with type A -> B
-/// func_type = implica.Arrow(A, B)
-/// term = implica.Term("f", func_type)
-///
-/// # Create an edge
-/// edge = implica.Edge(term, node_a, node_b)
-/// ```
-///
-/// # Fields
-///
-/// * `term` - The term this edge represents (accessible via term())
-/// * `start` - The starting node (accessible via start())
-/// * `end` - The ending node (accessible via end())
-/// * `properties` - A dictionary of edge properties
+
 #[pyclass]
 #[derive(Debug)]
 pub struct Edge {
@@ -87,22 +57,12 @@ impl Eq for Edge {}
 
 #[pymethods]
 impl Edge {
-    /// Gets the term of this edge.
-    ///
-    /// # Returns
-    ///
-    /// The term as a Python object
     #[getter]
     pub fn term(&self, py: Python) -> PyResult<Py<PyAny>> {
         let term = self.term.clone();
         term_to_python(py, &term)
     }
 
-    /// Gets the starting node of this edge.
-    ///
-    /// # Returns
-    ///
-    /// The start node as a Python object
     #[getter]
     pub fn start(&self, py: Python) -> PyResult<Py<Node>> {
         Py::new(
@@ -118,11 +78,6 @@ impl Edge {
         )
     }
 
-    /// Gets the ending node of this edge.
-    ///
-    /// # Returns
-    ///
-    /// The end node as a Python object
     #[getter]
     pub fn end(&self, py: Python) -> PyResult<Py<Node>> {
         Py::new(
@@ -170,14 +125,6 @@ impl Edge {
         Ok(())
     }
 
-    /// Returns a unique identifier for this edge.
-    ///
-    /// The UID is based on the edge's term UID using SHA256.
-    /// This result is cached to avoid recalculating for complex recursive types.
-    ///
-    /// # Returns
-    ///
-    /// A SHA256 hash representing this edge uniquely
     pub fn uid(&self) -> &str {
         self.uid_cache.get_or_init(|| {
             let mut hasher = Sha256::new();
@@ -187,21 +134,14 @@ impl Edge {
         })
     }
 
-    /// Returns a string representation of the edge.
-    ///
-    /// Format: "Edge(term_name: start_type -> end_type)"
     fn __str__(&self) -> String {
         self.to_string()
     }
 
-    /// Returns a detailed representation for debugging.
-    ///
-    /// Format: "Edge(term_name: start_type -> end_type)"
     fn __repr__(&self) -> String {
         self.to_string()
     }
 
-    /// Checks if two nodes are equal using UID.
     fn __eq__(&self, other: &Self) -> bool {
         // Equality based on uid
         self == other

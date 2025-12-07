@@ -11,17 +11,10 @@ use crate::patterns::type_schema::TypeSchema;
 use crate::typing::{Term, Type};
 use crate::utils::validate_variable_name;
 
-/// Internal compiled representation for efficient matching.
-///
-/// This enum represents the compiled/optimized form of a pattern,
-/// allowing for efficient matching without re-parsing or re-validation.
 #[derive(Clone, Debug)]
 enum CompiledTypeNodeMatcher {
-    /// Match any node (no type constraint)
     Any,
-    /// Match nodes with a specific type
     ExactType(Arc<Type>),
-    /// Match nodes with a type schema pattern
     SchemaType(TypeSchema),
 }
 
@@ -39,12 +32,11 @@ pub struct NodePattern {
     pub variable: Option<String>,
 
     pub properties: HashMap<String, Py<PyAny>>,
-    // Keep these for backward compatibility and introspection
     pub r#type: Option<Arc<Type>>,
     pub type_schema: Option<TypeSchema>,
 
     compiled_type_matcher: CompiledTypeNodeMatcher,
-    /// Optional term to set when creating nodes
+
     pub term: Option<Arc<Term>>,
     pub term_schema: Option<TermSchema>,
 
@@ -95,12 +87,10 @@ impl NodePattern {
         term_schema: Option<TermSchema>,
         properties: Option<HashMap<String, Py<PyAny>>>,
     ) -> PyResult<Self> {
-        // Validate variable name if provided
         if let Some(ref var) = variable {
             validate_variable_name(var)?;
         }
 
-        // Validate: cannot have both type and type_schema
         if r#type.is_some() && type_schema.is_some() {
             return Err(ImplicaError::InvalidPattern {
                 pattern: "NodePattern".to_string(),
@@ -121,7 +111,6 @@ impl NodePattern {
             .into());
         }
 
-        // Build compiled matcher for efficient matching
         let compiled_type_matcher = if let Some(ref t) = r#type {
             CompiledTypeNodeMatcher::ExactType(t.clone())
         } else if let Some(ref s) = type_schema {
@@ -138,8 +127,6 @@ impl NodePattern {
             CompiledTermNodeMatcher::Any
         };
 
-        // Parse properties
-
         Ok(NodePattern {
             variable,
             properties: properties.unwrap_or_default(),
@@ -152,25 +139,9 @@ impl NodePattern {
         })
     }
 
-    /// Checks if a node matches this pattern.
-    ///
-    /// This uses the pre-compiled matcher for optimal performance.
-    /// This is an internal method used by the query system.
-    ///
-    /// # Arguments
-    ///
-    /// * `node` - The node to check
-    /// * `py` - Python context
-    ///
-    /// # Returns
-    ///
-    /// `Ok(true)` if the node matches, `Ok(false)` otherwise
     pub fn matches(&self, node: &Node, context: Arc<Context>) -> Result<bool, ImplicaError> {
-        // Check type using compiled matcher (most efficient path)
         match &self.compiled_type_matcher {
-            CompiledTypeNodeMatcher::Any => {
-                // No type constraint, continue to property check
-            }
+            CompiledTypeNodeMatcher::Any => {}
             CompiledTypeNodeMatcher::ExactType(type_obj) => {
                 if node.r#type.as_ref() != type_obj.as_ref() {
                     return Ok(false);
@@ -215,7 +186,6 @@ impl NodePattern {
             }
         }
 
-        // Check properties if specified
         if !self.properties.is_empty() {
             return Python::attach(|py| -> Result<bool, ImplicaError> {
                 for (key, value) in &self.properties {
