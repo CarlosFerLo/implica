@@ -10,6 +10,8 @@ from .implica import (
     PathPattern,
     Node,
     Edge,
+    Graph,
+    Query,
 )
 
 __all__ = [
@@ -24,4 +26,6 @@ __all__ = [
     "PathPattern",
     "Node",
     "Edge",
+    "Graph",
+    "Query",
 ]

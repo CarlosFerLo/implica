@@ -2,7 +2,7 @@
 
 use crate::context::Context;
 use crate::errors::ImplicaError;
-use crate::graph::{Edge, Graph, Node};
+use crate::graph::{python_to_property_map, Edge, Graph, Node};
 use crate::patterns::{EdgePattern, NodePattern, PathPattern, TermSchema, TypeSchema};
 use crate::typing::{python_to_term, python_to_type, Term, Type};
 use crate::utils::validate_variable_name;
@@ -122,18 +122,20 @@ impl Query {
     }
 
     #[allow(clippy::too_many_arguments)]
+    #[pyo3(signature=(pattern=None, node=None, edge=None, start=None, end=None, r#type=None, type_schema=None, term=None, term_schema=None, properties=None))]
     pub fn r#match(
         &mut self,
+        py: Python,
         pattern: Option<String>,
         node: Option<String>,
         edge: Option<String>,
-        start: Option<Py<PyAny>>,
-        end: Option<Py<PyAny>>,
+        start: Option<String>,
+        end: Option<String>,
         r#type: Option<Py<PyAny>>,
-        type_schema: Option<Py<PyAny>>,
+        type_schema: Option<TypeSchema>,
         term: Option<Py<PyAny>>,
-        term_schema: Option<Py<PyAny>>,
-        properties: Option<Py<PyDict>>,
+        term_schema: Option<TermSchema>,
+        properties: Option<Py<PyAny>>,
     ) -> PyResult<Self> {
         if let Some(p) = pattern {
             // Parse Cypher-like pattern
@@ -141,115 +143,79 @@ impl Query {
             self.operations
                 .push(QueryOperation::Match(MatchOp::Path(path)));
         } else if node.is_some() {
-            Python::attach(|py| -> PyResult<()> {
-                // Convert Python types to Rust types
-                let type_obj = if let Some(t) = r#type {
-                    Some(python_to_type(t.bind(py))?)
-                } else {
-                    None
-                };
+            // Convert Python types to Rust types
+            let type_obj = if let Some(t) = r#type {
+                Some(Arc::new(python_to_type(t.bind(py))?))
+            } else {
+                None
+            };
 
-                let type_schema_obj = if let Some(ts) = type_schema {
-                    let schema_str: String = ts.bind(py).extract()?;
-                    Some(crate::patterns::TypeSchema::new(schema_str)?)
-                } else {
-                    None
-                };
+            let term_obj = if let Some(t) = term {
+                Some(Arc::new(python_to_term(t.bind(py))?))
+            } else {
+                None
+            };
 
-                let term_obj = if let Some(t) = term {
-                    Some(python_to_term(t.bind(py))?)
-                } else {
-                    None
-                };
+            let properties_map = if let Some(p) = properties {
+                Some(python_to_property_map(p.bind(py))?)
+            } else {
+                None
+            };
 
-                let term_schema_obj = if let Some(ts) = term_schema {
-                    let schema_str: String = ts.bind(py).extract()?;
-                    Some(crate::patterns::TermSchema::new(schema_str)?)
-                } else {
-                    None
-                };
-
-                let properties_map = if let Some(props) = properties {
-                    Some(
-                        props
-                            .bind(py)
-                            .extract::<std::collections::HashMap<String, Py<PyAny>>>()?,
-                    )
-                } else {
-                    None
-                };
-
-                // Match node
-                let node_pattern = NodePattern::new(
-                    node,
-                    type_obj.map(Arc::new),
-                    type_schema_obj,
-                    term_obj.map(Arc::new),
-                    term_schema_obj,
-                    properties_map,
-                )?;
-                self.operations
-                    .push(QueryOperation::Match(MatchOp::Node(node_pattern)));
-                Ok(())
-            })?;
+            // Match node
+            let node_pattern = NodePattern::new(
+                node,
+                type_obj,
+                type_schema,
+                term_obj,
+                term_schema,
+                properties_map,
+            )?;
+            self.operations
+                .push(QueryOperation::Match(MatchOp::Node(node_pattern)));
         } else if edge.is_some() {
-            Python::attach(|py| -> PyResult<()> {
-                // Convert Python types to Rust types
-                let type_obj = if let Some(t) = r#type {
-                    Some(Arc::new(python_to_type(t.bind(py))?))
-                } else {
-                    None
-                };
+            // Convert Python types to Rust types
+            let type_obj = if let Some(t) = r#type {
+                Some(Arc::new(python_to_type(t.bind(py))?))
+            } else {
+                None
+            };
 
-                let type_schema_obj = if let Some(ts) = type_schema {
-                    let schema_str: String = ts.bind(py).extract()?;
-                    Some(TypeSchema::new(schema_str)?)
-                } else {
-                    None
-                };
+            let term_obj = if let Some(t) = term {
+                Some(Arc::new(python_to_term(t.bind(py))?))
+            } else {
+                None
+            };
 
-                let term_obj = if let Some(t) = term {
-                    Some(Arc::new(python_to_term(t.bind(py))?))
-                } else {
-                    None
-                };
+            let properties_map = if let Some(props) = properties {
+                Some(python_to_property_map(props.bind(py))?)
+            } else {
+                None
+            };
 
-                let term_schema_obj = if let Some(ts) = term_schema {
-                    let schema_str: String = ts.bind(py).extract()?;
-                    Some(TermSchema::new(schema_str)?)
-                } else {
-                    None
-                };
+            // Match edge
+            let edge_pattern = EdgePattern::new(
+                edge.clone(),
+                type_obj,
+                type_schema,
+                term_obj,
+                term_schema,
+                properties_map,
+                "forward".to_string(),
+            )?;
 
-                let properties_map = if let Some(props) = properties {
-                    Some(
-                        props
-                            .bind(py)
-                            .extract::<std::collections::HashMap<String, Py<PyAny>>>()?,
-                    )
-                } else {
-                    None
-                };
+            if let Some(ref start_var) = start {
+                validate_variable_name(start_var)?;
+            }
+            if let Some(ref end_var) = end {
+                validate_variable_name(end_var)?;
+            }
 
-                // Match edge
-                let edge_pattern = EdgePattern::new(
-                    edge.clone(),
-                    type_obj,
-                    type_schema_obj,
-                    term_obj,
-                    term_schema_obj,
-                    properties_map,
-                    "forward".to_string(),
-                )?;
-                let start_var = Self::extract_var_or_none(start)?;
-                let end_var = Self::extract_var_or_none(end)?;
-                self.operations.push(QueryOperation::Match(MatchOp::Edge(
-                    edge_pattern,
-                    start_var,
-                    end_var,
-                )));
-                Ok(())
-            })?;
+            self.operations.push(QueryOperation::Match(MatchOp::Edge(
+                edge_pattern,
+                start,
+                end,
+            )));
         }
 
         Ok(self.clone())
@@ -263,7 +229,7 @@ impl Query {
     #[pyo3(signature = (*variables))]
     pub fn return_(&mut self, py: Python, variables: Vec<String>) -> PyResult<Vec<Py<PyAny>>> {
         // Execute all operations to build matched_vars
-        self.execute_operations(py)?;
+        self.execute_operations()?;
 
         // Collect results
         let mut results = Vec::new();
@@ -293,193 +259,178 @@ impl Query {
     }
 
     pub fn return_count(&mut self, py: Python) -> PyResult<usize> {
-        self.execute_operations(py)?;
+        self.execute_operations()?;
 
         Ok(self.matches.len())
     }
 
     #[allow(clippy::too_many_arguments)]
+    #[pyo3(signature=(pattern=None, node=None, edge=None, start=None, end=None, r#type=None, type_schema=None, term=None, term_schema=None, properties=None))]
     pub fn create(
         &mut self,
+        py: Python,
         pattern: Option<String>,
         node: Option<String>,
         edge: Option<String>,
+        start: Option<String>,
+        end: Option<String>,
         r#type: Option<Py<PyAny>>,
-        type_schema: Option<Py<PyAny>>,
+        type_schema: Option<TypeSchema>,
         term: Option<Py<PyAny>>,
-        term_schema: Option<Py<PyAny>>,
-        start: Option<Py<PyAny>>,
-        end: Option<Py<PyAny>>,
-        properties: Option<Py<PyDict>>,
+        term_schema: Option<TermSchema>,
+        properties: Option<Py<PyAny>>,
     ) -> PyResult<Self> {
         if let Some(p) = pattern {
             let path = PathPattern::parse(p)?;
             self.operations
                 .push(QueryOperation::Create(CreateOp::Path(path)));
         } else if node.is_some() {
-            Python::attach(|py| -> PyResult<()> {
-                // Convert Python types to Rust types
-                let type_obj = if let Some(t) = r#type {
-                    Some(python_to_type(t.bind(py))?)
-                } else {
-                    None
-                };
+            // Convert Python types to Rust types
+            let type_obj = if let Some(t) = r#type {
+                Some(Arc::new(python_to_type(t.bind(py))?))
+            } else {
+                None
+            };
 
-                let type_schema = if let Some(schema) = type_schema {
-                    Some(schema.bind(py).extract::<TypeSchema>()?)
-                } else {
-                    None
-                };
+            let term_obj = if let Some(t) = term {
+                Some(Arc::new(python_to_term(t.bind(py))?))
+            } else {
+                None
+            };
 
-                let term_obj = if let Some(t) = term {
-                    Some(python_to_term(t.bind(py))?)
-                } else {
-                    None
-                };
+            let properties_map = if let Some(props) = properties {
+                Some(python_to_property_map(props.bind(py))?)
+            } else {
+                None
+            };
 
-                let term_schema = if let Some(schema) = term_schema {
-                    Some(schema.bind(py).extract::<TermSchema>()?)
-                } else {
-                    None
-                };
-
-                let properties_map = if let Some(props) = properties {
-                    Some(props.bind(py).extract::<HashMap<String, Py<PyAny>>>()?)
-                } else {
-                    None
-                };
-
-                let node_pattern = NodePattern::new(
-                    node,
-                    type_obj.map(Arc::new),
-                    type_schema,
-                    term_obj.map(Arc::new),
-                    term_schema,
-                    properties_map,
-                )?;
-                self.operations
-                    .push(QueryOperation::Create(CreateOp::Node(node_pattern)));
-                Ok(())
-            })?;
+            let node_pattern = NodePattern::new(
+                node,
+                type_obj,
+                type_schema,
+                term_obj,
+                term_schema,
+                properties_map,
+            )?;
+            self.operations
+                .push(QueryOperation::Create(CreateOp::Node(node_pattern)));
         } else if edge.is_some() {
-            Python::attach(|py| -> PyResult<()> {
-                // Convert Python types to Rust types
-                let type_obj = if let Some(t) = r#type {
-                    Some(Arc::new(python_to_type(t.bind(py))?))
-                } else {
-                    None
-                };
+            // Convert Python types to Rust types
+            let type_obj = if let Some(t) = r#type {
+                Some(Arc::new(python_to_type(t.bind(py))?))
+            } else {
+                None
+            };
 
-                let type_schema = if let Some(schema) = type_schema {
-                    Some(schema.bind(py).extract::<TypeSchema>()?)
-                } else {
-                    None
-                };
+            let term_obj = if let Some(t) = term {
+                Some(Arc::new(python_to_term(t.bind(py))?))
+            } else {
+                None
+            };
 
-                let term_obj = if let Some(t) = term {
-                    Some(Arc::new(python_to_term(t.bind(py))?))
-                } else {
-                    None
-                };
+            let properties_map = if let Some(props) = properties {
+                Some(python_to_property_map(props.bind(py))?)
+            } else {
+                None
+            };
 
-                let term_schema = if let Some(schema) = term_schema {
-                    Some(schema.bind(py).extract::<TermSchema>()?)
-                } else {
-                    None
-                };
+            let edge_pattern = EdgePattern::new(
+                edge.clone(),
+                type_obj,
+                type_schema,
+                term_obj,
+                term_schema,
+                properties_map,
+                "forward".to_string(),
+            )?;
 
-                let properties_map = if let Some(props) = properties {
-                    Some(props.bind(py).extract::<HashMap<String, Py<PyAny>>>()?)
-                } else {
-                    None
-                };
+            let start = if let Some(start_var) = start {
+                validate_variable_name(&start_var)?;
+                start_var
+            } else {
+                return Err(ImplicaError::InvalidQuery {
+                    message: "for creating an edge you must specify a 'start' variable."
+                        .to_string(),
+                    context: Some("create".to_string()),
+                }
+                .into());
+            };
 
-                let edge_pattern = EdgePattern::new(
-                    edge.clone(),
-                    type_obj,
-                    type_schema,
-                    term_obj,
-                    term_schema,
-                    properties_map,
-                    "forward".to_string(),
-                )?;
-                let start_var = Self::extract_var(start)?;
-                let end_var = Self::extract_var(end)?;
-                self.operations.push(QueryOperation::Create(CreateOp::Edge(
-                    edge_pattern,
-                    start_var,
-                    end_var,
-                )));
-                Ok(())
-            })?;
+            let end = if let Some(end_var) = end {
+                validate_variable_name(&end_var)?;
+                end_var
+            } else {
+                return Err(ImplicaError::InvalidQuery {
+                    message: "for creating an edge you must specify a 'end' variable.".to_string(),
+                    context: Some("create".to_string()),
+                }
+                .into());
+            };
+
+            self.operations.push(QueryOperation::Create(CreateOp::Edge(
+                edge_pattern,
+                start,
+                end,
+            )));
         }
 
         Ok(self.clone())
     }
 
+    #[pyo3(signature=(variable, r#type=None, term=None))]
     pub fn add(
         &mut self,
+        py: Python,
         variable: String,
         r#type: Option<Py<PyAny>>,
         term: Option<Py<PyAny>>,
     ) -> PyResult<Self> {
         validate_variable_name(&variable)?;
 
-        Python::attach(|py| -> PyResult<()> {
-            let type_obj = if let Some(t) = r#type {
-                Some(python_to_type(t.bind(py))?)
-            } else {
-                None
-            };
+        let type_obj = if let Some(t) = r#type {
+            Some(python_to_type(t.bind(py))?)
+        } else {
+            None
+        };
 
-            let term_obj = if let Some(t) = term {
-                Some(python_to_term(t.bind(py))?)
-            } else {
-                None
-            };
+        let term_obj = if let Some(t) = term {
+            Some(python_to_term(t.bind(py))?)
+        } else {
+            None
+        };
 
-            match (type_obj, term_obj) {
-                (Some(typ), Some(trm)) => {
-                    return Err(ImplicaError::InvalidQuery { message: "cannot include 'term' and 'type' in an add operation - they are mutually exclusive".to_string(), context: Some("add".to_string()) }.into());
-                }
-                (Some(typ), None) => {
-                    self.operations
-                        .push(QueryOperation::Add(AddOp::Type(variable, typ)));
-                }
-                (None, Some(trm)) => {
-                    self.operations
-                        .push(QueryOperation::Add(AddOp::Term(variable, trm)));
-                }
-                (None, None) => {
-                    return Err(ImplicaError::InvalidQuery {
-                        message: "must specify at least one of 'term' or 'type'".to_string(),
-                        context: Some("add".to_string()),
-                    }
-                    .into());
-                }
+        match (type_obj, term_obj) {
+            (Some(typ), Some(trm)) => {
+                return Err(ImplicaError::InvalidQuery { message: "cannot include 'term' and 'type' in an add operation - they are mutually exclusive".to_string(), context: Some("add".to_string()) }.into());
             }
-
-            Ok(())
-        })?;
+            (Some(typ), None) => {
+                self.operations
+                    .push(QueryOperation::Add(AddOp::Type(variable, typ)));
+            }
+            (None, Some(trm)) => {
+                self.operations
+                    .push(QueryOperation::Add(AddOp::Term(variable, trm)));
+            }
+            (None, None) => {
+                return Err(ImplicaError::InvalidQuery {
+                    message: "must specify at least one of 'term' or 'type'".to_string(),
+                    context: Some("add".to_string()),
+                }
+                .into());
+            }
+        }
 
         Ok(self.clone())
     }
 
     pub fn set(
         &mut self,
+        py: Python,
         variable: String,
-        properties: Py<PyDict>,
+        properties: Py<PyAny>,
         overwrite: bool,
     ) -> PyResult<Self> {
-        let mut props = HashMap::new();
-        Python::attach(|py| -> PyResult<()> {
-            for (k, v) in properties.bind(py) {
-                let key = k.extract::<String>()?;
-                let val = v.unbind();
-                props.insert(key, val);
-            }
-            Ok(())
-        })?;
+        let props = python_to_property_map(properties.bind(py))?;
 
         self.operations
             .push(QueryOperation::Set(variable, props, overwrite));
@@ -516,50 +467,13 @@ impl Query {
     }
 
     pub fn execute(&mut self, py: Python) -> PyResult<Self> {
-        self.execute_operations(py)?;
+        self.execute_operations()?;
         Ok(self.clone())
     }
 }
 
 impl Query {
-    #[allow(unused_variables)]
-    fn extract_var(obj: Option<Py<PyAny>>) -> Result<String, ImplicaError> {
-        Python::attach(|py| {
-            if let Some(o) = obj {
-                if let Ok(s) = o.bind(py).extract::<String>() {
-                    Ok(s)
-                } else {
-                    Err(ImplicaError::InvalidQuery {
-                        message: "Expected string variable name".to_string(),
-                        context: Some("variable extraction".to_string()),
-                    })
-                }
-            } else {
-                Err(ImplicaError::InvalidQuery {
-                    message: "variable name required".to_string(),
-                    context: Some("extract_var".to_string()),
-                })
-            }
-        })
-    }
-
-    fn extract_var_or_none(obj: Option<Py<PyAny>>) -> Result<Option<String>, ImplicaError> {
-        Python::attach(|py| {
-            if let Some(o) = obj {
-                if let Ok(s) = o.bind(py).extract::<String>() {
-                    Ok(Some(s))
-                } else if let Ok(_node) = o.bind(py).extract::<Node>() {
-                    Ok(None) // Node object provided
-                } else {
-                    Ok(None)
-                }
-            } else {
-                Ok(None)
-            }
-        })
-    }
-
-    fn execute_operations(&mut self, py: Python) -> PyResult<()> {
+    fn execute_operations(&mut self) -> Result<(), ImplicaError> {
         for op in self.operations.clone() {
             match op {
                 QueryOperation::Match(match_op) => {
