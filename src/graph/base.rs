@@ -131,15 +131,8 @@ impl Graph {
         if let Some(existing) = nodes.get(uid) {
             return Err(ImplicaError::NodeAlreadyExists {
                 message: "Tried to add a node with a type that already exists.".to_string(),
-                existing: existing
-                    .read()
-                    .map_err(|e| ImplicaError::LockError {
-                        rw: "read".to_string(),
-                        message: e.to_string(),
-                        context: Some("add node".to_string()),
-                    })?
-                    .clone(),
-                new: node.clone(),
+                existing: existing.clone(),
+                new: Arc::new(RwLock::new(node.clone())),
             });
         }
 
@@ -225,15 +218,8 @@ impl Graph {
         if let Some(existing) = edges.get(uid) {
             return Err(ImplicaError::EdgeAlreadyExists {
                 message: "Tried to add a node that already exists.".to_string(),
-                existing: existing
-                    .read()
-                    .map_err(|e| ImplicaError::LockError {
-                        rw: "read".to_string(),
-                        message: e.to_string(),
-                        context: Some("add edge".to_string()),
-                    })?
-                    .clone(),
-                new: edge.clone(),
+                existing: existing.clone(),
+                new: Arc::new(RwLock::new(edge.clone())),
             });
         }
 

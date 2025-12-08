@@ -1,6 +1,7 @@
 use pyo3::pyclass::PyClassGuardError;
 use pyo3::{exceptions, PyErr};
 use std::fmt::{Display, Formatter, Result};
+use std::sync::{Arc, RwLock};
 
 use crate::graph::{Edge, Node};
 
@@ -59,13 +60,13 @@ pub enum ImplicaError {
 
     NodeAlreadyExists {
         message: String,
-        existing: Node,
-        new: Node,
+        existing: Arc<RwLock<Node>>,
+        new: Arc<RwLock<Node>>,
     },
     EdgeAlreadyExists {
         message: String,
-        existing: Edge,
-        new: Edge,
+        existing: Arc<RwLock<Edge>>,
+        new: Arc<RwLock<Edge>>,
     },
     VariableAlreadyExists {
         name: String,
@@ -171,6 +172,8 @@ impl Display for ImplicaError {
                 existing,
                 new,
             } => {
+                let existing = existing.read().unwrap();
+                let new = new.read().unwrap();
                 write!(
                     f,
                     "Node already exists in the graph: '{}'\nExisting: '{}'\nNew: '{}'",
@@ -182,6 +185,8 @@ impl Display for ImplicaError {
                 existing,
                 new,
             } => {
+                let existing = existing.read().unwrap();
+                let new = new.read().unwrap();
                 write!(
                     f,
                     "Node already exists in the graph: '{}'\nExisting: '{}'\nNew: '{}'",

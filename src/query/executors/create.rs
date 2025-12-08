@@ -565,7 +565,16 @@ impl Query {
                                     message: _,
                                     existing,
                                     new: _,
-                                } => node = existing.clone(),
+                                } => {
+                                    let existing =
+                                        existing.read().map_err(|e| ImplicaError::LockError {
+                                            rw: "read".to_string(),
+                                            message: e.to_string(),
+                                            context: Some("execute create".to_string()),
+                                        })?;
+
+                                    node = existing.clone();
+                                }
                                 _ => {
                                     return Err(e);
                                 }
