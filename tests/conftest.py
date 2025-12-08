@@ -48,6 +48,11 @@ def term_ba(arrow_ba):
 
 
 @pytest.fixture
+def term_aa(arrow_aa):
+    return implica.BasicTerm("h", arrow_aa)
+
+
+@pytest.fixture
 def node_a(type_a):
     return implica.Node(type_a)
 
@@ -75,3 +80,8 @@ def edge_ab(term_ab, node_a, node_b):
 @pytest.fixture
 def edge_ba(term_ba, node_b, node_a):
     return implica.Edge(term_ba, node_b, node_a)
+
+
+@pytest.fixture
+def edge_aa(term_aa, node_a):
+    return implica.Edge(term_aa, node_a, node_a)

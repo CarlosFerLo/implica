@@ -97,7 +97,7 @@ class TermSchema:
     def __str__(self) -> str: ...
     def __repr__(self) -> str: ...
 
-## TODO: Add EdgePattern, PathPattern classes here
+## TODO: Add PathPattern classes here
 ## -- NodePattern ---
 class NodePattern:
 
@@ -121,5 +121,33 @@ class NodePattern:
         properties: Dict[str, Any] = {},
     ) -> None: ...
     def matches(self, node, context: Dict[str, Type | Term] = {}) -> bool: ...
+    def __str__(self) -> str: ...
+    def __repr__(self) -> str: ...
+
+class EdgePattern:
+
+    variable: Optional[str]
+
+    type: Optional[Type]
+    type_schema: Optional[TypeSchema]
+
+    term: Optional[Term]
+    term_schema: Optional[TermSchema]
+
+    properties: Dict[str, Any]
+
+    direction: str
+
+    def __init__(
+        self,
+        variable: Optional[str] = None,
+        type: Optional[Type] = None,
+        type_schema: Optional[TypeSchema] = None,
+        term: Optional[Term] = None,
+        term_schema: Optional[TermSchema] = None,
+        properties: Dict[str, Any] = {},
+        direction: str = "forward",
+    ) -> None: ...
+    def matches(self, edge, context: Dict[str, Type | Term] = {}) -> bool: ...
     def __str__(self) -> str: ...
     def __repr__(self) -> str: ...

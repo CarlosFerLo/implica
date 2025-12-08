@@ -1,14 +1,16 @@
 use pyo3::prelude::*;
+use pyo3::types::PyDict;
 
 use std::collections::HashMap;
+use std::fmt::Display;
 use std::sync::Arc;
 
-use crate::context::Context;
+use crate::context::{python_to_context, Context, ContextElement};
 use crate::errors::ImplicaError;
-use crate::graph::Edge;
+use crate::graph::{property_map_to_python, property_map_to_string, python_to_property_map, Edge};
 use crate::patterns::term_schema::TermSchema;
 use crate::patterns::type_schema::TypeSchema;
-use crate::typing::{Term, Type};
+use crate::typing::{python_to_term, python_to_type, term_to_python, type_to_python, Term, Type};
 use crate::utils::validate_variable_name;
 
 #[derive(Clone, Debug, PartialEq)]
@@ -67,8 +69,10 @@ pub struct EdgePattern {
 
     // Keep these for backward compatibility and introspection
     pub term: Option<Arc<Term>>,
+    #[pyo3(get)]
     pub type_schema: Option<TypeSchema>,
     pub r#type: Option<Arc<Type>>,
+    #[pyo3(get)]
     pub term_schema: Option<TermSchema>,
 }
 
@@ -94,27 +98,152 @@ impl Clone for EdgePattern {
     }
 }
 
+impl Display for EdgePattern {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut content = Vec::new();
+
+        if let Some(ref var) = self.variable {
+            content.push(format!("variable='{}'", var));
+        }
+
+        if let Some(ref typ) = self.r#type {
+            content.push(format!("type='{}'", typ));
+        }
+
+        if let Some(ref type_schema) = self.type_schema {
+            content.push(format!("type_schema={}", type_schema));
+        }
+
+        if let Some(ref term) = self.term {
+            content.push(format!("term='{}'", term));
+        }
+
+        if let Some(ref term_schema) = self.term_schema {
+            content.push(format!("term_schema={}", term_schema));
+        }
+
+        if !self.properties.is_empty() {
+            content.push(format!(
+                "properties={}",
+                property_map_to_string(&self.properties)
+            ))
+        }
+
+        content.push(format!(
+            "direction='{}'",
+            self.compiled_direction.to_string()
+        ));
+
+        write!(f, "EdgePattern({})", content.join(", "))
+    }
+}
+
 #[pymethods]
 impl EdgePattern {
+    #[new]
+    #[pyo3(signature=(variable=None, r#type=None, type_schema=None, term=None, term_schema=None, properties=None, direction="forward".to_string()))]
+    #[allow(clippy::too_many_arguments)]
+    pub fn py_new(
+        py: Python,
+        variable: Option<String>,
+        r#type: Option<Py<PyAny>>,
+        type_schema: Option<TypeSchema>,
+        term: Option<Py<PyAny>>,
+        term_schema: Option<TermSchema>,
+        properties: Option<Py<PyAny>>,
+        direction: String,
+    ) -> PyResult<Self> {
+        let type_obj = match r#type {
+            Some(typ) => Some(Arc::new(python_to_type(typ.bind(py))?)),
+            None => None,
+        };
+        let term_obj = match term {
+            Some(term) => Some(Arc::new(python_to_term(term.bind(py))?)),
+            None => None,
+        };
+        let props_obj = match properties {
+            Some(props) => Some(python_to_property_map(props.bind(py))?),
+            None => None,
+        };
+
+        EdgePattern::new(
+            variable,
+            type_obj,
+            type_schema,
+            term_obj,
+            term_schema,
+            props_obj,
+            direction,
+        )
+    }
+
+    #[pyo3(name = "matches", signature=(edge, context=None))]
+    pub fn py_matches(&self, py: Python, edge: Edge, context: Option<Py<PyAny>>) -> PyResult<bool> {
+        let context_obj = match context.as_ref() {
+            Some(c) => Arc::new(python_to_context(c.bind(py))?),
+            None => Arc::new(Context::new()),
+        };
+
+        let result = self.matches(&edge, context_obj.clone())?;
+
+        if let Some(c) = context {
+            let dict = c.bind(py).cast::<PyDict>()?;
+
+            dict.clear();
+            let content = context_obj
+                .content
+                .read()
+                .map_err(|e| ImplicaError::LockError {
+                    rw: "read".to_string(),
+                    message: e.to_string(),
+                    context: Some("py matches type schema".to_string()),
+                })?;
+            for (k, v) in content.iter() {
+                let t_obj = match v {
+                    ContextElement::Type(t) => type_to_python(py, t)?,
+                    ContextElement::Term(t) => term_to_python(py, t)?,
+                };
+                dict.set_item(k.clone(), t_obj)?;
+            }
+        }
+
+        Ok(result)
+    }
+
+    #[getter]
+    pub fn get_type(&self, py: Python) -> PyResult<Option<Py<PyAny>>> {
+        if let Some(ref typ) = self.r#type {
+            Ok(Some(type_to_python(py, typ)?))
+        } else {
+            Ok(None)
+        }
+    }
+
+    #[getter]
+    pub fn get_term(&self, py: Python) -> PyResult<Option<Py<PyAny>>> {
+        if let Some(ref trm) = self.term {
+            Ok(Some(term_to_python(py, trm)?))
+        } else {
+            Ok(None)
+        }
+    }
+
+    #[getter]
+    pub fn get_properties(&self, py: Python) -> PyResult<Py<PyAny>> {
+        property_map_to_python(py, &self.properties)
+    }
+
     #[getter]
     pub fn direction(&self) -> String {
         self.compiled_direction.to_string().to_string()
     }
 
+    fn __str__(&self) -> String {
+        self.to_string()
+    }
+
     fn __repr__(&self) -> String {
-        let term_info = if self.term.is_some() {
-            ", term=<specified>"
-        } else if self.type_schema.is_some() {
-            ", type_schema=<specified>"
-        } else {
-            ""
-        };
-        format!(
-            "EdgePattern(variable={:?}, direction={}{})",
-            self.variable,
-            self.compiled_direction.to_string(),
-            term_info
-        )
+        self.to_string()
     }
 }
 
