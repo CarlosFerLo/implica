@@ -10,6 +10,6 @@ crate-type = ["cdylib", "lib"]
 
 [dependencies]
 fancy-regex = "0.16.2"
-pyo3 = { version = "0.27.1", features = ["extension-module", "abi3-py38", "auto-initialize"] }
+pyo3 = { version = "0.27.1", features = ["extension-module", "abi3-py38"] }
 rhai = {version = "1.23.6", features = ["sync"]}
 sha2 = "0.10"
