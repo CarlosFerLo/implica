@@ -7,6 +7,7 @@ from .implica import (
     TermSchema,
     NodePattern,
     EdgePattern,
+    PathPattern,
     Node,
     Edge,
 )
@@ -20,6 +21,7 @@ __all__ = [
     "TermSchema",
     "NodePattern",
     "EdgePattern",
+    "PathPattern",
     "Node",
     "Edge",
 ]

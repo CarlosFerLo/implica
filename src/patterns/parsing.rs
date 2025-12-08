@@ -22,94 +22,136 @@ pub(in crate::patterns) struct Token {
 
 pub(in crate::patterns) fn tokenize_pattern(pattern: &str) -> PyResult<Vec<Token>> {
     let mut tokens = Vec::new();
-    let mut current = String::new();
-    let mut in_parens = 0;
-    let mut in_brackets = 0;
+    let mut node_buffer = String::new();
     let mut edge_buffer = String::new();
+    let mut node_paren_depth = 0;
+    let mut edge_bracket_depth = 0;
+    let mut edge_paren_depth = 0; // Track parens INSIDE edge brackets
 
+    #[derive(Debug, PartialEq)]
+    enum State {
+        Outside, // Not in a node or edge
+        InNode,  // Inside a node pattern (...)
+        InEdge,  // Inside an edge pattern -[...]-
+    }
+
+    let mut state = State::Outside;
     let chars: Vec<char> = pattern.chars().collect();
     let mut i = 0;
 
     while i < chars.len() {
         let c = chars[i];
 
-        match c {
-            '(' => {
-                if in_brackets == 0 && in_parens == 0 {
-                    // Start of a new node
-                    if !edge_buffer.is_empty() {
-                        let trimmed_edge = edge_buffer.trim().to_string();
-                        if !trimmed_edge.is_empty() {
-                            tokens.push(Token {
-                                kind: TokenKind::Edge,
-                                text: trimmed_edge,
-                            });
+        match state {
+            State::Outside => {
+                match c {
+                    '(' => {
+                        // Start of a node
+                        state = State::InNode;
+                        node_paren_depth = 1;
+                        node_buffer.push(c);
+                    }
+                    '-' | '<' | '>' => {
+                        // Start of edge
+                        state = State::InEdge;
+                        edge_buffer.push(c);
+                    }
+                    '[' => {
+                        // Bracket without arrow prefix
+                        state = State::InEdge;
+                        edge_bracket_depth = 1;
+                        edge_buffer.push(c);
+                    }
+                    ' ' | '\t' | '\n' | '\r' => {
+                        // Skip whitespace
+                    }
+                    _ => {
+                        return Err(ImplicaError::InvalidPattern {
+                            pattern: pattern.to_string(),
+                            reason: format!(
+                                "Unexpected character '{}' outside of node or edge pattern",
+                                c
+                            ),
                         }
+                        .into());
+                    }
+                }
+            }
+            State::InNode => {
+                node_buffer.push(c);
+                match c {
+                    '(' => {
+                        node_paren_depth += 1;
+                    }
+                    ')' => {
+                        node_paren_depth -= 1;
+                        if node_paren_depth == 0 {
+                            // End of node
+                            tokens.push(Token {
+                                kind: TokenKind::Node,
+                                text: node_buffer.clone(),
+                            });
+                            node_buffer.clear();
+                            state = State::Outside;
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            State::InEdge => {
+                edge_buffer.push(c);
+                match c {
+                    '[' => {
+                        edge_bracket_depth += 1;
+                    }
+                    ']' => {
+                        edge_bracket_depth -= 1;
+                    }
+                    '(' if edge_bracket_depth > 0 => {
+                        // Paren inside brackets
+                        edge_paren_depth += 1;
+                    }
+                    ')' if edge_bracket_depth > 0 => {
+                        // Paren inside brackets
+                        edge_paren_depth -= 1;
+                    }
+                    '-' | '>' | '<' => {
+                        // Continue edge pattern
+                    }
+                    ' ' | '\t' | '\n' | '\r' => {
+                        // Whitespace in edge
+                    }
+                    _ if edge_bracket_depth > 0 => {
+                        // Any char inside brackets is ok
+                    }
+                    _ => {
+                        return Err(ImplicaError::InvalidPattern {
+                            pattern: pattern.to_string(),
+                            reason: format!("Unexpected character '{}' in edge pattern", c),
+                        }
+                        .into());
+                    }
+                }
+
+                // Check if edge pattern is complete
+                // An edge is complete when we're outside brackets and hit a node or whitespace before a node
+                if edge_bracket_depth == 0 && edge_paren_depth == 0 {
+                    // Look ahead to see if next non-whitespace char is '('
+                    let mut j = i + 1;
+                    while j < chars.len() && matches!(chars[j], ' ' | '\t' | '\n' | '\r') {
+                        j += 1;
+                    }
+                    if j < chars.len() && chars[j] == '(' {
+                        // Next is a node, edge is complete
+                        tokens.push(Token {
+                            kind: TokenKind::Edge,
+                            text: edge_buffer.clone(),
+                        });
                         edge_buffer.clear();
+                        edge_bracket_depth = 0;
+                        edge_paren_depth = 0;
+                        state = State::Outside;
                     }
-                    current.clear();
-                }
-                in_parens += 1;
-                current.push(c);
-            }
-            ')' => {
-                current.push(c);
-                in_parens -= 1;
-                if in_parens == 0 && in_brackets == 0 {
-                    // End of node
-                    tokens.push(Token {
-                        kind: TokenKind::Node,
-                        text: current.clone(),
-                    });
-                    current.clear();
-                }
-            }
-            '[' => {
-                if in_parens == 0 {
-                    in_brackets += 1;
-                    edge_buffer.push(c);
-                } else {
-                    current.push(c);
-                }
-            }
-            ']' => {
-                if in_parens == 0 {
-                    edge_buffer.push(c);
-                    in_brackets -= 1;
-                } else {
-                    current.push(c);
-                }
-            }
-            '-' | '>' | '<' => {
-                if in_parens == 0 {
-                    edge_buffer.push(c);
-                } else {
-                    current.push(c);
-                }
-            }
-            ' ' | '\t' | '\n' | '\r' => {
-                // Skip whitespace outside of patterns
-                if in_parens > 0 {
-                    current.push(c);
-                } else if in_brackets > 0 {
-                    edge_buffer.push(c);
-                }
-                // Otherwise skip whitespace
-            }
-            _ => {
-                if in_parens > 0 {
-                    current.push(c);
-                } else if in_brackets > 0 {
-                    edge_buffer.push(c);
-                } else {
-                    return Err(ImplicaError::InvalidPattern {
-                        pattern: pattern.to_string(),
-                        reason: format!(
-                            "Unexpected character '{}' outside of node or edge pattern",
-                            c
-                        ),
-                    }
-                    .into());
                 }
             }
         }
@@ -118,14 +160,14 @@ pub(in crate::patterns) fn tokenize_pattern(pattern: &str) -> PyResult<Vec<Token
     }
 
     // Check for unclosed patterns
-    if in_parens != 0 {
+    if node_paren_depth != 0 {
         return Err(ImplicaError::InvalidPattern {
             pattern: pattern.to_string(),
             reason: "Unmatched parentheses in pattern".to_string(),
         }
         .into());
     }
-    if in_brackets != 0 {
+    if edge_bracket_depth != 0 {
         return Err(ImplicaError::InvalidPattern {
             pattern: pattern.to_string(),
             reason: "Unmatched brackets in pattern".to_string(),
@@ -133,8 +175,8 @@ pub(in crate::patterns) fn tokenize_pattern(pattern: &str) -> PyResult<Vec<Token
         .into());
     }
 
-    // Add remaining edge if any
-    if !edge_buffer.is_empty() {
+    // Check final state
+    if state == State::InEdge {
         return Err(ImplicaError::InvalidPattern {
             pattern: pattern.to_string(),
             reason: "Pattern cannot end with an edge".to_string(),
@@ -376,6 +418,122 @@ fn unescape_string(s: &str) -> PyResult<String> {
     Ok(result)
 }
 
+fn find_properties_start(s: &str) -> Option<usize> {
+    // Find the start of properties section (opening brace not inside parentheses)
+    let mut paren_depth = 0;
+    let mut bracket_depth = 0;
+
+    for (i, c) in s.char_indices() {
+        match c {
+            '(' => paren_depth += 1,
+            ')' => paren_depth -= 1,
+            '[' => bracket_depth += 1,
+            ']' => bracket_depth -= 1,
+            '{' if paren_depth == 0 && bracket_depth == 0 => {
+                return Some(i);
+            }
+            _ => {}
+        }
+    }
+
+    None
+}
+
+fn smart_split_colons(s: &str) -> PyResult<Vec<String>> {
+    // Split by colons, but ignore colons inside parentheses, brackets, and braces
+    let mut parts = Vec::new();
+    let mut current = String::new();
+    let mut paren_depth = 0;
+    let mut bracket_depth = 0;
+    let mut brace_depth = 0;
+
+    for c in s.chars() {
+        match c {
+            '(' => {
+                paren_depth += 1;
+                current.push(c);
+            }
+            ')' => {
+                paren_depth -= 1;
+                if paren_depth < 0 {
+                    return Err(ImplicaError::InvalidPattern {
+                        pattern: s.to_string(),
+                        reason: "Unbalanced parentheses in pattern".to_string(),
+                    }
+                    .into());
+                }
+                current.push(c);
+            }
+            '[' => {
+                bracket_depth += 1;
+                current.push(c);
+            }
+            ']' => {
+                bracket_depth -= 1;
+                if bracket_depth < 0 {
+                    return Err(ImplicaError::InvalidPattern {
+                        pattern: s.to_string(),
+                        reason: "Unbalanced brackets in pattern".to_string(),
+                    }
+                    .into());
+                }
+                current.push(c);
+            }
+            '{' => {
+                brace_depth += 1;
+                current.push(c);
+            }
+            '}' => {
+                brace_depth -= 1;
+                if brace_depth < 0 {
+                    return Err(ImplicaError::InvalidPattern {
+                        pattern: s.to_string(),
+                        reason: "Unbalanced braces in pattern".to_string(),
+                    }
+                    .into());
+                }
+                current.push(c);
+            }
+            ':' if paren_depth == 0 && bracket_depth == 0 && brace_depth == 0 => {
+                // Top-level colon - this is a separator
+                parts.push(current.trim().to_string());
+                current.clear();
+            }
+            _ => {
+                current.push(c);
+            }
+        }
+    }
+
+    // Add the last part (trimmed)
+    parts.push(current.trim().to_string());
+
+    if paren_depth != 0 {
+        return Err(ImplicaError::InvalidPattern {
+            pattern: s.to_string(),
+            reason: "Unbalanced parentheses in pattern".to_string(),
+        }
+        .into());
+    }
+
+    if bracket_depth != 0 {
+        return Err(ImplicaError::InvalidPattern {
+            pattern: s.to_string(),
+            reason: "Unbalanced brackets in pattern".to_string(),
+        }
+        .into());
+    }
+
+    if brace_depth != 0 {
+        return Err(ImplicaError::InvalidPattern {
+            pattern: s.to_string(),
+            reason: "Unbalanced braces in pattern".to_string(),
+        }
+        .into());
+    }
+
+    Ok(parts)
+}
 pub(in crate::patterns) fn parse_node_pattern(s: &str) -> PyResult<NodePattern> {
     let s = s.trim();
     if !s.starts_with('(') || !s.ends_with(')') {
@@ -399,8 +557,8 @@ pub(in crate::patterns) fn parse_node_pattern(s: &str) -> PyResult<NodePattern> 
         return NodePattern::new(None, None, None, None, None, None);
     }
 
-    // Check for properties
-    let content = if let Some(brace_idx) = inner.find('{') {
+    // Check for properties - need to find the LAST { that's not inside parentheses
+    let content = if let Some(brace_idx) = find_properties_start(inner) {
         // Has properties - extract and parse them
         let props_str = &inner[brace_idx..];
         properties = Some(parse_properties(props_str)?);
@@ -409,15 +567,21 @@ pub(in crate::patterns) fn parse_node_pattern(s: &str) -> PyResult<NodePattern> 
         inner
     };
 
-    // Split by : to parse variable:type_schema:term_schema
-    let parts: Vec<&str> = content.split(':').collect();
+    // Smart split by : to parse variable:type_schema:term_schema
+    // Need to handle nested parentheses and arrows in type schemas
+    let parts = smart_split_colons(content)?;
 
     match parts.len() {
         1 => {
-            // Only one part: could be (var) or empty
+            // Only one part: could be (var) or (:type) - need to distinguish
             let part = parts[0].trim();
             if !part.is_empty() {
-                variable = Some(part.to_string());
+                // Check if it looks like a TypeSchema (contains ->, *, or starts with ()
+                if part.contains("->") || part.contains('*') || part.starts_with('(') {
+                    type_schema = Some(TypeSchema::new(part.to_string())?);
+                } else {
+                    variable = Some(part.to_string());
+                }
             }
         }
         2 => {
@@ -467,23 +631,7 @@ pub(in crate::patterns) fn parse_node_pattern(s: &str) -> PyResult<NodePattern> 
 pub(in crate::patterns) fn parse_edge_pattern(s: &str) -> PyResult<EdgePattern> {
     let s = s.trim();
 
-    // Determine direction based on arrows
-    // Patterns: -[e]-> (forward), <-[e]- (backward), -[e]- (any)
-    let direction = if s.starts_with('<') && s.contains("->") {
-        return Err(ImplicaError::InvalidPattern {
-            pattern: s.to_string(),
-            reason: "Cannot have both <- and -> in same edge".to_string(),
-        }
-        .into());
-    } else if s.starts_with("<-") || (s.starts_with('<') && s.contains('-')) {
-        "backward"
-    } else if s.contains("->") || s.ends_with('>') {
-        "forward"
-    } else {
-        "any"
-    };
-
-    // Extract the part inside brackets
+    // Extract the part inside brackets first
     let bracket_start = s.find('[').ok_or_else(|| ImplicaError::InvalidPattern {
         pattern: s.to_string(),
         reason: "Edge pattern must contain brackets".to_string(),
@@ -501,6 +649,25 @@ pub(in crate::patterns) fn parse_edge_pattern(s: &str) -> PyResult<EdgePattern> 
         .into());
     }
 
+    // Determine direction based on arrows OUTSIDE the brackets
+    // Patterns: -[e]-> (forward), <-[e]- (backward), -[e]- (any)
+    let before_bracket = &s[..bracket_start];
+    let after_bracket = &s[bracket_end + 1..];
+
+    let direction = if before_bracket.contains("<-") && after_bracket.contains("->") {
+        return Err(ImplicaError::InvalidPattern {
+            pattern: s.to_string(),
+            reason: "Cannot have both <- and -> in same edge".to_string(),
+        }
+        .into());
+    } else if before_bracket.contains("<-") || before_bracket.contains('<') {
+        "backward"
+    } else if after_bracket.contains("->") || after_bracket.contains('>') {
+        "forward"
+    } else {
+        "any"
+    };
+
     let inner = &s[bracket_start + 1..bracket_end].trim();
 
     let mut variable = None;
@@ -509,8 +676,8 @@ pub(in crate::patterns) fn parse_edge_pattern(s: &str) -> PyResult<EdgePattern> 
     let mut properties = None;
 
     if !inner.is_empty() {
-        // Check for properties
-        let content = if let Some(brace_idx) = inner.find('{') {
+        // Check for properties - need to find the LAST { that's not inside parentheses
+        let content = if let Some(brace_idx) = find_properties_start(inner) {
             // Has properties - extract and parse them
             let props_str = &inner[brace_idx..];
             properties = Some(parse_properties(props_str)?);
@@ -520,7 +687,8 @@ pub(in crate::patterns) fn parse_edge_pattern(s: &str) -> PyResult<EdgePattern> 
         };
 
         // Parse: [var:type:term] or [var:type] or [var] or [:type:term] or [:type]
-        let parts: Vec<&str> = content.split(':').collect();
+        // Use smart_split_colons to handle colons inside TypeSchemas
+        let parts = smart_split_colons(content)?;
 
         match parts.len() {
             1 => {
