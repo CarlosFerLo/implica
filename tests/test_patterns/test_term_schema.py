@@ -949,3 +949,34 @@ class TestTermSchemaErrorCases:
         # Should raise an error about context conflict
         with pytest.raises((TypeError, ValueError)):
             schema.matches(app, context)
+
+
+class TestTermSchemaEquality:
+    def test_term_schema_equality_same_pattern(self):
+        pattern = "f x"
+        schema1 = implica.TermSchema(pattern)
+        schema2 = implica.TermSchema(pattern)
+
+        assert schema1 == schema2
+
+    def test_term_schema_inequality_different_pattern(self):
+        pattern1 = "f x"
+        pattern2 = "g y"
+        schema1 = implica.TermSchema(pattern1)
+        schema2 = implica.TermSchema(pattern2)
+
+        assert schema1 != schema2
+
+    def test_term_schema_equality_with_non_schema(self):
+        pattern = "f x"
+        schema = implica.TermSchema(pattern)
+
+        assert schema != "not a schema"
+
+    def test_term_schema_equality_with_isomorphic_pattern(self):
+        pattern1 = "f x"
+        pattern2 = "  f   x  "
+        schema1 = implica.TermSchema(pattern1)
+        schema2 = implica.TermSchema(pattern2)
+
+        assert schema1 == schema2

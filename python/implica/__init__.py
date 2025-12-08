@@ -1,4 +1,14 @@
-from .implica import Variable, Arrow, BasicTerm, Application, TypeSchema, TermSchema, Node, Edge
+from .implica import (
+    Variable,
+    Arrow,
+    BasicTerm,
+    Application,
+    TypeSchema,
+    TermSchema,
+    NodePattern,
+    Node,
+    Edge,
+)
 
 __all__ = [
     "Variable",
@@ -7,6 +17,7 @@ __all__ = [
     "Application",
     "TypeSchema",
     "TermSchema",
+    "NodePattern",
     "Node",
     "Edge",
 ]

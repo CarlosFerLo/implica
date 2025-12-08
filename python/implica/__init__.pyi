@@ -42,30 +42,6 @@ class Application(BaseTerm):
 
 Term = BasicTerm | Application
 
-# --- Patterns -----
-
-## -- TypeSchema ---
-class TypeSchema:
-
-    pattern: str
-
-    def __init__(self, pattern: str) -> None: ...
-    def matches(self, type: Type, context: Dict[str, Type | Term] = {}) -> bool: ...
-    def __str__(self) -> str: ...
-    def __repr__(self) -> str: ...
-
-## -- TermSchema ---
-class TermSchema:
-
-    pattern: str
-
-    def __init__(self, pattern: str) -> None: ...
-    def matches(self, term: Term, context: Dict[str, Type | Term] = {}) -> bool: ...
-    def __str__(self) -> str: ...
-    def __repr__(self) -> str: ...
-
-## TODO: Add NodePattern, EdgePattern, PathPattern classes here
-
 # --- Graph -----
 
 ## -- Node ------
@@ -94,5 +70,56 @@ class Edge:
     def __init__(self, term: Term, start: Node, end: Node) -> None: ...
     def uid(self) -> str: ...
     def __eq__(self, value: Edge) -> bool: ...
+    def __str__(self) -> str: ...
+    def __repr__(self) -> str: ...
+
+# TODO: Add Graph class here
+
+# --- Patterns -----
+
+## -- TypeSchema ---
+class TypeSchema:
+
+    pattern: str
+
+    def __init__(self, pattern: str) -> None: ...
+    def matches(self, type: Type, context: Dict[str, Type | Term] = {}) -> bool: ...
+    def __str__(self) -> str: ...
+    def __repr__(self) -> str: ...
+
+## -- TermSchema ---
+class TermSchema:
+
+    pattern: str
+
+    def __init__(self, pattern: str) -> None: ...
+    def matches(self, term: Term, context: Dict[str, Type | Term] = {}) -> bool: ...
+    def __str__(self) -> str: ...
+    def __repr__(self) -> str: ...
+
+## TODO: Add EdgePattern, PathPattern classes here
+## -- NodePattern ---
+class NodePattern:
+
+    variable: Optional[str]
+
+    type: Optional[TypeSchema]
+    type_schema: Optional[TypeSchema]
+
+    term: Optional[Term]
+    term_schema: Optional[TermSchema]
+
+    properties: Dict[str, Any]
+
+    def __init__(
+        self,
+        variable: Optional[str] = None,
+        type: Optional[TypeSchema] = None,
+        type_schema: Optional[TypeSchema] = None,
+        term: Optional[Term] = None,
+        term_schema: Optional[TermSchema] = None,
+        properties: Dict[str, Any] = {},
+    ) -> None: ...
+    def matches(self, node, context: Dict[str, Type | Term] = {}) -> bool: ...
     def __str__(self) -> str: ...
     def __repr__(self) -> str: ...

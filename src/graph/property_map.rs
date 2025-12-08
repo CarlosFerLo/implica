@@ -98,3 +98,20 @@ fn make_deeply_immutable<'py>(
     // For other types (primitives, etc.), return as-is
     Ok(obj)
 }
+
+pub(crate) fn property_map_to_string(props: &PropertyMap) -> String {
+    Python::attach(|py| {
+        let mut content = Vec::new();
+
+        for (k, v) in props.iter() {
+            let v_bound = v.bind(py);
+            let v_repr = v_bound
+                .repr()
+                .map(|r| r.to_string())
+                .unwrap_or_else(|_| "None".to_string());
+            content.push(format!("'{}': {}", k, v_repr));
+        }
+
+        format!("{{{}}}", content.join(", "))
+    })
+}

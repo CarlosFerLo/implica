@@ -78,6 +78,10 @@ impl TermSchema {
         Ok(result)
     }
 
+    fn __eq__(&self, other: TermSchema) -> bool {
+        self.compiled == other.compiled
+    }
+
     fn __str__(&self) -> String {
         self.to_string()
     }

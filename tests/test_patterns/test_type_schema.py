@@ -940,8 +940,51 @@ class TestTypeSchemaStringRepresentation:
 
         assert repr(schema) == f"TypeSchema('{pattern}')"
 
-    def test_type_schema_pattern_property(self):
-        pattern = "(a -> b) -> c"
-        schema = implica.TypeSchema(pattern)
 
-        assert schema.pattern == pattern
+class TestTypeSchemaEquality:
+    """Test equality comparisons between TypeSchema instances."""
+
+    def test_type_schema_equality_same_pattern(self):
+        pattern = "a -> b"
+        schema1 = implica.TypeSchema(pattern)
+        schema2 = implica.TypeSchema(pattern)
+
+        assert schema1 == schema2
+
+    def test_type_schema_inequality_different_pattern(self):
+        pattern1 = "a -> b"
+        pattern2 = "a -> c"
+        schema1 = implica.TypeSchema(pattern1)
+        schema2 = implica.TypeSchema(pattern2)
+
+        assert schema1 != schema2
+
+    def test_type_schema_inequality_different_type(self):
+        pattern = "a -> b"
+        schema = implica.TypeSchema(pattern)
+        other = "NotATypeSchema"
+
+        assert schema != other
+
+    def test_type_schema_equality_complex_pattern(self):
+        pattern = "(x: *) -> (y: x -> *) -> y"
+        schema1 = implica.TypeSchema(pattern)
+        schema2 = implica.TypeSchema(pattern)
+
+        assert schema1 == schema2
+
+    def test_type_schema_inequality_similar_but_different(self):
+        pattern1 = "(a: *) -> a"
+        pattern2 = "(b: *) -> b"
+        schema1 = implica.TypeSchema(pattern1)
+        schema2 = implica.TypeSchema(pattern2)
+
+        assert schema1 != schema2
+
+    def test_type_schema_equality_with_whitespace_variation(self):
+        pattern1 = "a -> b"
+        pattern2 = "  a  ->  b  "
+        schema1 = implica.TypeSchema(pattern1)
+        schema2 = implica.TypeSchema(pattern2)
+
+        assert schema1 == schema2

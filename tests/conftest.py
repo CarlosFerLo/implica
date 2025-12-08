@@ -33,6 +33,11 @@ def arrow_ba(type_b, type_a):
 
 
 @pytest.fixture
+def arrow_aa(type_a):
+    return implica.Arrow(type_a, type_a)
+
+
+@pytest.fixture
 def term_ab(arrow_ab):
     return implica.BasicTerm("f", arrow_ab)
 
