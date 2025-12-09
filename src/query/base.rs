@@ -20,7 +20,7 @@ mod create;
 mod delete;
 #[path = "executors/limit.rs"]
 mod limit;
-#[path = "executors/match.rs"]
+#[path = "executors/match/base.rs"]
 mod r#match;
 #[path = "executors/order_by.rs"]
 mod order_by;
@@ -37,9 +37,8 @@ mod with;
 #[derive(Clone, Debug)]
 pub struct Query {
     pub graph: Graph,
-    pub matches: Vec<HashMap<String, QueryResult>>,
+    pub matches: Vec<(HashMap<String, QueryResult>, Context)>,
     pub operations: Vec<QueryOperation>,
-    pub context: Arc<Context>,
 }
 
 #[derive(Clone, Debug)]
@@ -117,7 +116,6 @@ impl Query {
             graph,
             matches: Vec::new(),
             operations: Vec::new(),
-            context: Arc::new(Context::new()),
         }
     }
 
@@ -238,7 +236,7 @@ impl Query {
             return Ok(results);
         }
 
-        for m in self.matches.iter() {
+        for (m, _) in self.matches.iter() {
             let dict = PyDict::new(py);
             for (k, v) in m.iter() {
                 if variables.contains(k) {

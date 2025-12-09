@@ -52,12 +52,12 @@ impl TypeSchema {
         context: Option<Py<PyAny>>,
     ) -> PyResult<bool> {
         let context_obj = match context.as_ref() {
-            Some(c) => Arc::new(python_to_context(c.bind(py))?),
-            None => Arc::new(Context::new()),
+            Some(c) => python_to_context(c.bind(py))?,
+            None => Context::new(),
         };
         let type_obj = python_to_type(r#type.bind(py))?;
 
-        let result = self.matches(&type_obj, context_obj.clone())?;
+        let result = self.matches(&type_obj, &context_obj)?;
 
         if let Some(c) = context {
             let dict = c.bind(py).cast::<PyDict>()?;
@@ -103,11 +103,11 @@ impl TypeSchema {
         Ok(TypeSchema { pattern, compiled })
     }
 
-    pub fn matches(&self, r#type: &Type, context: Arc<Context>) -> Result<bool, ImplicaError> {
+    pub fn matches(&self, r#type: &Type, context: &Context) -> Result<bool, ImplicaError> {
         Self::match_pattern(&self.compiled, r#type, context)
     }
 
-    pub fn as_type(&self, context: Arc<Context>) -> Result<Type, ImplicaError> {
+    pub fn as_type(&self, context: &Context) -> Result<Type, ImplicaError> {
         Self::generate_type(&self.compiled, context)
     }
 
@@ -230,7 +230,7 @@ impl TypeSchema {
     fn match_pattern(
         pattern: &TypePattern,
         r#type: &Type,
-        context: Arc<Context>,
+        context: &Context,
     ) -> Result<bool, ImplicaError> {
         match pattern {
             TypePattern::Wildcard => {
@@ -264,8 +264,8 @@ impl TypeSchema {
                 // Match only if type is an Arrow with matching parts
                 match r#type {
                     Type::Arrow(app) => {
-                        let result = Self::match_pattern(left, &app.left, context.clone())?
-                            && Self::match_pattern(right, &app.right, context.clone())?;
+                        let result = Self::match_pattern(left, &app.left, context)?
+                            && Self::match_pattern(right, &app.right, context)?;
 
                         Ok(result)
                     }
@@ -275,7 +275,7 @@ impl TypeSchema {
 
             TypePattern::Capture { name, pattern } => {
                 // Try to match the inner pattern
-                if Self::match_pattern(pattern, r#type, context.clone())? {
+                if Self::match_pattern(pattern, r#type, context)? {
                     if let Ok(e) = context.get(name) {
                         match e {
                             ContextElement::Type(ref t) => Ok(r#type == t),
@@ -297,7 +297,7 @@ impl TypeSchema {
         }
     }
 
-    fn generate_type(pattern: &TypePattern, context: Arc<Context>) -> Result<Type, ImplicaError> {
+    fn generate_type(pattern: &TypePattern, context: &Context) -> Result<Type, ImplicaError> {
         match pattern {
             TypePattern::Wildcard => Err(ImplicaError::InvalidPattern {
                 pattern: "*".to_string(),
@@ -310,8 +310,8 @@ impl TypeSchema {
                     .to_string(),
             }),
             TypePattern::Arrow { left, right } => {
-                let left_type = Self::generate_type(left, context.clone())?;
-                let right_type = Self::generate_type(right, context.clone())?;
+                let left_type = Self::generate_type(left, context)?;
+                let right_type = Self::generate_type(right, context)?;
 
                 Ok(Type::Arrow(Arrow::new(
                     Arc::new(left_type),

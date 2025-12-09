@@ -10,7 +10,7 @@ impl Query {
 
         let evaluator = Evaluator::new()?;
 
-        for m in self.matches.iter() {
+        for (m, context) in self.matches.iter() {
             let mut scope = Scope::new();
             for (var, qr) in m.iter() {
                 let props = match qr {
@@ -35,7 +35,7 @@ impl Query {
             }
 
             if evaluator.eval(&mut scope, &condition)? {
-                results.push(m.clone());
+                results.push((m.clone(), context.clone()));
             }
         }
 

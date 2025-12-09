@@ -4,6 +4,7 @@ use std::sync::{Arc, RwLock};
 
 use pyo3::prelude::*;
 
+use crate::context::Context;
 use crate::errors::ImplicaError;
 use crate::graph::Node;
 use crate::query::base::{CreateOp, Query, QueryResult};
@@ -13,40 +14,42 @@ use crate::utils::PlaceholderGenerator;
 impl Query {
     pub(super) fn execute_create(&mut self, create_op: CreateOp) -> Result<(), ImplicaError> {
         if self.matches.is_empty() {
-            self.matches.push(HashMap::new());
+            self.matches.push((HashMap::new(), Context::new()));
         }
 
         match create_op {
             CreateOp::Node(node_pattern) => {
-                for m in self.matches.iter_mut() {
+                for (m, ref context) in self.matches.iter_mut() {
                     if let Some(var) = &node_pattern.variable {
                         if m.contains_key(var) {
                             return Err(ImplicaError::VariableAlreadyExists {
                                 name: var.clone(),
-                                context: Some("create node".to_string()),
+                                context: Some(format!("create node {}", line!())),
                             });
                         }
                     }
 
+                    let term = if let Some(term_obj) = &node_pattern.term {
+                        Some(term_obj.clone())
+                    } else if let Some(term_schema) = &node_pattern.term_schema {
+                        Some(Arc::new(term_schema.as_term(context)?))
+                    } else {
+                        None
+                    };
+
                     let r#type = if let Some(type_obj) = &node_pattern.r#type {
                         type_obj.clone()
                     } else if let Some(type_schema) = &node_pattern.type_schema {
-                        Arc::new(type_schema.as_type(self.context.clone())?)
+                        Arc::new(type_schema.as_type(context)?)
+                    } else if let Some(ref trm) = term {
+                        trm.r#type()
                     } else {
                         return Err(ImplicaError::InvalidQuery {
                             message:
                                 "To create a node you must provide either a 'type' or 'type_schema'"
                                     .to_string(),
-                            context: Some("create node".to_string()),
+                            context: Some(format!("create node {}", line!())),
                         });
-                    };
-
-                    let term = if let Some(term_obj) = &node_pattern.term {
-                        Some(term_obj.clone())
-                    } else if let Some(term_schema) = &node_pattern.term_schema {
-                        Some(Arc::new(term_schema.as_term(self.context.clone())?))
-                    } else {
-                        None
                     };
 
                     let mut props = HashMap::new();
@@ -71,12 +74,12 @@ impl Query {
                 }
             }
             CreateOp::Edge(edge_pattern, start, end) => {
-                for m in self.matches.iter_mut() {
+                for (m, context) in self.matches.iter_mut() {
                     if let Some(ref var) = edge_pattern.variable {
                         if m.contains_key(var) {
                             return Err(ImplicaError::VariableAlreadyExists {
                                 name: var.clone(),
-                                context: Some("create edge".to_string()),
+                                context: Some(format!("create edge {}", line!())),
                             });
                         }
                     }
@@ -90,7 +93,7 @@ impl Query {
                                         "start node identifier '{}' matches as an edge.",
                                         &start
                                     ),
-                                    context: Some("create_edge".to_string()),
+                                    context: Some(format!("create edge {}", line!())),
                                 });
                             }
                         }
@@ -100,7 +103,7 @@ impl Query {
                                 "start node identifier '{}' did not appear in the match.",
                                 &start
                             ),
-                            context: Some("create edge".to_string()),
+                            context: Some(format!("create edge {}", line!())),
                         });
                     };
 
@@ -113,7 +116,7 @@ impl Query {
                                         "end node identifier '{}' matches as an edge.",
                                         &start
                                     ),
-                                    context: Some("create_edge".to_string()),
+                                    context: Some(format!("create edge {}", line!())),
                                 });
                             }
                         }
@@ -123,21 +126,21 @@ impl Query {
                                 "end node identifier '{}' did not appear in the match.",
                                 &start
                             ),
-                            context: Some("create edge".to_string()),
+                            context: Some(format!("create edge {}", line!())),
                         });
                     };
 
                     let term = if let Some(term_obj) = &edge_pattern.term {
                         (**term_obj).clone()
                     } else if let Some(term_schema) = &edge_pattern.term_schema {
-                        term_schema.as_term(self.context.clone())?
+                        term_schema.as_term(context)?
                     } else {
                         return Err(ImplicaError::InvalidQuery {
-                        message:
-                            "To create an edge you must provide either a 'term' or 'term_schema'"
-                                .to_string(),
-                        context: Some("create edge".to_string()),
-                    });
+                            message:
+                                "To create an edge you must provide either a 'term' or 'term_schema'"
+                                    .to_string(),
+                            context: Some(format!("create edge {}", line!())),
+                         });
                     };
 
                     let mut props = HashMap::new();
@@ -161,15 +164,15 @@ impl Query {
                 }
             }
             CreateOp::Path(mut path) => {
-                if path.edges.len() != path.nodes.len() + 1 {
+                if path.edges.len() != path.nodes.len() - 1 {
                     return Err(ImplicaError::InvalidQuery {
                         message: format!(
                             "Expected number of edges {} for {} nodes, actual number of edges {}",
-                            path.nodes.len() + 1,
+                            path.nodes.len() - 1,
                             path.nodes.len(),
                             path.edges.len()
                         ),
-                        context: Some("create path".to_string()),
+                        context: Some(format!("create path {}", line!())),
                     });
                 }
 
@@ -177,52 +180,52 @@ impl Query {
 
                 let ph_generator = PlaceholderGenerator::new();
 
-                for np in path.nodes.iter_mut() {
-                    if np.variable.is_none() {
-                        let var_name = ph_generator.next();
-                        np.variable = Some(var_name);
-                    }
+                for (m, context) in self.matches.iter_mut() {
+                    for np in path.nodes.iter_mut() {
+                        if np.variable.is_none() {
+                            let var_name = ph_generator.next();
+                            np.variable = Some(var_name);
+                        }
 
-                    if let Some(ref type_schema) = np.type_schema {
-                        np.r#type = Some(Arc::new(type_schema.as_type(self.context.clone())?));
-                        np.type_schema = None;
-                    }
+                        if let Some(ref type_schema) = np.type_schema {
+                            np.r#type = Some(Arc::new(type_schema.as_type(context)?));
+                            np.type_schema = None;
+                        }
 
-                    if let Some(ref term_schema) = np.term_schema {
-                        np.term = Some(Arc::new(term_schema.as_term(self.context.clone())?));
-                        np.term_schema = None;
-                    }
+                        if let Some(ref term_schema) = np.term_schema {
+                            np.term = Some(Arc::new(term_schema.as_term(context)?));
+                            np.term_schema = None;
+                        }
 
-                    if np.r#type.is_none() {
-                        if let Some(ref term) = np.term {
-                            np.r#type = Some(term.r#type().clone());
+                        if np.r#type.is_none() {
+                            if let Some(ref term) = np.term {
+                                np.r#type = Some(term.r#type().clone());
+                            }
                         }
                     }
-                }
-                for ep in path.edges.iter_mut() {
-                    if ep.variable.is_none() {
-                        let var_name = ph_generator.next();
-                        ep.variable = Some(var_name);
-                    }
+                    for ep in path.edges.iter_mut() {
+                        if ep.variable.is_none() {
+                            let var_name = ph_generator.next();
+                            ep.variable = Some(var_name);
+                        }
 
-                    if let Some(ref type_schema) = ep.type_schema {
-                        ep.r#type = Some(Arc::new(type_schema.as_type(self.context.clone())?));
-                        ep.type_schema = None;
-                    }
+                        if let Some(ref type_schema) = ep.type_schema {
+                            ep.r#type = Some(Arc::new(type_schema.as_type(context)?));
+                            ep.type_schema = None;
+                        }
 
-                    if let Some(ref term_schema) = ep.term_schema {
-                        ep.r#term = Some(Arc::new(term_schema.as_term(self.context.clone())?));
-                        ep.term_schema = None;
-                    }
+                        if let Some(ref term_schema) = ep.term_schema {
+                            ep.r#term = Some(Arc::new(term_schema.as_term(context)?));
+                            ep.term_schema = None;
+                        }
 
-                    if ep.r#type.is_none() {
-                        if let Some(ref term) = ep.term {
-                            ep.r#type = Some(term.r#type().clone());
+                        if ep.r#type.is_none() {
+                            if let Some(ref term) = ep.term {
+                                ep.r#type = Some(term.r#type().clone());
+                            }
                         }
                     }
-                }
 
-                for m in self.matches.iter_mut() {
                     for np in path.nodes.iter_mut() {
                         if let Some(ref var) = np.variable {
                             if let Some(qr) = m.get(var) {
@@ -235,7 +238,10 @@ impl Query {
                                                     ImplicaError::LockError {
                                                         rw: "read".to_string(),
                                                         message: e.to_string(),
-                                                        context: Some("execute delete".to_string()),
+                                                        context: Some(format!(
+                                                            "create path {}",
+                                                            line!()
+                                                        )),
                                                     }
                                                 })?)
                                                 .clone(),
@@ -247,7 +253,7 @@ impl Query {
                                     QueryResult::Edge(_) => {
                                         return Err(ImplicaError::InvalidQuery {
                                             message: format!("Variable '{}' previously assigned to an edge has been assigned to a node", var),
-                                            context: Some("create path".to_string())
+                                            context: Some(format!("create path {}", line!()))
                                         });
                                     }
                                 }
@@ -266,7 +272,7 @@ impl Query {
                                     QueryResult::Node(_) => {
                                         return Err(ImplicaError::InvalidQuery {
                                             message: format!("Variable '{}' previously assigned to a node has been assigned to an edge", var),
-                                            context: Some("create path".to_string())
+                                            context: Some(format!("create path {}", line!()))
                                         });
                                     }
                                 }
@@ -293,7 +299,10 @@ impl Query {
                                                 message:
                                                     "The type of an edge must be an arrow type."
                                                         .to_string(),
-                                                context: Some("create path node".to_string()),
+                                                context: Some(format!(
+                                                    "create path node {}",
+                                                    line!()
+                                                )),
                                             });
                                         }
                                     } else {
@@ -303,7 +312,7 @@ impl Query {
                                     return Err(ImplicaError::IndexOutOfRange {
                                         idx,
                                         length: nodes_len - 1,
-                                        context: Some("create path node".to_string()),
+                                        context: Some(format!("create path node {}", line!())),
                                     });
                                 }
                             } else {
@@ -323,7 +332,10 @@ impl Query {
                                             return Err(ImplicaError::IndexOutOfRange {
                                                 idx,
                                                 length: nodes_len,
-                                                context: Some("create path node".to_string()),
+                                                context: Some(format!(
+                                                    "create path node {}",
+                                                    line!()
+                                                )),
                                             });
                                         }
                                     } else {
@@ -333,7 +345,7 @@ impl Query {
                                     return Err(ImplicaError::IndexOutOfRange {
                                         idx,
                                         length: nodes_len - 1,
-                                        context: Some("create path node".to_string()),
+                                        context: Some(format!("create path node {}", line!())),
                                     });
                                 }
                             } else {
@@ -350,7 +362,10 @@ impl Query {
                                                 message:
                                                     "The type of an edge must be an arrow type."
                                                         .to_string(),
-                                                context: Some("create path node".to_string()),
+                                                context: Some(format!(
+                                                    "create path node {}",
+                                                    line!()
+                                                )),
                                             });
                                         }
                                     } else {
@@ -360,7 +375,7 @@ impl Query {
                                     return Err(ImplicaError::IndexOutOfRange {
                                         idx,
                                         length: nodes_len - 1,
-                                        context: Some("create path node".to_string()),
+                                        context: Some(format!("create path node {}", line!())),
                                     });
                                 }
                             } else {
@@ -380,7 +395,10 @@ impl Query {
                                             return Err(ImplicaError::IndexOutOfRange {
                                                 idx,
                                                 length: nodes_len,
-                                                context: Some("create path node".to_string()),
+                                                context: Some(format!(
+                                                    "create path node {}",
+                                                    line!()
+                                                )),
                                             });
                                         }
                                     } else {
@@ -390,7 +408,7 @@ impl Query {
                                     return Err(ImplicaError::IndexOutOfRange {
                                         idx,
                                         length: nodes_len - 1,
-                                        context: Some("create path node".to_string()),
+                                        context: Some(format!("create path node {}", line!())),
                                     });
                                 }
                             } else {
@@ -442,7 +460,7 @@ impl Query {
                                 return Err(ImplicaError::IndexOutOfRange {
                                     idx,
                                     length: nodes_len,
-                                    context: Some("create path node".to_string()),
+                                    context: Some(format!("create path node {}", line!())),
                                 });
                             }
                         } else {
@@ -452,7 +470,7 @@ impl Query {
                                     return Err(ImplicaError::IndexOutOfRange {
                                         idx,
                                         length: nodes_len,
-                                        context: Some("create path node".to_string()),
+                                        context: Some(format!("create path node {}", line!())),
                                     });
                                 }
                             };
@@ -461,9 +479,9 @@ impl Query {
                                 Some(n) => n,
                                 None => {
                                     return Err(ImplicaError::IndexOutOfRange {
-                                        idx,
+                                        idx: idx + 1,
                                         length: nodes_len,
-                                        context: Some("create path node".to_string()),
+                                        context: Some(format!("create path node {}", line!())),
                                     });
                                 }
                             };
@@ -508,7 +526,7 @@ impl Query {
                                 return Err(ImplicaError::IndexOutOfRange {
                                     idx,
                                     length: nodes_len,
-                                    context: Some("create path edge".to_string()),
+                                    context: Some(format!("create path edge {}", line!())),
                                 });
                             }
                         }
@@ -526,7 +544,7 @@ impl Query {
                                     QueryResult::Edge(_) => {
                                         return Err(ImplicaError::InvalidQuery {
                                             message: format!("Variable '{}' previously assigned to an edge has been assigned to a node", var),
-                                            context: Some("create path".to_string())
+                                            context: Some(format!("create path node {}", line!()))
                                         });
                                     }
                                 }
@@ -542,7 +560,7 @@ impl Query {
                                 message:
                                     "could not resolve the type of a node from the provided pattern"
                                         .to_string(),
-                                context: Some("create path".to_string()),
+                                context: Some(format!("create path {}", line!())),
                             });
                             }
                         };
@@ -570,7 +588,7 @@ impl Query {
                                         existing.read().map_err(|e| ImplicaError::LockError {
                                             rw: "read".to_string(),
                                             message: e.to_string(),
-                                            context: Some("execute create".to_string()),
+                                            context: Some(format!("create path {}", line!())),
                                         })?;
 
                                     node = existing.clone();
@@ -599,7 +617,7 @@ impl Query {
                             None => {
                                 return Err(ImplicaError::InvalidQuery {
                                     message: "could not resolve the term of an edge from the provided pattern".to_string(),
-                                    context: Some("create path".to_string())
+                                    context: Some(format!("create path node {}", line!()))
                                 });
                             }
                         };
@@ -618,7 +636,7 @@ impl Query {
                                 return Err(ImplicaError::IndexOutOfRange {
                                     idx,
                                     length: nodes_len,
-                                    context: Some("create path".to_string()),
+                                    context: Some(format!("create path {}", line!())),
                                 });
                             }
                         };
@@ -629,7 +647,7 @@ impl Query {
                                 return Err(ImplicaError::IndexOutOfRange {
                                     idx: idx + 1,
                                     length: nodes_len,
-                                    context: Some("create path".to_string()),
+                                    context: Some(format!("create path {}", line!())),
                                 });
                             }
                         };

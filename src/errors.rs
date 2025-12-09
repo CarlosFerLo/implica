@@ -81,10 +81,6 @@ pub enum ImplicaError {
         length: usize,
         context: Option<String>,
     },
-    MissingIdentifier {
-        message: String,
-        context: Option<String>,
-    },
     EvaluationError {
         message: String,
     },
@@ -215,13 +211,6 @@ impl Display for ImplicaError {
                 }
                 Ok(())
             }
-            ImplicaError::MissingIdentifier { message, context } => {
-                write!(f, "Missing Identifier: '{}'", message)?;
-                if let Some(context) = context {
-                    write!(f, " ({})", context)?;
-                }
-                Ok(())
-            }
             ImplicaError::EvaluationError { message } => {
                 write!(f, "Evaluation Error: '{}'", message)
             }
@@ -290,9 +279,6 @@ impl From<ImplicaError> for PyErr {
                 exceptions::PyValueError::new_err(err.to_string())
             }
             ImplicaError::IndexOutOfRange { .. } => {
-                exceptions::PyIndexError::new_err(err.to_string())
-            }
-            ImplicaError::MissingIdentifier { .. } => {
                 exceptions::PyIndexError::new_err(err.to_string())
             }
             ImplicaError::EvaluationError { .. } => {

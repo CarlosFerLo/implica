@@ -3,7 +3,7 @@ use crate::query::base::{Query, QueryResult};
 
 impl Query {
     pub(super) fn execute_delete(&mut self, vars: Vec<String>) -> Result<(), ImplicaError> {
-        for m in self.matches.iter_mut() {
+        for (m, _) in self.matches.iter_mut() {
             for var in vars.iter() {
                 if let Some(qr) = m.remove(var) {
                     match qr {

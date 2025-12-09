@@ -12,7 +12,7 @@ impl Query {
         props: HashMap<String, Py<PyAny>>,
         overwrite: bool,
     ) -> Result<(), ImplicaError> {
-        for m in self.matches.iter() {
+        for (m, _) in self.matches.iter() {
             if let Some(qr) = m.get(&var) {
                 match qr {
                     QueryResult::Node(n) => {

@@ -143,11 +143,11 @@ impl NodePattern {
     #[pyo3(name="matches", signature=(node, context=None))]
     pub fn py_matches(&self, py: Python, node: Node, context: Option<Py<PyAny>>) -> PyResult<bool> {
         let context_obj = match context.as_ref() {
-            Some(c) => Arc::new(python_to_context(c.bind(py))?),
-            None => Arc::new(Context::new()),
+            Some(c) => python_to_context(c.bind(py))?,
+            None => Context::new(),
         };
 
-        let result = self.matches(&node, context_obj.clone())?;
+        let result = self.matches(&node, &context_obj)?;
 
         if let Some(c) = context {
             let dict = c.bind(py).cast::<PyDict>()?;
@@ -266,7 +266,7 @@ impl NodePattern {
         })
     }
 
-    pub fn matches(&self, node: &Node, context: Arc<Context>) -> Result<bool, ImplicaError> {
+    pub fn matches(&self, node: &Node, context: &Context) -> Result<bool, ImplicaError> {
         match &self.compiled_type_matcher {
             CompiledTypeNodeMatcher::Any => {}
             CompiledTypeNodeMatcher::ExactType(type_obj) => {
@@ -275,7 +275,7 @@ impl NodePattern {
                 }
             }
             CompiledTypeNodeMatcher::SchemaType(schema) => {
-                if !schema.matches(&node.r#type, context.clone())? {
+                if !schema.matches(&node.r#type, context)? {
                     return Ok(false);
                 }
             }
@@ -304,7 +304,7 @@ impl NodePattern {
                         message: e.to_string(),
                         context: Some("node pattern matches".to_string()),
                     })?;
-                    if !term_schema.matches(&term, context.clone())? {
+                    if !term_schema.matches(&term, context)? {
                         return Ok(false);
                     }
                 } else {

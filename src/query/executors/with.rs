@@ -5,7 +5,7 @@ use crate::query::base::Query;
 
 impl Query {
     pub(super) fn execute_with(&mut self, vars: Vec<String>) -> Result<(), ImplicaError> {
-        for m in self.matches.iter_mut() {
+        for (m, _) in self.matches.iter_mut() {
             let mut dict = HashMap::new();
 
             for v in vars.iter() {

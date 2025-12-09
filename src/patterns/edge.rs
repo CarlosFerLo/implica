@@ -14,7 +14,7 @@ use crate::typing::{python_to_term, python_to_type, term_to_python, type_to_pyth
 use crate::utils::validate_variable_name;
 
 #[derive(Clone, Debug, PartialEq)]
-enum CompiledDirection {
+pub(crate) enum CompiledDirection {
     Forward,
     Backward,
     Any,
@@ -64,7 +64,7 @@ pub struct EdgePattern {
     /// Compiled matcher for efficient term checking
     compiled_term_matcher: CompiledTermEdgeMatcher,
     compiled_type_matcher: CompiledTypeEdgeMatcher,
-    compiled_direction: CompiledDirection,
+    pub(crate) compiled_direction: CompiledDirection,
     pub properties: HashMap<String, Py<PyAny>>,
 
     // Keep these for backward compatibility and introspection
@@ -184,7 +184,7 @@ impl EdgePattern {
             None => Arc::new(Context::new()),
         };
 
-        let result = self.matches(&edge, context_obj.clone())?;
+        let result = self.matches(&edge, &context_obj)?;
 
         if let Some(c) = context {
             let dict = c.bind(py).cast::<PyDict>()?;
@@ -320,7 +320,7 @@ impl EdgePattern {
         }
     }
 
-    pub fn matches(&self, edge: &Edge, context: Arc<Context>) -> PyResult<bool> {
+    pub fn matches(&self, edge: &Edge, context: &Context) -> PyResult<bool> {
         // Check term using compiled matcher (most efficient path)
         match &self.compiled_type_matcher {
             CompiledTypeEdgeMatcher::Any => {
@@ -336,7 +336,7 @@ impl EdgePattern {
             CompiledTypeEdgeMatcher::SchemaTerm(type_schema) => {
                 let edge_term = edge.term.clone();
 
-                if !type_schema.matches(&edge_term.r#type(), context.clone())? {
+                if !type_schema.matches(&edge_term.r#type(), context)? {
                     return Ok(false);
                 }
             }
@@ -354,7 +354,7 @@ impl EdgePattern {
             CompiledTermEdgeMatcher::SchemaTerm(term_schema) => {
                 let edge_term = edge.term.clone();
 
-                if !term_schema.matches(&edge_term, context.clone())? {
+                if !term_schema.matches(&edge_term, context)? {
                     return Ok(false);
                 }
             }

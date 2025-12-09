@@ -85,3 +85,37 @@ def edge_ba(term_ba, node_b, node_a):
 @pytest.fixture
 def edge_aa(term_aa, node_a):
     return implica.Edge(term_aa, node_a, node_a)
+
+
+@pytest.fixture
+def graph_empty():
+    return implica.Graph()
+
+
+@pytest.fixture
+def graph_with_nodes(type_a, term_a, type_b, arrow_ab, arrow_ba):
+    graph = implica.Graph()
+    graph.query().create(node="N1", type=type_a, term=term_a).create(node="N2", type=type_b).create(
+        node="N3", type=arrow_ab
+    ).create(node="N4", type=arrow_ba).execute()
+    return graph
+
+
+@pytest.fixture
+def graph_with_edges(
+    type_a,
+    type_b,
+    arrow_ab,
+    term_ab,
+    arrow_ba,
+    term_ba,
+):
+    graph = implica.Graph()
+    graph.query().create(node="N1", type=type_a).create(node="N2", type=type_b).create(
+        node="N3", type=arrow_ab, term=term_ab
+    ).create(node="N4", type=arrow_ba, term=term_ba).create(
+        edge="E1", start="N1", end="N2", type=arrow_ab, term=term_ab
+    ).create(
+        edge="E2", start="N2", end="N1", type=arrow_ba, term=term_ba
+    ).execute()
+    return graph

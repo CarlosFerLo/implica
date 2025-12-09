@@ -30,7 +30,7 @@ impl Query {
         }
 
         Python::attach(|py| {
-            self.matches.sort_by(|a, b| {
+            self.matches.sort_by(|(a, _), (b, _)| {
                 for (var, prop) in &props {
                     let val_a = match a.get(var) {
                         Some(qr) => match qr {

@@ -1,7 +1,7 @@
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
 
-use std::{fmt::Display, sync::Arc};
+use std::fmt::Display;
 
 use crate::context::{python_to_context, Context, ContextElement};
 use crate::errors::ImplicaError;
@@ -47,12 +47,12 @@ impl TermSchema {
         context: Option<Py<PyAny>>,
     ) -> PyResult<bool> {
         let context_obj = match context.as_ref() {
-            Some(c) => Arc::new(python_to_context(c.bind(py))?),
-            None => Arc::new(Context::new()),
+            Some(c) => python_to_context(c.bind(py))?,
+            None => Context::new(),
         };
         let term_obj = python_to_term(term.bind(py))?;
 
-        let result = self.matches(&term_obj, context_obj.clone())?;
+        let result = self.matches(&term_obj, &context_obj)?;
 
         if let Some(c) = context {
             let dict = c.bind(py).cast::<PyDict>()?;
@@ -98,11 +98,11 @@ impl TermSchema {
         Ok(TermSchema { pattern, compiled })
     }
 
-    pub fn matches(&self, term: &Term, context: Arc<Context>) -> Result<bool, ImplicaError> {
+    pub fn matches(&self, term: &Term, context: &Context) -> Result<bool, ImplicaError> {
         Self::match_pattern(&self.compiled, term, context)
     }
 
-    pub fn as_term(&self, context: Arc<Context>) -> Result<Term, ImplicaError> {
+    pub fn as_term(&self, context: &Context) -> Result<Term, ImplicaError> {
         Self::generate_term(&self.compiled, context)
     }
 
@@ -151,7 +151,7 @@ impl TermSchema {
     fn match_pattern(
         pattern: &TermPattern,
         term: &Term,
-        context: Arc<Context>,
+        context: &Context,
     ) -> Result<bool, ImplicaError> {
         match pattern {
             TermPattern::Wildcard => {
@@ -178,13 +178,11 @@ impl TermSchema {
                 // Term must be an application
                 if let Some(app) = term.as_application() {
                     // Match function and argument recursively
-                    let function_matches =
-                        Self::match_pattern(function, &app.function, context.clone())?;
+                    let function_matches = Self::match_pattern(function, &app.function, context)?;
                     if !function_matches {
                         return Ok(false);
                     }
-                    let argument_matches =
-                        Self::match_pattern(argument, &app.argument, context.clone())?;
+                    let argument_matches = Self::match_pattern(argument, &app.argument, context)?;
                     Ok(argument_matches)
                 } else {
                     Ok(false)
@@ -193,7 +191,7 @@ impl TermSchema {
         }
     }
 
-    fn generate_term(pattern: &TermPattern, context: Arc<Context>) -> Result<Term, ImplicaError> {
+    fn generate_term(pattern: &TermPattern, context: &Context) -> Result<Term, ImplicaError> {
         match pattern {
             TermPattern::Wildcard => Err(ImplicaError::InvalidPattern {
                 pattern: "*".to_string(),
@@ -201,8 +199,8 @@ impl TermSchema {
                     .to_string(),
             }),
             TermPattern::Application { function, argument } => {
-                let function_term = Self::generate_term(function, context.clone())?;
-                let argument_term = Self::generate_term(argument, context.clone())?;
+                let function_term = Self::generate_term(function, context)?;
+                let argument_term = Self::generate_term(argument, context)?;
 
                 Ok(Term::Application(Application::new(
                     function_term,

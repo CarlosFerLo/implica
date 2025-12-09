@@ -10,3 +10,5 @@ pub use node::NodePattern;
 pub use path::PathPattern;
 pub use term_schema::TermSchema;
 pub use type_schema::TypeSchema;
+
+pub(crate) use edge::CompiledDirection;
