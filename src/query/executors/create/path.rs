@@ -10,13 +10,11 @@ use crate::{
     context::Context,
     errors::ImplicaError,
     graph::{Graph, Node},
-    patterns::{EdgePattern, NodePattern, PathPattern},
+    patterns::{CompiledDirection, EdgePattern, NodePattern, PathPattern},
     query::base::{Query, QueryResult},
     typing::{Arrow, Type},
     utils::PlaceholderGenerator,
 };
-
-// TODO: add support for non forward edges
 
 impl Query {
     pub(super) fn execute_create_path(
@@ -34,8 +32,6 @@ impl Query {
                 context: Some(format!("create path {}", line!())),
             });
         }
-
-        let nodes_len = path.nodes.len();
 
         let ph_generator = PlaceholderGenerator::new();
 
@@ -202,7 +198,13 @@ impl Query {
             if let Some(left_edge) = edges.get(idx - 1) {
                 if let Some(ref edge_type) = left_edge.r#type {
                     if let Some(arr) = edge_type.as_arrow() {
-                        Some(arr.right.clone())
+                        match left_edge.compiled_direction {
+                            CompiledDirection::Forward => Some(arr.right.clone()),
+                            CompiledDirection::Backward => Some(arr.left.clone()),
+                            CompiledDirection::Any => todo!(
+                                "the 'any' direction of edges is not supported yet for create."
+                            ),
+                        }
                     } else {
                         return Err(ImplicaError::InvalidQuery {
                             message: "The type of an edge must be an arrow type.".to_string(),
@@ -228,7 +230,27 @@ impl Query {
                 if let Some(ref edge_term) = left_edge.term {
                     if let Some(left_node) = nodes.get(idx - 1) {
                         if let Some(ref left_node_term) = left_node.term {
-                            Some(edge_term.apply(left_node_term)?)
+                            match left_edge.compiled_direction {
+                                CompiledDirection::Forward => {
+                                    Some(Arc::new(edge_term.apply(left_node_term)?))
+                                }
+                                CompiledDirection::Backward => {
+                                    if let Some(left_node_term) = left_node_term.as_application() {
+                                        if left_node_term.function.as_ref() == edge_term.as_ref() {
+                                            Some(left_node_term.argument.clone())
+                                        } else {
+                                            None
+                                        }
+                                    } else {
+                                        None
+                                    }
+                                }
+                                CompiledDirection::Any => {
+                                    todo!(
+                                "the 'any' direction of edges is not supported yet for create."
+                            )
+                                }
+                            }
                         } else {
                             None
                         }
@@ -257,7 +279,13 @@ impl Query {
             if let Some(right_edge) = edges.get(idx) {
                 if let Some(ref edge_type) = right_edge.r#type {
                     if let Some(arr) = edge_type.as_arrow() {
-                        Some(arr.left.clone())
+                        match right_edge.compiled_direction {
+                            CompiledDirection::Forward => Some(arr.left.clone()),
+                            CompiledDirection::Backward => Some(arr.right.clone()),
+                            CompiledDirection::Any => todo!(
+                                "the 'any' direction of edges is not supported yet for create."
+                            ),
+                        }
                     } else {
                         return Err(ImplicaError::InvalidQuery {
                             message: "The type of an edge must be an arrow type.".to_string(),
@@ -283,14 +311,24 @@ impl Query {
                 if let Some(ref edge_term) = right_edge.term {
                     if let Some(right_node) = nodes.get(idx + 1) {
                         if let Some(ref right_node_term) = right_node.term {
-                            if let Some(app) = right_node_term.as_application() {
-                                if &app.function == edge_term {
-                                    Some(app.argument.clone())
-                                } else {
-                                    None
+                            match right_edge.compiled_direction {
+                                CompiledDirection::Forward => {
+                                    if let Some(app) = right_node_term.as_application() {
+                                        if &app.function == edge_term {
+                                            Some(app.argument.clone())
+                                        } else {
+                                            None
+                                        }
+                                    } else {
+                                        None
+                                    }
                                 }
-                            } else {
-                                None
+                                CompiledDirection::Backward => {
+                                    Some(Arc::new(edge_term.apply(right_node_term)?))
+                                }
+                                CompiledDirection::Any => todo!(
+                                    "the 'any' direction of edges is not supported yet for create."
+                                ),
                             }
                         } else {
                             None
@@ -331,7 +369,7 @@ impl Query {
 
             if node.term.is_none() {
                 if let Some(term_result) = left_edge_term_update {
-                    node.term = Some(Arc::new(term_result));
+                    node.term = Some(term_result);
                     changed = true;
                 } else if let Some(term_result) = right_edge_term_update {
                     node.term = Some(term_result);
@@ -354,6 +392,16 @@ impl Query {
         edges: &mut [EdgePattern],
         idx: usize,
     ) -> Result<bool, ImplicaError> {
+        let compiled_direction = if let Some(edge) = edges.get(idx) {
+            edge.compiled_direction.clone()
+        } else {
+            return Err(ImplicaError::IndexOutOfRange {
+                idx,
+                length: nodes.len(),
+                context: Some(format!("create path edge {}", line!())),
+            });
+        };
+
         let left_node = match nodes.get(idx) {
             Some(n) => n,
             None => {
@@ -377,25 +425,50 @@ impl Query {
         };
 
         let type_update = match (&left_node.r#type, &right_node.r#type) {
-            (Some(left_type), Some(right_type)) => Some(Arc::new(Type::Arrow(Arrow::new(
-                left_type.clone(),
-                right_type.clone(),
-            )))),
+            (Some(left_type), Some(right_type)) => match compiled_direction {
+                CompiledDirection::Forward => Some(Arc::new(Type::Arrow(Arrow::new(
+                    left_type.clone(),
+                    right_type.clone(),
+                )))),
+                CompiledDirection::Backward => Some(Arc::new(Type::Arrow(Arrow::new(
+                    right_type.clone(),
+                    left_type.clone(),
+                )))),
+                CompiledDirection::Any => {
+                    todo!("the 'any' direction of edges is not supported yet for create.")
+                }
+            },
             _ => None,
         };
 
         let term_update = match (&left_node.term, &right_node.term) {
-            (Some(left_term), Some(right_term)) => {
-                if let Some(right_term) = right_term.as_application() {
-                    if left_term.as_ref() == right_term.argument.as_ref() {
-                        Some(right_term.function.clone())
+            (Some(left_term), Some(right_term)) => match compiled_direction {
+                CompiledDirection::Forward => {
+                    if let Some(right_term) = right_term.as_application() {
+                        if left_term.as_ref() == right_term.argument.as_ref() {
+                            Some(right_term.function.clone())
+                        } else {
+                            None
+                        }
                     } else {
                         None
                     }
-                } else {
-                    None
                 }
-            }
+                CompiledDirection::Backward => {
+                    if let Some(left_term) = left_term.as_application() {
+                        if right_term.as_ref() == left_term.argument.as_ref() {
+                            Some(left_term.function.clone())
+                        } else {
+                            None
+                        }
+                    } else {
+                        None
+                    }
+                }
+                CompiledDirection::Any => {
+                    todo!("the 'any' direction of edges is not supported yet for create.")
+                }
+            },
             _ => None,
         };
 
@@ -561,7 +634,17 @@ impl Query {
                 }
             };
 
-            let edge = graph.add_edge(term, start, end, Some(Arc::new(RwLock::new(props))))?;
+            let edge = match ep.compiled_direction {
+                CompiledDirection::Forward => {
+                    graph.add_edge(term, start, end, Some(Arc::new(RwLock::new(props))))?
+                }
+                CompiledDirection::Backward => {
+                    graph.add_edge(term, end, start, Some(Arc::new(RwLock::new(props))))?
+                }
+                CompiledDirection::Any => {
+                    todo!("the 'any' direction of edges is not supported yet for create.")
+                }
+            };
 
             if let Some(ref var) = ep.variable {
                 r#match.insert(var.clone(), QueryResult::Edge(edge));
