@@ -29,9 +29,9 @@ impl Query {
                         context: Some("execute match node".to_string()),
                     })?;
 
-                    let context = Context::new();
+                    let mut context = Context::new();
 
-                    if node_pattern.matches(&node, &context)? {
+                    if node_pattern.matches(&node, &mut context)? {
                         let dict = HashMap::from([(var.clone(), QueryResult::Node(node.clone()))]);
                         self.matches.push((dict, context));
                     }
@@ -40,7 +40,7 @@ impl Query {
                 let mut results = Vec::new();
                 let mut contained = false;
 
-                for (m, context) in self.matches.iter() {
+                for (ref m, context) in self.matches.iter_mut() {
                     if let Some(old) = m.get(var) {
                         match old {
                             QueryResult::Node(old_node) => {
@@ -84,8 +84,8 @@ impl Query {
                         })?;
 
                         for (m, context) in self.matches.iter() {
-                            let context = context.clone();
-                            if node_pattern.matches(&node, &context)? {
+                            let mut context = context.clone();
+                            if node_pattern.matches(&node, &mut context)? {
                                 let mut dict = m.clone();
 
                                 dict.insert(var.clone(), QueryResult::Node(node.clone()));

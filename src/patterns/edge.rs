@@ -179,26 +179,19 @@ impl EdgePattern {
 
     #[pyo3(name = "matches", signature=(edge, context=None))]
     pub fn py_matches(&self, py: Python, edge: Edge, context: Option<Py<PyAny>>) -> PyResult<bool> {
-        let context_obj = match context.as_ref() {
-            Some(c) => Arc::new(python_to_context(c.bind(py))?),
-            None => Arc::new(Context::new()),
+        let mut context_obj = match context.as_ref() {
+            Some(c) => python_to_context(c.bind(py))?,
+            None => Context::new(),
         };
 
-        let result = self.matches(&edge, &context_obj)?;
+        let result = self.matches(&edge, &mut context_obj)?;
 
         if let Some(c) = context {
             let dict = c.bind(py).cast::<PyDict>()?;
 
             dict.clear();
-            let content = context_obj
-                .content
-                .read()
-                .map_err(|e| ImplicaError::LockError {
-                    rw: "read".to_string(),
-                    message: e.to_string(),
-                    context: Some("py matches type schema".to_string()),
-                })?;
-            for (k, v) in content.iter() {
+
+            for (k, v) in context_obj.content.iter() {
                 let t_obj = match v {
                     ContextElement::Type(t) => type_to_python(py, t)?,
                     ContextElement::Term(t) => term_to_python(py, t)?,
@@ -320,7 +313,7 @@ impl EdgePattern {
         }
     }
 
-    pub fn matches(&self, edge: &Edge, context: &Context) -> PyResult<bool> {
+    pub fn matches(&self, edge: &Edge, context: &mut Context) -> PyResult<bool> {
         // Check term using compiled matcher (most efficient path)
         match &self.compiled_type_matcher {
             CompiledTypeEdgeMatcher::Any => {

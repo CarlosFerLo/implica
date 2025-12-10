@@ -31,9 +31,9 @@ impl Query {
                     context: Some("execute match edge".to_string()),
                 })?;
 
-                let context = Context::new();
+                let mut context = Context::new();
 
-                if edge_pattern.matches(&edge, &context)? {
+                if edge_pattern.matches(&edge, &mut context)? {
                     for dict in Self::generate_full_edge_match_dict(
                         &edge,
                         &edge_pattern,
@@ -50,7 +50,7 @@ impl Query {
             let mut results = Vec::new();
             let mut contained = false;
 
-            for (m, context) in self.matches.iter() {
+            for (ref m, context) in self.matches.iter_mut() {
                 for edge_lock in edges.values() {
                     let edge = edge_lock.read().map_err(|e| ImplicaError::LockError {
                         rw: "read".to_string(),
@@ -145,9 +145,9 @@ impl Query {
                             context: Some("execute match edge".to_string()),
                         })?;
 
-                        let context = context.clone();
+                        let mut context = context.clone();
 
-                        if edge_pattern.matches(&edge, &context)? {
+                        if edge_pattern.matches(&edge, &mut context)? {
                             for dict in Self::generate_full_edge_match_dict(
                                 &edge,
                                 &edge_pattern,

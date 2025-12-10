@@ -12,7 +12,7 @@ impl Query {
             self.matches.push((HashMap::new(), Context::new()));
         }
 
-        for (_, context) in self.matches.iter() {
+        for (_, context) in self.matches.iter_mut() {
             match &add_op {
                 AddOp::Type(var, r#type) => {
                     context.add_type(var.clone(), r#type.clone())?;

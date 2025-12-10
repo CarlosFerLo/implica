@@ -51,27 +51,20 @@ impl TypeSchema {
         r#type: Py<PyAny>,
         context: Option<Py<PyAny>>,
     ) -> PyResult<bool> {
-        let context_obj = match context.as_ref() {
+        let mut context_obj = match context.as_ref() {
             Some(c) => python_to_context(c.bind(py))?,
             None => Context::new(),
         };
         let type_obj = python_to_type(r#type.bind(py))?;
 
-        let result = self.matches(&type_obj, &context_obj)?;
+        let result = self.matches(&type_obj, &mut context_obj)?;
 
         if let Some(c) = context {
             let dict = c.bind(py).cast::<PyDict>()?;
 
             dict.clear();
-            let content = context_obj
-                .content
-                .read()
-                .map_err(|e| ImplicaError::LockError {
-                    rw: "read".to_string(),
-                    message: e.to_string(),
-                    context: Some("py matches type schema".to_string()),
-                })?;
-            for (k, v) in content.iter() {
+
+            for (k, v) in context_obj.content.iter() {
                 let t_obj = match v {
                     ContextElement::Type(t) => type_to_python(py, t)?,
                     ContextElement::Term(t) => term_to_python(py, t)?,
@@ -103,7 +96,7 @@ impl TypeSchema {
         Ok(TypeSchema { pattern, compiled })
     }
 
-    pub fn matches(&self, r#type: &Type, context: &Context) -> Result<bool, ImplicaError> {
+    pub fn matches(&self, r#type: &Type, context: &mut Context) -> Result<bool, ImplicaError> {
         Self::match_pattern(&self.compiled, r#type, context)
     }
 
@@ -230,7 +223,7 @@ impl TypeSchema {
     fn match_pattern(
         pattern: &TypePattern,
         r#type: &Type,
-        context: &Context,
+        context: &mut Context,
     ) -> Result<bool, ImplicaError> {
         match pattern {
             TypePattern::Wildcard => {

@@ -307,8 +307,8 @@ impl Graph {
                 message: e.to_string(),
                 context: Some("remove edges matching".to_string()),
             })?;
-            let context = Context::new();
-            if pattern.matches(&edge, &context)? {
+            let mut context = Context::new();
+            if pattern.matches(&edge, &mut context)? {
                 remove_uids.push(edge.uid().to_string());
             }
         }
