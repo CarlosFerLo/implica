@@ -33,7 +33,7 @@ impl Query {
 
                 let mut context = Context::new();
 
-                if edge_pattern.matches(&edge, &mut context)? {
+                if edge_pattern.matches(&edge, &mut context, self.graph.constants.clone())? {
                     for dict in Self::generate_full_edge_match_dict(
                         &edge,
                         &edge_pattern,
@@ -58,7 +58,7 @@ impl Query {
                         context: Some("execute match edge".to_string()),
                     })?;
 
-                    if edge_pattern.matches(&edge, context)? {
+                    if edge_pattern.matches(&edge, context, self.graph.constants.clone())? {
                         let mut dict = m.clone();
 
                         if let Some(ref var) = edge_pattern.variable {
@@ -147,7 +147,11 @@ impl Query {
 
                         let mut context = context.clone();
 
-                        if edge_pattern.matches(&edge, &mut context)? {
+                        if edge_pattern.matches(
+                            &edge,
+                            &mut context,
+                            self.graph.constants.clone(),
+                        )? {
                             for dict in Self::generate_full_edge_match_dict(
                                 &edge,
                                 &edge_pattern,

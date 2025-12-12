@@ -20,11 +20,13 @@ impl Query {
         }
 
         match create_op {
-            CreateOp::Node(node_pattern) => self.execute_create_node(node_pattern),
-            CreateOp::Edge(edge_pattern, start_var, end_var) => {
-                self.execute_create_edge(edge_pattern, start_var, end_var)
+            CreateOp::Node(node_pattern, is_merge) => {
+                self.execute_create_node(node_pattern, is_merge)
             }
-            CreateOp::Path(path) => self.execute_create_path(path),
+            CreateOp::Edge(edge_pattern, start_var, end_var, is_merge) => {
+                self.execute_create_edge(edge_pattern, start_var, end_var, is_merge)
+            }
+            CreateOp::Path(path, is_merge) => self.execute_create_path(path, is_merge),
         }
     }
 }

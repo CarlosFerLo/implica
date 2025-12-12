@@ -14,6 +14,7 @@ impl Query {
     pub(super) fn execute_create_node(
         &mut self,
         node_pattern: NodePattern,
+        is_merge: bool,
     ) -> Result<(), ImplicaError> {
         for (m, ref context) in self.matches.iter_mut() {
             if let Some(var) = &node_pattern.variable {
@@ -28,7 +29,9 @@ impl Query {
             let term = if let Some(term_obj) = &node_pattern.term {
                 Some(term_obj.clone())
             } else if let Some(term_schema) = &node_pattern.term_schema {
-                Some(Arc::new(term_schema.as_term(context)?))
+                Some(Arc::new(
+                    term_schema.as_term(context, self.graph.constants.clone())?,
+                ))
             } else {
                 None
             };
@@ -55,13 +58,38 @@ impl Query {
                 }
             });
 
-            let node = Node::new(
+            let mut node = Node::new(
                 r#type,
                 term.map(|t| Arc::new(RwLock::new((*t).clone()))),
                 Some(props),
             )?;
 
-            self.graph.add_node(&node)?;
+            match self.graph.add_node(&node) {
+                Ok(_) => (),
+                Err(e) => match &e {
+                    ImplicaError::NodeAlreadyExists {
+                        message: _,
+                        existing,
+                        new: _,
+                    } => {
+                        if is_merge {
+                            node = existing
+                                .read()
+                                .map_err(|e| ImplicaError::LockError {
+                                    rw: "read".to_string(),
+                                    message: e.to_string(),
+                                    context: Some("execute create node (merge mode)".to_string()),
+                                })?
+                                .clone();
+                        } else {
+                            return Err(e);
+                        }
+                    }
+                    _ => {
+                        return Err(e);
+                    }
+                },
+            }
 
             if let Some(var) = &node_pattern.variable {
                 m.insert(var.clone(), QueryResult::Node(node));

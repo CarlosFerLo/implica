@@ -3,6 +3,7 @@ from .implica import (
     Arrow,
     BasicTerm,
     Application,
+    Constant,
     TypeSchema,
     TermSchema,
     NodePattern,
@@ -14,9 +15,15 @@ from .implica import (
     Query,
 )
 
+Type = Variable | Arrow
+Term = BasicTerm | Application
+
 __all__ = [
     "Variable",
     "Arrow",
+    "Type",
+    "Term",
+    "Constant",
     "BasicTerm",
     "Application",
     "TypeSchema",

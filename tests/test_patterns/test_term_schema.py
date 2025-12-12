@@ -980,3 +980,64 @@ class TestTermSchemaEquality:
         schema2 = implica.TermSchema(pattern2)
 
         assert schema1 == schema2
+
+
+class TestTermSchemaWithConstants:
+    """Test patterns that include constant terms."""
+
+    def test_term_schema_with_K_constant(self, K, type_a, type_b):
+        schema = implica.TermSchema("@K(A, B)")
+
+        assert isinstance(schema, implica.TermSchema)
+        assert schema.pattern == "@K(A, B)"
+
+        term = implica.BasicTerm("K", implica.Arrow(type_a, implica.Arrow(type_b, type_a)))
+        assert schema.matches(term, constants=[K]) is True
+
+    def test_term_schema_with_S_constant(self, S, type_a, type_b, type_c):
+        schema = implica.TermSchema("@S(A, B, C)")
+
+        assert isinstance(schema, implica.TermSchema)
+        assert schema.pattern == "@S(A, B, C)"
+
+        term = implica.BasicTerm(
+            "S",
+            implica.Arrow(
+                implica.Arrow(type_a, implica.Arrow(type_b, type_c)),
+                implica.Arrow(implica.Arrow(type_a, type_b), implica.Arrow(type_a, type_c)),
+            ),
+        )
+        assert schema.matches(term, constants=[S]) is True
+
+    def test_term_schema_with_constant_and_complex_types(self, K, type_a, type_b):
+        schema = implica.TermSchema("@K(A->B, B->A->B)")
+
+        assert isinstance(schema, implica.TermSchema)
+        assert schema.pattern == "@K(A->B, B->A->B)"
+
+        term = implica.BasicTerm(
+            "K",
+            implica.Arrow(
+                implica.Arrow(type_a, type_b),
+                implica.Arrow(
+                    implica.Arrow(type_b, implica.Arrow(type_a, type_b)),
+                    implica.Arrow(type_a, type_b),
+                ),
+            ),
+        )
+        assert schema.matches(term, constants=[K]) is True
+
+    def test_term_schema_with_two_constant_terms(self, K, S, type_a, type_b):
+        schema = implica.TermSchema("@S(A, B, A) @K(A, B)")
+
+        assert isinstance(schema, implica.TermSchema)
+        assert schema.pattern == "@S(A, B, A) @K(A, B)"
+
+        term = implica.BasicTerm(
+            "S",
+            implica.Arrow(
+                implica.Arrow(type_a, implica.Arrow(type_b, type_a)),
+                implica.Arrow(implica.Arrow(type_a, type_b), implica.Arrow(type_a, type_a)),
+            ),
+        )(implica.BasicTerm("K", implica.Arrow(type_a, implica.Arrow(type_b, type_a))))
+        assert schema.matches(term, constants=[K, S]) is True

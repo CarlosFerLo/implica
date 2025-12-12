@@ -391,3 +391,113 @@ class TestCreateQueryPath:
         assert len(edges) == 1
         edge = edges[0]
         assert edge.term == term_ab
+
+    def test_create_query_path_create_two_nodes_and_an_edge_backwards(
+        self, graph_empty, type_a, type_b, term_ab
+    ):
+        graph_empty.query().add("x", term=term_ab).create("(:B)<-[:A->B:x]-(:A)").execute()
+
+        nodes = graph_empty._get_all_nodes()
+        assert len(nodes) == 2
+        types = {node.type for node in nodes}
+        assert types == {type_a, type_b}
+
+        edges = graph_empty._get_all_edges()
+        assert len(edges) == 1
+        edge = edges[0]
+        assert edge.term == term_ab
+
+    def test_create_query_path_create_two_nodes_and_an_edge_backwards_partial_context(
+        self, graph_empty, type_a, type_b, term_ab
+    ):
+        graph_empty.query().add("x", term=term_ab).create("()<-[::x]-()").execute()
+
+        nodes = graph_empty._get_all_nodes()
+        assert len(nodes) == 2
+        types = {node.type for node in nodes}
+        assert types == {type_a, type_b}
+
+        edges = graph_empty._get_all_edges()
+        assert len(edges) == 1
+        edge = edges[0]
+        assert edge.term == term_ab
+
+    def test_create_query_path_fails_with_conflicting_node_types(self, graph_empty, term_ab):
+        with pytest.raises(TypeError):
+            graph_empty.query().add("x", term=term_ab).create("(:B)-[:A->B:x]->(:A)").execute()
+
+    def test_create_query_path_with_term_inference(
+        self, graph_empty, type_a, type_b, term_a, term_ab
+    ):
+        graph_empty.query().add("x", term=term_a).add("f", term=term_ab).create(
+            "(:A:x)-[:A->B]->(:B:f x)"
+        ).execute()
+
+        nodes = graph_empty._get_all_nodes()
+        assert len(nodes) == 2
+        types = {node.type for node in nodes}
+        assert types == {type_a, type_b}
+
+        edges = graph_empty._get_all_edges()
+        assert len(edges) == 1
+        edge = edges[0]
+        assert edge.term == term_ab
+
+    def test_create_query_path_fails_with_missing_term_inference(self, graph_empty, term_a, term_b):
+
+        with pytest.raises(ValueError):
+            graph_empty.query().add("x", term=term_a).add("y", term=term_b).create(
+                "(:A:x)-[:A->B]->(:B:y)"
+            ).execute()
+
+    def test_create_query_path_fails_with_conflicting_edge_term(self, graph_empty, term_ab):
+
+        with pytest.raises(TypeError):
+            graph_empty.query().add("x", term=term_ab).create("(:A)-[::x]->(:A)").execute()
+
+    def test_create_query_path_fails_if_edge_already_exists(self, graph_empty, term_ab):
+        graph_empty.query().add("x", term=term_ab).create("(:A)-[:A->B:x]->(:B)").execute()
+
+        with pytest.raises(ValueError):
+            graph_empty.query().add("x", term=term_ab).create("(:A)-[:A->B:x]->(:B)").execute()
+
+    def test_create_query_path_fails_if_node_already_exists(self, graph_empty):
+        graph_empty.query().create("(:A)").execute()
+
+        with pytest.raises(ValueError):
+            graph_empty.query().create("(:A)").execute()
+
+    def test_create_query_path_continues_when_one_of_the_nodes_already_exists(
+        self, graph_empty, type_a, type_b, term_ab
+    ):
+        graph_empty.query().create("(:A)").execute()
+
+        graph_empty.query().add("x", term=term_ab).create("(:A)-[:A->B:x]->(:B)").execute()
+
+        nodes = graph_empty._get_all_nodes()
+        assert len(nodes) == 2
+        types = {node.type for node in nodes}
+        assert types == {type_a, type_b}
+
+        edges = graph_empty._get_all_edges()
+        assert len(edges) == 1
+        edge = edges[0]
+        assert edge.term == term_ab
+
+    def test_create_query_path_handles_already_matched_nodes(
+        self, graph_empty, type_a, type_b, term_a, term_ab
+    ):
+        graph_empty.query().add("x", term=term_a).create("(:A:x)").execute()
+        graph_empty.query().add("y", term=term_ab(term_a)).create("(:B:y)").execute()
+
+        graph_empty.query().match("(N:A)").match("(M:B)").create(" (N)-[:A->B]->(M) ").execute()
+
+        nodes = graph_empty._get_all_nodes()
+        assert len(nodes) == 2
+        types = {node.type for node in nodes}
+        assert types == {type_a, type_b}
+
+        edges = graph_empty._get_all_edges()
+        assert len(edges) == 1
+        edge = edges[0]
+        assert edge.term == term_ab

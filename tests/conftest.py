@@ -13,6 +13,11 @@ def type_b():
 
 
 @pytest.fixture
+def type_c():
+    return implica.Variable("C")
+
+
+@pytest.fixture
 def term_a(type_a):
     return implica.BasicTerm("a", type_a)
 
@@ -50,6 +55,27 @@ def term_ba(arrow_ba):
 @pytest.fixture
 def term_aa(arrow_aa):
     return implica.BasicTerm("h", arrow_aa)
+
+
+@pytest.fixture
+def K():
+    return implica.Constant(
+        "K", lambda A, B: implica.BasicTerm("K", implica.Arrow(A, implica.Arrow(B, A)))
+    )
+
+
+@pytest.fixture
+def S():
+    return implica.Constant(
+        "S",
+        lambda A, B, C: implica.BasicTerm(
+            "S",
+            implica.Arrow(
+                implica.Arrow(A, implica.Arrow(B, C)),
+                implica.Arrow(implica.Arrow(A, B), implica.Arrow(A, C)),
+            ),
+        ),
+    )
 
 
 @pytest.fixture

@@ -2,7 +2,7 @@
 
 use crate::context::Context;
 use crate::errors::ImplicaError;
-use crate::graph::{python_to_property_map, Edge, Graph, Node};
+use crate::graph::{python_to_property_map, Edge, Graph, Node, PyGraph};
 use crate::patterns::{EdgePattern, NodePattern, PathPattern, TermSchema, TypeSchema};
 use crate::typing::{python_to_term, python_to_type, Term, Type};
 use crate::utils::validate_variable_name;
@@ -13,30 +13,32 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 #[path = "executors/add.rs"]
-mod add;
+mod __add;
 #[path = "executors/create/base.rs"]
-mod create;
+mod __create;
 #[path = "executors/delete.rs"]
-mod delete;
+mod __delete;
 #[path = "executors/limit.rs"]
-mod limit;
+mod __limit;
 #[path = "executors/match/base.rs"]
-mod r#match;
+mod __match;
 #[path = "executors/order_by.rs"]
-mod order_by;
+mod __order_by;
+#[path = "executors/put.rs"]
+mod __put;
 #[path = "executors/set.rs"]
-mod set;
+mod __set;
 #[path = "executors/skip.rs"]
-mod skip;
+mod __skip;
 #[path = "executors/where.rs"]
-mod r#where;
+mod __where;
 #[path = "executors/with.rs"]
-mod with;
+mod __with;
 
 #[pyclass]
 #[derive(Clone, Debug)]
 pub struct Query {
-    pub graph: Graph,
+    pub graph: Arc<Graph>,
     pub matches: Vec<(HashMap<String, QueryResult>, Context)>,
     pub operations: Vec<QueryOperation>,
 }
@@ -53,6 +55,7 @@ pub enum QueryOperation {
     Where(String),
     Create(CreateOp),
     Add(AddOp),
+    Put(String, Option<Term>, Option<TermSchema>),
     Set(String, HashMap<String, Py<PyAny>>, bool),
     Delete(Vec<String>),
     With(Vec<String>),
@@ -68,6 +71,9 @@ impl Clone for QueryOperation {
             QueryOperation::Where(w) => QueryOperation::Where(w.clone()),
             QueryOperation::Create(c) => QueryOperation::Create(c.clone()),
             QueryOperation::Add(a) => QueryOperation::Add(a.clone()),
+            QueryOperation::Put(var, term, schema) => {
+                QueryOperation::Put(var.clone(), term.clone(), schema.clone())
+            }
             QueryOperation::Set(var, dict, overwrite) => {
                 let mut new_dict = HashMap::new();
 
@@ -97,9 +103,9 @@ pub enum MatchOp {
 
 #[derive(Clone, Debug)]
 pub enum CreateOp {
-    Node(NodePattern),
-    Edge(EdgePattern, String, String),
-    Path(PathPattern),
+    Node(NodePattern, bool),
+    Edge(EdgePattern, String, String, bool),
+    Path(PathPattern, bool),
 }
 
 #[derive(Clone, Debug)]
@@ -111,12 +117,8 @@ pub enum AddOp {
 #[pymethods]
 impl Query {
     #[new]
-    pub fn new(graph: Graph) -> Self {
-        Query {
-            graph,
-            matches: Vec::new(),
-            operations: Vec::new(),
-        }
+    pub fn py_new(graph: PyGraph) -> Self {
+        Query::new(graph.graph.clone())
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -278,10 +280,203 @@ impl Query {
         term_schema: Option<TermSchema>,
         properties: Option<Py<PyAny>>,
     ) -> PyResult<Self> {
+        self.merge_or_create(
+            py,
+            pattern,
+            node,
+            edge,
+            start,
+            end,
+            r#type,
+            type_schema,
+            term,
+            term_schema,
+            properties,
+            false,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    #[pyo3(signature=(pattern=None, node=None, edge=None, start=None, end=None, r#type=None, type_schema=None, term=None, term_schema=None, properties=None))]
+    pub fn merge(
+        &mut self,
+        py: Python,
+        pattern: Option<String>,
+        node: Option<String>,
+        edge: Option<String>,
+        start: Option<String>,
+        end: Option<String>,
+        r#type: Option<Py<PyAny>>,
+        type_schema: Option<TypeSchema>,
+        term: Option<Py<PyAny>>,
+        term_schema: Option<TermSchema>,
+        properties: Option<Py<PyAny>>,
+    ) -> PyResult<Self> {
+        self.merge_or_create(
+            py,
+            pattern,
+            node,
+            edge,
+            start,
+            end,
+            r#type,
+            type_schema,
+            term,
+            term_schema,
+            properties,
+            true,
+        )
+    }
+
+    #[pyo3(signature=(variable, r#type=None, term=None))]
+    pub fn add(
+        &mut self,
+        py: Python,
+        variable: String,
+        r#type: Option<Py<PyAny>>,
+        term: Option<Py<PyAny>>,
+    ) -> PyResult<Self> {
+        validate_variable_name(&variable)?;
+
+        let type_obj = if let Some(t) = r#type {
+            Some(python_to_type(t.bind(py))?)
+        } else {
+            None
+        };
+
+        let term_obj = if let Some(t) = term {
+            Some(python_to_term(t.bind(py))?)
+        } else {
+            None
+        };
+
+        match (type_obj, term_obj) {
+            (Some(typ), Some(trm)) => {
+                return Err(ImplicaError::InvalidQuery { message: "cannot include 'term' and 'type' in an add operation - they are mutually exclusive".to_string(), context: Some("add".to_string()) }.into());
+            }
+            (Some(typ), None) => {
+                self.operations
+                    .push(QueryOperation::Add(AddOp::Type(variable, typ)));
+            }
+            (None, Some(trm)) => {
+                self.operations
+                    .push(QueryOperation::Add(AddOp::Term(variable, trm)));
+            }
+            (None, None) => {
+                return Err(ImplicaError::InvalidQuery {
+                    message: "must specify at least one of 'term' or 'type'".to_string(),
+                    context: Some("add".to_string()),
+                }
+                .into());
+            }
+        }
+
+        Ok(self.clone())
+    }
+
+    #[pyo3(signature=(variable, term=None, term_schema=None))]
+    pub fn put(
+        &mut self,
+        py: Python,
+        variable: String,
+        term: Option<Py<PyAny>>,
+        term_schema: Option<TermSchema>,
+    ) -> PyResult<Self> {
+        let term = match term {
+            Some(t) => Some(python_to_term(t.bind(py))?),
+            None => None,
+        };
+
+        if term.is_some() && term_schema.is_some() {
+            return Err(ImplicaError::InvalidQuery { message: "cannot include 'term' and 'term_schema' in a put operation - they are mutually exclusive".to_string(), context: Some("put".to_string()) }.into());
+        }
+
+        validate_variable_name(&variable)?;
+
+        self.operations
+            .push(QueryOperation::Put(variable, term, term_schema));
+
+        Ok(self.clone())
+    }
+
+    pub fn set(
+        &mut self,
+        py: Python,
+        variable: String,
+        properties: Py<PyAny>,
+        overwrite: bool,
+    ) -> PyResult<Self> {
+        let props = python_to_property_map(properties.bind(py))?;
+
+        self.operations
+            .push(QueryOperation::Set(variable, props, overwrite));
+        Ok(self.clone())
+    }
+
+    #[pyo3(signature = (*variables))]
+    pub fn delete(&mut self, variables: Vec<String>) -> PyResult<Self> {
+        self.operations.push(QueryOperation::Delete(variables));
+        Ok(self.clone())
+    }
+
+    #[pyo3(signature = (*variables))]
+    pub fn with_(&mut self, variables: Vec<String>) -> PyResult<Self> {
+        self.operations.push(QueryOperation::With(variables));
+        Ok(self.clone())
+    }
+
+    #[pyo3(signature = (*variables, ascending=true))]
+    pub fn order_by(&mut self, variables: Vec<String>, ascending: bool) -> PyResult<Self> {
+        self.operations
+            .push(QueryOperation::OrderBy(variables, ascending));
+        Ok(self.clone())
+    }
+
+    pub fn limit(&mut self, count: usize) -> PyResult<Self> {
+        self.operations.push(QueryOperation::Limit(count));
+        Ok(self.clone())
+    }
+
+    pub fn skip(&mut self, count: usize) -> PyResult<Self> {
+        self.operations.push(QueryOperation::Skip(count));
+        Ok(self.clone())
+    }
+
+    pub fn execute(&mut self, py: Python) -> PyResult<Self> {
+        self.execute_operations()?;
+        Ok(self.clone())
+    }
+}
+
+impl Query {
+    pub fn new(graph: Arc<Graph>) -> Self {
+        Query {
+            graph,
+            matches: Vec::new(),
+            operations: Vec::new(),
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn merge_or_create(
+        &mut self,
+        py: Python,
+        pattern: Option<String>,
+        node: Option<String>,
+        edge: Option<String>,
+        start: Option<String>,
+        end: Option<String>,
+        r#type: Option<Py<PyAny>>,
+        type_schema: Option<TypeSchema>,
+        term: Option<Py<PyAny>>,
+        term_schema: Option<TermSchema>,
+        properties: Option<Py<PyAny>>,
+        is_merge: bool,
+    ) -> PyResult<Self> {
         if let Some(p) = pattern {
             let path = PathPattern::parse(p)?;
             self.operations
-                .push(QueryOperation::Create(CreateOp::Path(path)));
+                .push(QueryOperation::Create(CreateOp::Path(path, is_merge)));
         } else if node.is_some() {
             // Convert Python types to Rust types
             let type_obj = if let Some(t) = r#type {
@@ -310,8 +505,10 @@ impl Query {
                 term_schema,
                 properties_map,
             )?;
-            self.operations
-                .push(QueryOperation::Create(CreateOp::Node(node_pattern)));
+            self.operations.push(QueryOperation::Create(CreateOp::Node(
+                node_pattern,
+                is_merge,
+            )));
         } else if edge.is_some() {
             // Convert Python types to Rust types
             let type_obj = if let Some(t) = r#type {
@@ -369,108 +566,13 @@ impl Query {
                 edge_pattern,
                 start,
                 end,
+                is_merge,
             )));
         }
 
         Ok(self.clone())
     }
 
-    #[pyo3(signature=(variable, r#type=None, term=None))]
-    pub fn add(
-        &mut self,
-        py: Python,
-        variable: String,
-        r#type: Option<Py<PyAny>>,
-        term: Option<Py<PyAny>>,
-    ) -> PyResult<Self> {
-        validate_variable_name(&variable)?;
-
-        let type_obj = if let Some(t) = r#type {
-            Some(python_to_type(t.bind(py))?)
-        } else {
-            None
-        };
-
-        let term_obj = if let Some(t) = term {
-            Some(python_to_term(t.bind(py))?)
-        } else {
-            None
-        };
-
-        match (type_obj, term_obj) {
-            (Some(typ), Some(trm)) => {
-                return Err(ImplicaError::InvalidQuery { message: "cannot include 'term' and 'type' in an add operation - they are mutually exclusive".to_string(), context: Some("add".to_string()) }.into());
-            }
-            (Some(typ), None) => {
-                self.operations
-                    .push(QueryOperation::Add(AddOp::Type(variable, typ)));
-            }
-            (None, Some(trm)) => {
-                self.operations
-                    .push(QueryOperation::Add(AddOp::Term(variable, trm)));
-            }
-            (None, None) => {
-                return Err(ImplicaError::InvalidQuery {
-                    message: "must specify at least one of 'term' or 'type'".to_string(),
-                    context: Some("add".to_string()),
-                }
-                .into());
-            }
-        }
-
-        Ok(self.clone())
-    }
-
-    pub fn set(
-        &mut self,
-        py: Python,
-        variable: String,
-        properties: Py<PyAny>,
-        overwrite: bool,
-    ) -> PyResult<Self> {
-        let props = python_to_property_map(properties.bind(py))?;
-
-        self.operations
-            .push(QueryOperation::Set(variable, props, overwrite));
-        Ok(self.clone())
-    }
-
-    #[pyo3(signature = (*variables))]
-    pub fn delete(&mut self, variables: Vec<String>) -> PyResult<Self> {
-        self.operations.push(QueryOperation::Delete(variables));
-        Ok(self.clone())
-    }
-
-    #[pyo3(signature = (*variables))]
-    pub fn with_(&mut self, variables: Vec<String>) -> PyResult<Self> {
-        self.operations.push(QueryOperation::With(variables));
-        Ok(self.clone())
-    }
-
-    #[pyo3(signature = (*variables, ascending=true))]
-    pub fn order_by(&mut self, variables: Vec<String>, ascending: bool) -> PyResult<Self> {
-        self.operations
-            .push(QueryOperation::OrderBy(variables, ascending));
-        Ok(self.clone())
-    }
-
-    pub fn limit(&mut self, count: usize) -> PyResult<Self> {
-        self.operations.push(QueryOperation::Limit(count));
-        Ok(self.clone())
-    }
-
-    pub fn skip(&mut self, count: usize) -> PyResult<Self> {
-        self.operations.push(QueryOperation::Skip(count));
-        Ok(self.clone())
-    }
-
-    pub fn execute(&mut self, py: Python) -> PyResult<Self> {
-        self.execute_operations()?;
-        Ok(self.clone())
-    }
-}
-
-impl Query {
     fn execute_operations(&mut self) -> Result<(), ImplicaError> {
         for op in self.operations.clone() {
             match op {
@@ -482,6 +584,9 @@ impl Query {
                 }
                 QueryOperation::Add(add_op) => {
                     self.execute_add(add_op)?;
+                }
+                QueryOperation::Put(variable, term, term_schema) => {
+                    self.execute_put(variable, term, term_schema)?;
                 }
                 QueryOperation::Delete(vars) => {
                     self.execute_delete(vars)?;

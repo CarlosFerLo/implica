@@ -10,7 +10,9 @@ use crate::errors::ImplicaError;
 use crate::graph::{property_map_to_python, property_map_to_string, python_to_property_map, Edge};
 use crate::patterns::term_schema::TermSchema;
 use crate::patterns::type_schema::TypeSchema;
-use crate::typing::{python_to_term, python_to_type, term_to_python, type_to_python, Term, Type};
+use crate::typing::{
+    python_to_term, python_to_type, term_to_python, type_to_python, Constant, Term, Type,
+};
 use crate::utils::validate_variable_name;
 
 #[derive(Clone, Debug, PartialEq)]
@@ -177,14 +179,28 @@ impl EdgePattern {
         )
     }
 
-    #[pyo3(name = "matches", signature=(edge, context=None))]
-    pub fn py_matches(&self, py: Python, edge: Edge, context: Option<Py<PyAny>>) -> PyResult<bool> {
+    #[pyo3(name = "matches", signature=(edge, context=None, constants=None))]
+    pub fn py_matches(
+        &self,
+        py: Python,
+        edge: Edge,
+        context: Option<Py<PyAny>>,
+        constants: Option<Vec<Constant>>,
+    ) -> PyResult<bool> {
         let mut context_obj = match context.as_ref() {
             Some(c) => python_to_context(c.bind(py))?,
             None => Context::new(),
         };
+        let constants = match constants {
+            Some(cts) => Arc::new(
+                cts.iter()
+                    .map(|c| (c.name.to_string(), c.clone()))
+                    .collect(),
+            ),
+            None => Arc::new(HashMap::new()),
+        };
 
-        let result = self.matches(&edge, &mut context_obj)?;
+        let result = self.matches(&edge, &mut context_obj, constants)?;
 
         if let Some(c) = context {
             let dict = c.bind(py).cast::<PyDict>()?;
@@ -313,7 +329,12 @@ impl EdgePattern {
         }
     }
 
-    pub fn matches(&self, edge: &Edge, context: &mut Context) -> PyResult<bool> {
+    pub fn matches(
+        &self,
+        edge: &Edge,
+        context: &mut Context,
+        constants: Arc<HashMap<String, Constant>>,
+    ) -> PyResult<bool> {
         // Check term using compiled matcher (most efficient path)
         match &self.compiled_type_matcher {
             CompiledTypeEdgeMatcher::Any => {
@@ -347,7 +368,7 @@ impl EdgePattern {
             CompiledTermEdgeMatcher::SchemaTerm(term_schema) => {
                 let edge_term = edge.term.clone();
 
-                if !term_schema.matches(&edge_term, context)? {
+                if !term_schema.matches(&edge_term, context, constants.clone())? {
                     return Ok(false);
                 }
             }

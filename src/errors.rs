@@ -92,6 +92,10 @@ pub enum ImplicaError {
         message: String,
         context: Option<String>,
     },
+    ConstantNotFound {
+        name: String,
+        context: Option<String>,
+    },
 }
 
 impl Display for ImplicaError {
@@ -228,6 +232,13 @@ impl Display for ImplicaError {
                 }
                 Ok(())
             }
+            ImplicaError::ConstantNotFound { name, context } => {
+                write!(f, "Constant with name '{}' not found", name)?;
+                if let Some(context) = context {
+                    write!(f, "({})", context)?;
+                }
+                Ok(())
+            }
         }
     }
 }
@@ -286,6 +297,9 @@ impl From<ImplicaError> for PyErr {
             }
             ImplicaError::InvalidType { .. } => exceptions::PyTypeError::new_err(err.to_string()),
             ImplicaError::LockError { .. } => exceptions::PyRuntimeError::new_err(err.to_string()),
+            ImplicaError::ConstantNotFound { .. } => {
+                exceptions::PyValueError::new_err(err.to_string())
+            }
         }
     }
 }

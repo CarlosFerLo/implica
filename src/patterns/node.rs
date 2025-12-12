@@ -10,7 +10,9 @@ use crate::errors::ImplicaError;
 use crate::graph::{property_map_to_python, property_map_to_string, python_to_property_map, Node};
 use crate::patterns::term_schema::TermSchema;
 use crate::patterns::type_schema::TypeSchema;
-use crate::typing::{python_to_term, python_to_type, term_to_python, type_to_python, Term, Type};
+use crate::typing::{
+    python_to_term, python_to_type, term_to_python, type_to_python, Constant, Term, Type,
+};
 use crate::utils::validate_variable_name;
 
 #[derive(Clone, Debug)]
@@ -140,14 +142,24 @@ impl NodePattern {
         )
     }
 
-    #[pyo3(name="matches", signature=(node, context=None))]
-    pub fn py_matches(&self, py: Python, node: Node, context: Option<Py<PyAny>>) -> PyResult<bool> {
+    #[pyo3(name="matches", signature=(node, context=None, constants=None))]
+    pub fn py_matches(
+        &self,
+        py: Python,
+        node: Node,
+        context: Option<Py<PyAny>>,
+        constants: Option<Vec<Constant>>,
+    ) -> PyResult<bool> {
         let mut context_obj = match context.as_ref() {
             Some(c) => python_to_context(c.bind(py))?,
             None => Context::new(),
         };
+        let constants = match constants {
+            Some(cts) => Arc::new(cts.iter().map(|c| (c.name.clone(), c.clone())).collect()),
+            None => Arc::new(HashMap::new()),
+        };
 
-        let result = self.matches(&node, &mut context_obj)?;
+        let result = self.matches(&node, &mut context_obj, constants)?;
 
         if let Some(c) = context {
             let dict = c.bind(py).cast::<PyDict>()?;
@@ -259,7 +271,12 @@ impl NodePattern {
         })
     }
 
-    pub fn matches(&self, node: &Node, context: &mut Context) -> Result<bool, ImplicaError> {
+    pub fn matches(
+        &self,
+        node: &Node,
+        context: &mut Context,
+        constants: Arc<HashMap<String, Constant>>,
+    ) -> Result<bool, ImplicaError> {
         match &self.compiled_type_matcher {
             CompiledTypeNodeMatcher::Any => {}
             CompiledTypeNodeMatcher::ExactType(type_obj) => {
@@ -297,7 +314,7 @@ impl NodePattern {
                         message: e.to_string(),
                         context: Some("node pattern matches".to_string()),
                     })?;
-                    if !term_schema.matches(&term, context)? {
+                    if !term_schema.matches(&term, context, constants)? {
                         return Ok(false);
                     }
                 } else {

@@ -12,7 +12,7 @@ use crate::{
     graph::{Graph, Node},
     patterns::{CompiledDirection, EdgePattern, NodePattern, PathPattern},
     query::base::{Query, QueryResult},
-    typing::{Arrow, Type},
+    typing::{Arrow, Constant, Type},
     utils::PlaceholderGenerator,
 };
 
@@ -20,6 +20,7 @@ impl Query {
     pub(super) fn execute_create_path(
         &mut self,
         mut path: PathPattern,
+        is_merge: bool,
     ) -> Result<(), ImplicaError> {
         if path.edges.len() != path.nodes.len() - 1 {
             return Err(ImplicaError::InvalidQuery {
@@ -36,13 +37,25 @@ impl Query {
         let ph_generator = PlaceholderGenerator::new();
 
         for (m, ref context) in self.matches.iter_mut() {
-            Self::normalize_nodes(&mut path.nodes, &ph_generator, m, context)?;
-            Self::normalize_edges(&mut path.edges, &ph_generator, m, context)?;
+            Self::normalize_nodes(
+                &mut path.nodes,
+                &ph_generator,
+                m,
+                context,
+                self.graph.constants.clone(),
+            )?;
+            Self::normalize_edges(
+                &mut path.edges,
+                &ph_generator,
+                m,
+                context,
+                self.graph.constants.clone(),
+            )?;
 
             Self::infer(&mut path.nodes, &mut path.edges)?;
 
-            let nodes = Self::insert_nodes(&path.nodes, m, &mut self.graph)?;
-            Self::insert_edges(&nodes, &path.edges, m, &mut self.graph)?;
+            let nodes = Self::insert_nodes(&path.nodes, m, self.graph.clone(), is_merge)?;
+            Self::insert_edges(&nodes, &path.edges, m, self.graph.clone(), is_merge)?;
 
             for ph in ph_generator.prev() {
                 m.remove(&ph);
@@ -57,6 +70,7 @@ impl Query {
         ph_generator: &PlaceholderGenerator,
         r#match: &HashMap<String, QueryResult>,
         context: &Context,
+        constants: Arc<HashMap<String, Constant>>,
     ) -> Result<(), ImplicaError> {
         for np in nodes.iter_mut() {
             if let Some(ref var) = np.variable {
@@ -97,7 +111,7 @@ impl Query {
                 }
 
                 if let Some(ref term_schema) = np.term_schema {
-                    np.term = Some(Arc::new(term_schema.as_term(context)?));
+                    np.term = Some(Arc::new(term_schema.as_term(context, constants.clone())?));
                     np.term_schema = None;
                 }
 
@@ -116,6 +130,7 @@ impl Query {
         ph_generator: &PlaceholderGenerator,
         r#match: &HashMap<String, QueryResult>,
         context: &Context,
+        constants: Arc<HashMap<String, Constant>>,
     ) -> Result<(), ImplicaError> {
         for ep in edges.iter_mut() {
             if let Some(ref var) = ep.variable {
@@ -145,7 +160,7 @@ impl Query {
                 }
 
                 if let Some(ref term_schema) = ep.term_schema {
-                    ep.r#term = Some(Arc::new(term_schema.as_term(context)?));
+                    ep.r#term = Some(Arc::new(term_schema.as_term(context, constants.clone())?));
                     ep.term_schema = None;
                 }
 
@@ -495,9 +510,12 @@ impl Query {
     fn insert_nodes(
         nodes: &Vec<NodePattern>,
         r#match: &mut HashMap<String, QueryResult>,
-        graph: &mut Graph,
+        graph: Arc<Graph>,
+        is_merge: bool,
     ) -> Result<Vec<Node>, ImplicaError> {
         let mut new_nodes = Vec::new();
+
+        let nodes_len = nodes.len();
 
         for np in nodes {
             // -- Check if already in the match ---
@@ -543,12 +561,16 @@ impl Query {
 
             match graph.add_node(&node) {
                 Ok(()) => (),
-                Err(e) => match e {
+                Err(e) => match &e {
                     ImplicaError::NodeAlreadyExists {
                         message: _,
                         existing,
                         new: _,
                     } => {
+                        if !is_merge && (nodes_len == 1) {
+                            return Err(e);
+                        }
+
                         let existing = existing.read().map_err(|e| ImplicaError::LockError {
                             rw: "read".to_string(),
                             message: e.to_string(),
@@ -574,7 +596,8 @@ impl Query {
         nodes: &[Node],
         edges: &[EdgePattern],
         r#match: &mut HashMap<String, QueryResult>,
-        graph: &mut Graph,
+        graph: Arc<Graph>,
+        is_merge: bool,
     ) -> Result<(), ImplicaError> {
         for (idx, ep) in edges.iter().enumerate() {
             if let Some(ref var) = ep.variable {
@@ -634,16 +657,43 @@ impl Query {
                 }
             };
 
-            let edge = match ep.compiled_direction {
+            let add_edge_result = match ep.compiled_direction {
                 CompiledDirection::Forward => {
-                    graph.add_edge(term, start, end, Some(Arc::new(RwLock::new(props))))?
+                    graph.add_edge(term, start, end, Some(Arc::new(RwLock::new(props))))
                 }
                 CompiledDirection::Backward => {
-                    graph.add_edge(term, end, start, Some(Arc::new(RwLock::new(props))))?
+                    graph.add_edge(term, end, start, Some(Arc::new(RwLock::new(props))))
                 }
                 CompiledDirection::Any => {
                     todo!("the 'any' direction of edges is not supported yet for create.")
                 }
+            };
+
+            let edge = match add_edge_result {
+                Ok(edge) => edge,
+                Err(e) => match &e {
+                    ImplicaError::EdgeAlreadyExists {
+                        message: _,
+                        existing,
+                        new: _,
+                    } => {
+                        if is_merge {
+                            existing
+                                .read()
+                                .map_err(|e| ImplicaError::LockError {
+                                    rw: "read".to_string(),
+                                    message: e.to_string(),
+                                    context: Some(
+                                        "execute create path edge (merge mode)".to_string(),
+                                    ),
+                                })?
+                                .clone()
+                        } else {
+                            return Err(e);
+                        }
+                    }
+                    _ => return Err(e),
+                },
             };
 
             if let Some(ref var) = ep.variable {

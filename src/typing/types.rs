@@ -20,6 +20,13 @@ impl Type {
         }
     }
 
+    pub fn get_type_vars(&self) -> Vec<Variable> {
+        match self {
+            Type::Variable(v) => v.get_type_vars(),
+            Type::Arrow(arr) => arr.get_type_vars(),
+        }
+    }
+
     pub fn as_variable(&self) -> Option<&Variable> {
         match self {
             Type::Variable(v) => Some(v),
@@ -52,6 +59,12 @@ pub struct Variable {
     uid_cache: OnceLock<String>,
 }
 
+impl Variable {
+    pub fn get_type_vars(&self) -> Vec<Variable> {
+        vec![self.clone()]
+    }
+}
+
 #[pymethods]
 impl Variable {
     #[new]
@@ -79,6 +92,20 @@ impl Variable {
             hasher.update(self.name.as_bytes());
             format!("{:x}", hasher.finalize())
         })
+    }
+
+    #[pyo3(name = "get_type_vars")]
+    pub fn py_get_type_vars(&self, py: Python) -> PyResult<Vec<Py<PyAny>>> {
+        let vars = self.get_type_vars();
+
+        let mut result = Vec::with_capacity(vars.len());
+
+        for v in vars {
+            let obj = type_to_python(py, &Type::Variable(v))?;
+            result.push(obj);
+        }
+
+        Ok(result)
     }
 
     fn __str__(&self) -> &str {
@@ -139,6 +166,15 @@ impl Arrow {
             uid_cache: OnceLock::new(),
         }
     }
+
+    pub fn get_type_vars(&self) -> Vec<Variable> {
+        let right_vars = self.right.get_type_vars();
+        let left_vars = self.left.get_type_vars();
+
+        let mut result: Vec<Variable> = right_vars.into_iter().chain(left_vars).collect();
+        result.dedup();
+        result
+    }
 }
 
 #[pymethods]
@@ -174,6 +210,20 @@ impl Arrow {
             hasher.update(self.right.uid().as_bytes());
             format!("{:x}", hasher.finalize())
         })
+    }
+
+    #[pyo3(name = "get_type_vars")]
+    pub fn py_get_type_vars(&self, py: Python) -> PyResult<Vec<Py<PyAny>>> {
+        let vars = self.get_type_vars();
+
+        let mut result = Vec::with_capacity(vars.len());
+
+        for v in vars {
+            let obj = type_to_python(py, &Type::Variable(v))?;
+            result.push(obj);
+        }
+
+        Ok(result)
     }
 
     fn __str__(&self) -> String {

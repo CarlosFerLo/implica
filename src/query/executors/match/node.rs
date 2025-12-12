@@ -31,7 +31,7 @@ impl Query {
 
                     let mut context = Context::new();
 
-                    if node_pattern.matches(&node, &mut context)? {
+                    if node_pattern.matches(&node, &mut context, self.graph.constants.clone())? {
                         let dict = HashMap::from([(var.clone(), QueryResult::Node(node.clone()))]);
                         self.matches.push((dict, context));
                     }
@@ -53,8 +53,11 @@ impl Query {
                                         }
                                     })?;
 
-                                    if node_pattern.matches(&new_node, context)?
-                                        && &*new_node == old_node
+                                    if node_pattern.matches(
+                                        &new_node,
+                                        context,
+                                        self.graph.constants.clone(),
+                                    )? && &*new_node == old_node
                                     {
                                         results.push((m.clone(), context.clone()));
                                     }
@@ -85,7 +88,11 @@ impl Query {
 
                         for (m, context) in self.matches.iter() {
                             let mut context = context.clone();
-                            if node_pattern.matches(&node, &mut context)? {
+                            if node_pattern.matches(
+                                &node,
+                                &mut context,
+                                self.graph.constants.clone(),
+                            )? {
                                 let mut dict = m.clone();
 
                                 dict.insert(var.clone(), QueryResult::Node(node.clone()));

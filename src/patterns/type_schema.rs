@@ -76,6 +76,24 @@ impl TypeSchema {
         Ok(result)
     }
 
+    #[pyo3(signature=(context=None))]
+    pub fn get_type_vars(
+        &self,
+        py: Python,
+        context: Option<Py<PyAny>>,
+    ) -> PyResult<Vec<Py<PyAny>>> {
+        let context = match context {
+            Some(ctx) => python_to_context(ctx.bind(py))?,
+            None => Context::new(),
+        };
+        let r#type = self.as_type(&context)?;
+
+        match r#type {
+            Type::Variable(v) => v.py_get_type_vars(py),
+            Type::Arrow(arr) => arr.py_get_type_vars(py),
+        }
+    }
+
     fn __eq__(&self, other: TypeSchema) -> bool {
         self.compiled == other.compiled
     }

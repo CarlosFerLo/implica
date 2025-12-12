@@ -8,10 +8,10 @@ pub mod query;
 pub mod typing;
 pub mod utils;
 
-use graph::{Edge, Graph, Node};
+use graph::{Edge, Node, PyGraph};
 use patterns::{EdgePattern, NodePattern, PathPattern, TermSchema, TypeSchema};
 use query::Query;
-use typing::{Application, Arrow, BasicTerm, Variable};
+use typing::{Application, Arrow, BasicTerm, Constant, Variable};
 
 /// A Python module implemented in Rust for type theoretical graph modeling.
 ///
@@ -40,10 +40,13 @@ fn implica(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<BasicTerm>()?;
     m.add_class::<Application>()?;
 
+    // Constant
+    m.add_class::<Constant>()?;
+
     // Graph components
     m.add_class::<Node>()?;
     m.add_class::<Edge>()?;
-    m.add_class::<Graph>()?;
+    m.add_class::<PyGraph>()?;
 
     // Query system
     m.add_class::<TypeSchema>()?;
