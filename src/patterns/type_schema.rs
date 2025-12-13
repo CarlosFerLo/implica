@@ -66,8 +66,8 @@ impl TypeSchema {
 
             for (k, v) in context_obj.iter() {
                 let t_obj = match v {
-                    ContextElement::Type(t) => type_to_python(py, &t)?,
-                    ContextElement::Term(t) => term_to_python(py, &t)?,
+                    ContextElement::Type(t) => type_to_python(py, t)?,
+                    ContextElement::Term(t) => term_to_python(py, t)?,
                 };
                 dict.set_item(k.clone(), t_obj)?;
             }
@@ -84,7 +84,7 @@ impl TypeSchema {
             Context::new()
         };
         let r#type = self.as_type(&context_obj)?;
-        Ok(type_to_python(py, &r#type)?)
+        type_to_python(py, &r#type)
     }
 
     #[pyo3(signature=(context=None))]
