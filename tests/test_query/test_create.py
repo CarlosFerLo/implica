@@ -501,3 +501,25 @@ class TestCreateQueryPath:
         assert len(edges) == 1
         edge = edges[0]
         assert edge.term == term_ab
+
+
+class TestCreateQueryForDemo:
+    def test_crate_query_special_case(self, graph_with_K_S, arrow_aa, type_a, K):
+        graph_with_K_S.query().create("(: A->A)").create("(:(A->A)->A->A)").execute()
+
+        (
+            graph_with_K_S.query()
+            .match("(N: (B:*)->(A:*))")
+            .merge("(M: A)-[::@K(A, B)]->(N)")
+            .execute()
+        )
+
+        nodes = graph_with_K_S._get_all_nodes()
+        assert len(nodes) == 3
+        types = {node.type for node in nodes}
+        assert types == {type_a, arrow_aa, implica.Arrow(arrow_aa, arrow_aa)}
+
+        edges = graph_with_K_S._get_all_edges()
+        assert len(edges) == 2
+        terms = {edge.term for edge in edges}
+        assert terms == {K(type_a, type_a), K(arrow_aa, arrow_aa)}

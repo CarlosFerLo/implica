@@ -145,3 +145,9 @@ def graph_with_edges(
         edge="E2", start="N2", end="N1", type=arrow_ba, term=term_ba
     ).execute()
     return graph
+
+
+@pytest.fixture
+def graph_with_K_S(K, S):
+    graph = implica.Graph(constants=[K, S])
+    return graph

@@ -166,7 +166,7 @@ impl NodePattern {
 
             dict.clear();
 
-            for (k, v) in context_obj.content.iter() {
+            for (k, v) in context_obj.iter() {
                 let t_obj = match v {
                     ContextElement::Type(t) => type_to_python(py, t)?,
                     ContextElement::Term(t) => term_to_python(py, t)?,

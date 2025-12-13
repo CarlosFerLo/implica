@@ -16,12 +16,16 @@ pub enum ContextElement {
 
 #[derive(Clone, Debug, Default)]
 pub struct Context {
-    pub(crate) content: HashMap<String, ContextElement>,
+    content: HashMap<String, ContextElement>,
 }
 
 impl Context {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = (&String, &ContextElement)> {
+        self.content.iter()
     }
 
     pub fn add_term(&mut self, name: String, term: Term) -> Result<(), ImplicaError> {

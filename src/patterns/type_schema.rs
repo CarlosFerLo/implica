@@ -64,16 +64,27 @@ impl TypeSchema {
 
             dict.clear();
 
-            for (k, v) in context_obj.content.iter() {
+            for (k, v) in context_obj.iter() {
                 let t_obj = match v {
-                    ContextElement::Type(t) => type_to_python(py, t)?,
-                    ContextElement::Term(t) => term_to_python(py, t)?,
+                    ContextElement::Type(t) => type_to_python(py, &t)?,
+                    ContextElement::Term(t) => term_to_python(py, &t)?,
                 };
                 dict.set_item(k.clone(), t_obj)?;
             }
         }
 
         Ok(result)
+    }
+
+    #[pyo3(name="as_type", signature=(context=None))]
+    pub fn py_as_type(&self, py: Python, context: Option<Py<PyAny>>) -> PyResult<Py<PyAny>> {
+        let context_obj = if let Some(ctx) = context {
+            python_to_context(ctx.bind(py))?
+        } else {
+            Context::new()
+        };
+        let r#type = self.as_type(&context_obj)?;
+        Ok(type_to_python(py, &r#type)?)
     }
 
     #[pyo3(signature=(context=None))]

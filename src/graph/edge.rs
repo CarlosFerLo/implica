@@ -74,7 +74,7 @@ impl Edge {
                 return Err(ImplicaError::TypeMismatch {
                     expected: arr.left.to_string(),
                     got: start.r#type.to_string(),
-                    context: Some("new edge".to_string()),
+                    context: Some("new edge - left".to_string()),
                 });
             }
 
@@ -88,7 +88,7 @@ impl Edge {
                 return Err(ImplicaError::TypeMismatch {
                     expected: arr.right.to_string(),
                     got: end.r#type.to_string(),
-                    context: Some("new edge".to_string()),
+                    context: Some("new edge - right".to_string()),
                 });
             }
         } else {

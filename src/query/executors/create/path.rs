@@ -19,7 +19,7 @@ use crate::{
 impl Query {
     pub(super) fn execute_create_path(
         &mut self,
-        mut path: PathPattern,
+        path: PathPattern,
         is_merge: bool,
     ) -> Result<(), ImplicaError> {
         if path.edges.len() != path.nodes.len() - 1 {
@@ -37,6 +37,7 @@ impl Query {
         let ph_generator = PlaceholderGenerator::new();
 
         for (m, ref context) in self.matches.iter_mut() {
+            let mut path = path.clone();
             Self::normalize_nodes(
                 &mut path.nodes,
                 &ph_generator,
@@ -78,8 +79,8 @@ impl Query {
                     match qr {
                         QueryResult::Node(node) => {
                             np.r#type = Some(node.r#type.clone());
-                            np.term = if let Some(t) = node.term.clone() {
-                                Some(Arc::new(
+                            if let Some(t) = node.term.clone() {
+                                np.term = Some(Arc::new(
                                     (t.read().map_err(|e| ImplicaError::LockError {
                                         rw: "read".to_string(),
                                         message: e.to_string(),
@@ -87,9 +88,7 @@ impl Query {
                                     })?)
                                     .clone(),
                                 ))
-                            } else {
-                                None
-                            };
+                            }
                         }
                         QueryResult::Edge(_) => {
                             return Err(ImplicaError::InvalidQuery {
@@ -98,27 +97,26 @@ impl Query {
                                         });
                         }
                     }
+                    continue;
                 }
             } else {
-                if np.variable.is_none() {
-                    let var_name = ph_generator.next();
-                    np.variable = Some(var_name);
-                }
+                let var_name = ph_generator.next();
+                np.variable = Some(var_name);
+            }
 
-                if let Some(ref type_schema) = np.type_schema {
-                    np.r#type = Some(Arc::new(type_schema.as_type(context)?));
-                    np.type_schema = None;
-                }
+            if let Some(ref type_schema) = np.type_schema {
+                np.r#type = Some(Arc::new(type_schema.as_type(context)?));
+                np.type_schema = None;
+            }
 
-                if let Some(ref term_schema) = np.term_schema {
-                    np.term = Some(Arc::new(term_schema.as_term(context, constants.clone())?));
-                    np.term_schema = None;
-                }
+            if let Some(ref term_schema) = np.term_schema {
+                np.term = Some(Arc::new(term_schema.as_term(context, constants.clone())?));
+                np.term_schema = None;
+            }
 
-                if np.r#type.is_none() {
-                    if let Some(ref term) = np.term {
-                        np.r#type = Some(term.r#type().clone());
-                    }
+            if np.r#type.is_none() {
+                if let Some(ref term) = np.term {
+                    np.r#type = Some(term.r#type().clone());
                 }
             }
         }
@@ -147,27 +145,26 @@ impl Query {
                                         });
                         }
                     }
+                    continue;
                 }
             } else {
-                if ep.variable.is_none() {
-                    let var_name = ph_generator.next();
-                    ep.variable = Some(var_name);
-                }
+                let var_name = ph_generator.next();
+                ep.variable = Some(var_name);
+            }
 
-                if let Some(ref type_schema) = ep.type_schema {
-                    ep.r#type = Some(Arc::new(type_schema.as_type(context)?));
-                    ep.type_schema = None;
-                }
+            if let Some(ref type_schema) = ep.type_schema {
+                ep.r#type = Some(Arc::new(type_schema.as_type(context)?));
+                ep.type_schema = None;
+            }
 
-                if let Some(ref term_schema) = ep.term_schema {
-                    ep.r#term = Some(Arc::new(term_schema.as_term(context, constants.clone())?));
-                    ep.term_schema = None;
-                }
+            if let Some(ref term_schema) = ep.term_schema {
+                ep.term = Some(Arc::new(term_schema.as_term(context, constants.clone())?));
+                ep.term_schema = None;
+            }
 
-                if ep.r#type.is_none() {
-                    if let Some(ref term) = ep.term {
-                        ep.r#type = Some(term.r#type().clone());
-                    }
+            if ep.r#type.is_none() {
+                if let Some(ref term) = ep.term {
+                    ep.r#type = Some(term.r#type().clone());
                 }
             }
         }

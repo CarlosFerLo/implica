@@ -1,10 +1,10 @@
 #![allow(unused_variables)]
 
-use crate::context::Context;
+use crate::context::{Context, ContextElement};
 use crate::errors::ImplicaError;
 use crate::graph::{python_to_property_map, Edge, Graph, Node, PyGraph};
 use crate::patterns::{EdgePattern, NodePattern, PathPattern, TermSchema, TypeSchema};
-use crate::typing::{python_to_term, python_to_type, Term, Type};
+use crate::typing::{python_to_term, python_to_type, term_to_python, type_to_python, Term, Type};
 use crate::utils::validate_variable_name;
 
 use pyo3::prelude::*;
@@ -238,20 +238,34 @@ impl Query {
             return Ok(results);
         }
 
-        for (m, _) in self.matches.iter() {
+        for (m, context) in self.matches.iter() {
             let dict = PyDict::new(py);
-            for (k, v) in m.iter() {
-                if variables.contains(k) {
-                    match v {
-                        QueryResult::Node(n) => {
-                            dict.set_item(k, n.clone())?;
+
+            for var in variables.iter() {
+                if let Some(var_name) = var.strip_prefix("$") {
+                    let val = context.get(var_name)?;
+                    match val {
+                        ContextElement::Type(t) => {
+                            dict.set_item(var_name, type_to_python(py, &t)?)?;
                         }
-                        QueryResult::Edge(e) => {
-                            dict.set_item(k, e.clone())?;
+                        ContextElement::Term(t) => {
+                            dict.set_item(var_name, term_to_python(py, &t)?)?;
                         }
                     }
+                } else if let Some(val) = m.get(var) {
+                    match val {
+                        QueryResult::Node(n) => dict.set_item(var.clone(), n.clone())?,
+                        QueryResult::Edge(e) => dict.set_item(var.clone(), e.clone())?,
+                    }
+                } else {
+                    return Err(ImplicaError::VariableNotFound {
+                        name: var.clone(),
+                        context: Some("return".to_string()),
+                    }
+                    .into());
                 }
             }
+
             results.push(dict.into());
         }
 

@@ -988,3 +988,15 @@ class TestTypeSchemaEquality:
         schema2 = implica.TypeSchema(pattern2)
 
         assert schema1 == schema2
+
+
+class TestTypeSchemaForDemo:
+    """Test TypeSchema functionality for demo purposes."""
+
+    def test_type_schema_matches_specific_type(self, arrow_aa):
+        schema = implica.TypeSchema("(A:*)->(B:*)")
+        type_instance = implica.Arrow(arrow_aa, arrow_aa)
+        context = {}
+        assert schema.matches(type_instance, context) is True
+        assert context["A"] == arrow_aa
+        assert context["B"] == arrow_aa

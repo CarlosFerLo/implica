@@ -27,6 +27,12 @@ impl Constant {
 
         Ok(Constant { name, func })
     }
+
+    #[pyo3(signature=(*args))]
+    pub fn __call__(&self, py: Python, args: Py<PyTuple>) -> PyResult<Py<PyAny>> {
+        let results = self.func.call1(py, args.bind(py))?;
+        Ok(results)
+    }
 }
 
 impl Constant {

@@ -71,7 +71,7 @@ impl TermSchema {
 
             dict.clear();
 
-            for (k, v) in context_obj.content.iter() {
+            for (k, v) in context_obj.iter() {
                 let t_obj = match v {
                     ContextElement::Type(t) => type_to_python(py, t)?,
                     ContextElement::Term(t) => term_to_python(py, t)?,
@@ -81,6 +81,28 @@ impl TermSchema {
         }
 
         Ok(result)
+    }
+
+    #[pyo3(name="as_term", signature=(context=None, constants=None))]
+    pub fn py_as_term(
+        &self,
+        py: Python,
+        context: Option<Py<PyAny>>,
+        constants: Option<Vec<Constant>>,
+    ) -> PyResult<Py<PyAny>> {
+        let context_obj = if let Some(ctx) = context {
+            python_to_context(ctx.bind(py))?
+        } else {
+            Context::new()
+        };
+        let constants = match constants {
+            Some(cts) => Arc::new(cts.iter().map(|c| (c.name.clone(), c.clone())).collect()),
+            None => Arc::new(HashMap::new()),
+        };
+
+        let term = self.as_term(&context_obj, constants)?;
+
+        term_to_python(py, &term)
     }
 
     fn __eq__(&self, other: TermSchema) -> bool {
