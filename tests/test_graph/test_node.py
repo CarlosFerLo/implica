@@ -69,14 +69,14 @@ class TestNodeBasicMethods:
 
         assert uid1 == uid2
 
-    def test_node_uid_varies_with_different_terms(self, type_a):
+    def test_node_uid_does_not_vary_with_different_terms(self, type_a):
         term1 = implica.BasicTerm("term1", type_a)
         term2 = implica.BasicTerm("term2", type_a)
 
         node1 = implica.Node(type_a, term1)
         node2 = implica.Node(type_a, term2)
 
-        assert node1.uid() != node2.uid()
+        assert node1.uid() == node2.uid()
 
     def test_node_uid_consistent_with_same_term(self, type_a, term_a):
         node1 = implica.Node(type_a, term_a)
@@ -102,14 +102,14 @@ class TestNodeBasicMethods:
     def test_node_inequality_different_types(self, node_a, node_b):
         assert node_a != node_b
 
-    def test_node_inequality_different_terms(self, type_a):
+    def test_node_equality_different_terms(self, type_a):
         term1 = implica.BasicTerm("term_one", type_a)
         term2 = implica.BasicTerm("term_two", type_a)
 
         node1 = implica.Node(type_a, term1)
         node2 = implica.Node(type_a, term2)
 
-        assert node1 != node2
+        assert node1 == node2
 
     def test_node_hash_consistency(self, node_a):
         hash1 = hash(node_a)

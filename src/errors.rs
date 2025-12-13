@@ -96,6 +96,10 @@ pub enum ImplicaError {
         name: String,
         context: Option<String>,
     },
+    SerializationError {
+        message: String,
+        context: Option<String>,
+    },
 }
 
 impl Display for ImplicaError {
@@ -239,6 +243,13 @@ impl Display for ImplicaError {
                 }
                 Ok(())
             }
+            ImplicaError::SerializationError { message, context } => {
+                write!(f, "Serialization Error: '{}'", message)?;
+                if let Some(context) = context {
+                    write!(f, " ({})", context)?;
+                }
+                Ok(())
+            }
         }
     }
 }
@@ -299,6 +310,9 @@ impl From<ImplicaError> for PyErr {
             ImplicaError::LockError { .. } => exceptions::PyRuntimeError::new_err(err.to_string()),
             ImplicaError::ConstantNotFound { .. } => {
                 exceptions::PyValueError::new_err(err.to_string())
+            }
+            ImplicaError::SerializationError { .. } => {
+                exceptions::PyRuntimeError::new_err(err.to_string())
             }
         }
     }

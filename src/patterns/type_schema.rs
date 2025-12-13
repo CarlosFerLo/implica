@@ -133,6 +133,10 @@ impl TypeSchema {
         Self::generate_type(&self.compiled, context)
     }
 
+    pub fn ordered_capture_keys(&self) -> Result<Vec<String>, ImplicaError> {
+        Self::ordered_capture_keys_recursive(&self.compiled)
+    }
+
     fn parse_pattern(input: &str) -> Result<TypePattern, ImplicaError> {
         let trimmed = input.trim();
 
@@ -353,6 +357,28 @@ impl TypeSchema {
                 } else {
                     Ok(Type::Variable(Variable::new(name.clone())?))
                 }
+            }
+        }
+    }
+
+    fn ordered_capture_keys_recursive(pattern: &TypePattern) -> Result<Vec<String>, ImplicaError> {
+        match pattern {
+            TypePattern::Wildcard | TypePattern::Variable(_) => Ok(Vec::new()),
+            TypePattern::Capture { name, pattern } => {
+                let mut keys = vec![name.clone()];
+                let mut pattern_keys = Self::ordered_capture_keys_recursive(pattern)?;
+
+                keys.append(&mut pattern_keys);
+
+                Ok(keys)
+            }
+            TypePattern::Arrow { left, right } => {
+                let mut left_keys = Self::ordered_capture_keys_recursive(left)?;
+                let mut right_keys = Self::ordered_capture_keys_recursive(right)?;
+
+                left_keys.append(&mut right_keys);
+
+                Ok(left_keys)
             }
         }
     }

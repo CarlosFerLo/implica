@@ -1,7 +1,9 @@
 use pyo3::{prelude::*, types::PyTuple};
 
 use crate::{
+    context::{Context, ContextElement},
     errors::ImplicaError,
+    patterns::TypeSchema,
     typing::{python_to_term, type_to_python, Term, Type},
 };
 
@@ -10,13 +12,20 @@ use crate::{
 pub struct Constant {
     #[pyo3(get)]
     pub name: String,
+    #[pyo3(get)]
+    pub type_schema: TypeSchema,
     func: Py<PyAny>,
 }
 
 #[pymethods]
 impl Constant {
     #[new]
-    pub fn new(py: Python, name: String, func: Py<PyAny>) -> PyResult<Self> {
+    pub fn new(
+        py: Python,
+        name: String,
+        type_schema: TypeSchema,
+        func: Py<PyAny>,
+    ) -> PyResult<Self> {
         if !func.bind(py).is_callable() {
             return Err(ImplicaError::PythonError {
                 message: "'func' argument must be a callable".to_string(),
@@ -25,7 +34,11 @@ impl Constant {
             .into());
         }
 
-        Ok(Constant { name, func })
+        Ok(Constant {
+            name,
+            type_schema,
+            func,
+        })
     }
 
     #[pyo3(signature=(*args))]
@@ -53,12 +66,39 @@ impl Constant {
             context: Some(format!("constant '{}' apply", &self.name)),
         })
     }
+
+    pub fn matches(&self, r#type: &Type) -> Result<Option<Term>, ImplicaError> {
+        let mut context = Context::new();
+        if self.type_schema.matches(r#type, &mut context)? {
+            let mut args = Vec::new();
+
+            for key in self.type_schema.ordered_capture_keys()? {
+                match context.get(&key)? {
+                    ContextElement::Type(t) => args.push(t.clone()),
+                    ContextElement::Term(_) => {
+                        return Err(ImplicaError::ContextConflict {
+                            message: "expected context element to be a type but is a term"
+                                .to_string(),
+                            context: Some("constant matches".to_string()),
+                        });
+                    }
+                }
+            }
+
+            let term = self.apply(&args)?;
+
+            Ok(Some(term))
+        } else {
+            Ok(None)
+        }
+    }
 }
 
 impl Clone for Constant {
     fn clone(&self) -> Self {
         Python::attach(|py| Constant {
             name: self.name.clone(),
+            type_schema: self.type_schema.clone(),
             func: self.func.clone_ref(py),
         })
     }

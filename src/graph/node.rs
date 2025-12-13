@@ -150,12 +150,6 @@ impl Node {
             hasher.update(b"node:");
             hasher.update(self.r#type.uid().as_bytes());
 
-            if let Some(ref term_lock) = self.term {
-                let term = term_lock.read().unwrap();
-                hasher.update(b":");
-                hasher.update(term.uid().as_bytes());
-            }
-
             format!("{:x}", hasher.finalize())
         })
     }

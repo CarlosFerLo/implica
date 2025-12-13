@@ -3,6 +3,7 @@ use crate::errors::ImplicaError;
 use crate::patterns::{EdgePattern, TypeSchema};
 use crate::typing::{Term, Type};
 use pyo3::prelude::*;
+use serde_json;
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 
@@ -42,18 +43,15 @@ impl Graph {
         }
     }
 
-    pub fn find_node_by_type(&self, typ: &Type) -> Result<Arc<RwLock<Node>>, ImplicaError> {
+    pub fn find_node_by_type(&self, typ: &Type) -> Result<Option<Arc<RwLock<Node>>>, ImplicaError> {
         let nodes = self.nodes.read().map_err(|e| ImplicaError::LockError {
             rw: "read".to_string(),
             message: e.to_string(),
             context: Some("find node by type".to_string()),
         })?;
         match nodes.get(typ.uid()) {
-            Some(node) => Ok(node.clone()),
-            None => Err(ImplicaError::NodeNotFound {
-                uid: typ.uid().to_string(),
-                context: Some("find_node_by_type".to_string()),
-            }),
+            Some(node) => Ok(Some(node.clone())),
+            None => Ok(None),
         }
     }
 
@@ -116,20 +114,35 @@ impl Graph {
     pub fn add_node(&self, node: &Node) -> Result<(), ImplicaError> {
         let uid = node.uid();
 
-        let mut nodes = self.nodes.write().map_err(|e| ImplicaError::LockError {
-            rw: "write".to_string(),
-            message: e.to_string(),
-            context: Some("add node".to_string()),
-        })?;
-        if let Some(existing) = nodes.get(uid) {
-            return Err(ImplicaError::NodeAlreadyExists {
-                message: "Tried to add a node with a type that already exists.".to_string(),
-                existing: existing.clone(),
-                new: Arc::new(RwLock::new(node.clone())),
-            });
+        {
+            let mut nodes = self.nodes.write().map_err(|e| ImplicaError::LockError {
+                rw: "write".to_string(),
+                message: e.to_string(),
+                context: Some("add node".to_string()),
+            })?;
+
+            if let Some(existing) = nodes.get(uid) {
+                return Err(ImplicaError::NodeAlreadyExists {
+                    message: "Tried to add a node with a type that already exists.".to_string(),
+                    existing: existing.clone(),
+                    new: Arc::new(RwLock::new(node.clone())),
+                });
+            }
+
+            let mut node = node.clone();
+
+            if node.term.is_none() {
+                for cnst in self.constants.values() {
+                    if let Some(term) = cnst.matches(&node.r#type)? {
+                        node.term = Some(Arc::new(RwLock::new(term)));
+                    }
+                }
+            }
+
+            nodes.insert(uid.to_string(), Arc::new(RwLock::new(node.clone())));
         }
 
-        nodes.insert(uid.to_string(), Arc::new(RwLock::new(node.clone())));
+        self.update_node_terms(node)?;
 
         Ok(())
     }
@@ -183,7 +196,12 @@ impl Graph {
                     context: Some("set node term".to_string()),
                 })?;
 
+                let prev_term = node.term.clone();
                 node.term = Some(Arc::new(RwLock::new(term.clone())));
+
+                if prev_term.is_none() {
+                    self.update_node_terms(&node)?;
+                }
 
                 Ok(())
             }
@@ -293,6 +311,239 @@ impl Graph {
 
         Ok(())
     }
+
+    fn update_node_terms(&self, node: &Node) -> Result<(), ImplicaError> {
+        if let Some(term_lock) = node.term.clone() {
+            let term = term_lock.read().map_err(|e| ImplicaError::LockError {
+                rw: "read".to_string(),
+                message: e.to_string(),
+                context: Some("update node terms".to_string()),
+            })?;
+
+            if let Some(r#type) = node.r#type.as_arrow() {
+                let mut start = Node::new(r#type.left.clone(), None, None)?;
+
+                match self.add_node(&start) {
+                    Ok(_) => {}
+                    Err(ImplicaError::NodeAlreadyExists {
+                        message: _,
+                        existing,
+                        new: _,
+                    }) => {
+                        start = existing
+                            .read()
+                            .map_err(|e| ImplicaError::LockError {
+                                rw: "read".to_string(),
+                                message: e.to_string(),
+                                context: Some("update node terms".to_string()),
+                            })?
+                            .clone();
+                    }
+                    Err(e) => return Err(e),
+                }
+
+                let mut end = Node::new(r#type.right.clone(), None, None)?;
+
+                match self.add_node(&end) {
+                    Ok(_) => {}
+                    Err(ImplicaError::NodeAlreadyExists {
+                        message: _,
+                        existing,
+                        new: _,
+                    }) => {
+                        end = existing
+                            .read()
+                            .map_err(|e| ImplicaError::LockError {
+                                rw: "read".to_string(),
+                                message: e.to_string(),
+                                context: Some("update node terms".to_string()),
+                            })?
+                            .clone();
+                    }
+                    Err(e) => return Err(e),
+                }
+
+                self.add_edge(Arc::new(term.clone()), start.clone(), end.clone(), None)?;
+            }
+
+            let edges = self.edges.read().map_err(|e| ImplicaError::LockError {
+                rw: "read".to_string(),
+                message: e.to_string(),
+                context: Some("update node terms".to_string()),
+            })?;
+
+            for edge_lock in edges.values() {
+                let edge = edge_lock.read().map_err(|e| ImplicaError::LockError {
+                    rw: "read".to_string(),
+                    message: e.to_string(),
+                    context: Some("update node terms".to_string()),
+                })?;
+
+                let start = edge.start.read().map_err(|e| ImplicaError::LockError {
+                    rw: "read".to_string(),
+                    message: e.to_string(),
+                    context: Some("update node terms".to_string()),
+                })?;
+
+                let end = edge.end.read().map_err(|e| ImplicaError::LockError {
+                    rw: "read".to_string(),
+                    message: e.to_string(),
+                    context: Some("update node terms".to_string()),
+                })?;
+
+                if &*start == node {
+                    self.set_node_term(end.uid(), &edge.term.apply(&term)?)?;
+                } else if &*end == node {
+                    if let Some(app) = term.as_application() {
+                        if app.function == edge.term {
+                            self.set_node_term(start.uid(), &app.argument)?;
+                        }
+                    }
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    pub fn to_dot(&self) -> Result<String, ImplicaError> {
+        let mut dot = String::new();
+        dot.push_str("digraph G {\n");
+
+        let nodes = self.nodes.read().map_err(|e| ImplicaError::LockError {
+            rw: "read".to_string(),
+            message: e.to_string(),
+            context: Some("to dot".to_string()),
+        })?;
+
+        for (uid, node_lock) in nodes.iter() {
+            let node = node_lock.read().map_err(|e| ImplicaError::LockError {
+                rw: "read".to_string(),
+                message: e.to_string(),
+                context: Some("to dot".to_string()),
+            })?;
+
+            dot.push_str(&format!(
+                " \"{}\" [label=\"{}\", color=\"{}\"];\n",
+                uid,
+                node.r#type,
+                if node.term.is_none() { "blue" } else { "red" }
+            ));
+        }
+
+        let edges = self.edges.read().map_err(|e| ImplicaError::LockError {
+            rw: "read".to_string(),
+            message: e.to_string(),
+            context: Some("to dot".to_string()),
+        })?;
+
+        for edge_lock in edges.values() {
+            let edge = edge_lock.read().map_err(|e| ImplicaError::LockError {
+                rw: "read".to_string(),
+                message: e.to_string(),
+                context: Some("to dot".to_string()),
+            })?;
+
+            let start = edge.start.read().map_err(|e| ImplicaError::LockError {
+                rw: "read".to_string(),
+                message: e.to_string(),
+                context: Some("to dot".to_string()),
+            })?;
+
+            let end = edge.end.read().map_err(|e| ImplicaError::LockError {
+                rw: "read".to_string(),
+                message: e.to_string(),
+                context: Some("to dot".to_string()),
+            })?;
+
+            dot.push_str(&format!(
+                " \"{}\" -> \"{}\" [label=\"{}\"];\n",
+                start.uid(),
+                end.uid(),
+                edge.term
+            ));
+        }
+
+        dot.push_str("}\n");
+
+        Ok(dot)
+    }
+
+    pub fn to_force_graph_json(&self) -> Result<String, ImplicaError> {
+        let nodes: Vec<_> = self
+            .nodes
+            .read()
+            .map_err(|e| ImplicaError::LockError {
+                rw: "read".to_string(),
+                message: e.to_string(),
+                context: Some("to force graph json".to_string()),
+            })?
+            .values()
+            .map(|n| -> Result<HashMap<String, String>, ImplicaError> {
+                let node = n.read().map_err(|e| ImplicaError::LockError {
+                    rw: "read".to_string(),
+                    message: e.to_string(),
+                    context: Some("to force graph json".to_string()),
+                })?;
+
+                Ok(HashMap::from([
+                    ("id".to_string(), node.uid().to_string()),
+                    ("label".to_string(), node.r#type.to_string()),
+                    (
+                        "group".to_string(),
+                        if node.term.is_none() {
+                            "no_term".to_string()
+                        } else {
+                            "term".to_string()
+                        },
+                    ),
+                ]))
+            })
+            .collect::<Result<_, _>>()?;
+
+        let links: Vec<_> = self
+            .edges
+            .read()
+            .map_err(|e| ImplicaError::LockError {
+                rw: "read".to_string(),
+                message: e.to_string(),
+                context: Some("to force graph json".to_string()),
+            })?
+            .values()
+            .map(|e| -> Result<HashMap<String, String>, ImplicaError> {
+                let edge = e.read().map_err(|e| ImplicaError::LockError {
+                    rw: "read".to_string(),
+                    message: e.to_string(),
+                    context: Some("to force graph json".to_string()),
+                })?;
+
+                let start = edge.start.read().map_err(|e| ImplicaError::LockError {
+                    rw: "read".to_string(),
+                    message: e.to_string(),
+                    context: Some("to force graph json".to_string()),
+                })?;
+
+                let end = edge.end.read().map_err(|e| ImplicaError::LockError {
+                    rw: "read".to_string(),
+                    message: e.to_string(),
+                    context: Some("to force graph json".to_string()),
+                })?;
+
+                Ok(HashMap::from([
+                    ("source".to_string(), start.uid().to_string()),
+                    ("target".to_string(), end.uid().to_string()),
+                    ("label".to_string(), edge.term.to_string()),
+                ]))
+            })
+            .collect::<Result<_, _>>()?;
+
+        let graph = HashMap::from([("nodes".to_string(), nodes), ("links".to_string(), links)]);
+
+        serde_json::to_string(&graph).map_err(|e| ImplicaError::SerializationError {
+            message: e.to_string(),
+            context: Some("to force graph json".to_string()),
+        })
+    }
 }
 
 impl Default for Graph {
@@ -387,5 +638,13 @@ impl PyGraph {
         }
 
         Ok(results)
+    }
+
+    pub fn to_dot(&self) -> PyResult<String> {
+        self.graph.to_dot().map_err(|e| e.into())
+    }
+
+    pub fn to_force_graph_json(&self) -> PyResult<String> {
+        self.graph.to_force_graph_json().map_err(|e| e.into())
     }
 }

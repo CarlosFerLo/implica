@@ -2,12 +2,22 @@ import implica
 from typing import List
 import logging
 
+# visualization
+from graphviz import Source
+import json
+import tempfile
+import webbrowser
+from pathlib import Path
+
 
 K = implica.Constant(
-    "K", lambda A, B: implica.BasicTerm("K", implica.Arrow(A, implica.Arrow(B, A)))
+    "K",
+    implica.TypeSchema("(A:*) -> (B:*) -> A"),
+    lambda A, B: implica.BasicTerm("K", implica.Arrow(A, implica.Arrow(B, A))),
 )
 S = implica.Constant(
     "S",
+    implica.TypeSchema("((A:*) -> (B:*) -> (C:*)) -> (A -> B) -> A -> C"),
     lambda A, B, C: implica.BasicTerm(
         "S",
         implica.Arrow(
@@ -40,7 +50,7 @@ class Model:
         self.graph = implica.Graph(constants=constants)
         self.max_iterations = max_iterations
 
-    def run(self, query: str):
+    def run(self, query: str) -> str:
 
         objective = implica.TypeSchema(query)
 
@@ -50,28 +60,84 @@ class Model:
         self.graph.query().create(node="N", type_schema=objective).execute()
 
         for iteration in range(self.max_iterations):
-            logging.debug(f"--- Iteration {iteration} ---")
+            logging.debug(f"--- Iteration {iteration+1} ---")
 
             # Mark existing nodes
             self.graph.query().match("(N)").set("N", {"existed": True}, overwrite=True).execute()
 
-            self.graph.query().match("(N:(B:*)->(A:*))").where("N.existed").merge(
-                "(M: A { existed: false })"
-            ).merge("(M)-[::@K(A, B)]->(N)").execute()
-            self.graph.query().match("(N:(A:*))").where("N.existed").match("(M:(B:*))").where(
-                "M.existed"
-            ).merge("(N)-[::@K(A, B)]->(:B->A { existed: false })").execute()
+            (
+                self.graph.query()
+                .match("(N:(B:*)->(A:*))")
+                .where("N.existed")
+                .merge("(M: A { existed: false })-[::@K(A, B)]->(N)")
+                .execute()
+            )
+            (
+                self.graph.query()
+                .match("(N:(A:*))")
+                .where("N.existed")
+                .match("(M:(B:*))")
+                .where("M.existed")
+                .merge("(N)-[::@K(A, B)]->(:B->A { existed: false })")
+                .execute()
+            )
+            (
+                self.graph.query()
+                .match("(N:((A:*)->(B:*))->A->(C:*))")
+                .where("N.existed")
+                .merge("(M:A->B->C { existed: false })-[::@S(A, B, C)]->(N)")
+                .execute()
+            )
+            (
+                self.graph.query()
+                .match("(N:(A:*)->(B:*)->(C:*))")
+                .where("N.existed")
+                .merge("(N)-[::@S(A, B, C)]->(:(A->B)->A->C { existed: false })")
+                .execute()
+            )
 
-            result = self.graph.query().match("(N)-[E]->(M)").return_("N", "E", "M")
+            result = (
+                self.graph.query().match(f"(:{run_context.objective.as_type()}:f)").return_("f")
+            )
 
-            for record in result:
-                logging.debug(f"Record: N={record['N']}, E={record['E']}, M={record['M']}")
+            if result:
+                logging.debug(f"Objective achieved in iteration {iteration+1}")
+                return str(result[0]["f"])
+
+        logging.debug("Objective not achieved within max iterations")
+        return "Objective not achieved within max iterations"
+
+    def visualize(self) -> None:
+        dot = self.graph.to_dot()
+        Source(dot).render("model_graph", format="png", cleanup=True)
+
+    def visualize_force_graph(self) -> None:
+        json_data = json.loads(self.graph.to_force_graph_json())
+
+        html = Path("./demo/viewer.html").read_text()
+        html = html.replace("GRAPH_DATA", json.dumps(json_data))
+
+        try:
+            tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".html")
+            tmp.write(html.encode("utf-8"))
+            tmp.close()
+
+            webbrowser.open(f"file://{tmp.name}")
+        finally:
+            tmp.delete = True
 
 
 if __name__ == "__main__":
 
-    logging.basicConfig(level=logging.DEBUG, format="[%(asctime)s - %(levelname)s] %(message)s")
+    logging.basicConfig(
+        level=logging.DEBUG,
+        format="[%(asctime)s - %(levelname)s] %(message)s",
+    )
 
-    model = Model(constants=[K, S], max_iterations=10)
+    model = Model(constants=[K, S], max_iterations=4)
 
-    model.run("A -> A")
+    result = model.run("A -> A")
+    print("Model run completed.")
+    print(f"Result: {result}")
+    print("Visualizing model graph...")
+    model.visualize_force_graph()

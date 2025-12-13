@@ -60,7 +60,9 @@ def term_aa(arrow_aa):
 @pytest.fixture
 def K():
     return implica.Constant(
-        "K", lambda A, B: implica.BasicTerm("K", implica.Arrow(A, implica.Arrow(B, A)))
+        "K",
+        implica.TypeSchema("(A:*) -> (B:*) -> A"),
+        lambda A, B: implica.BasicTerm("K", implica.Arrow(A, implica.Arrow(B, A))),
     )
 
 
@@ -68,6 +70,7 @@ def K():
 def S():
     return implica.Constant(
         "S",
+        implica.TypeSchema("((A:*) -> (B:*) -> (C:*)) -> (A -> B) -> A -> C"),
         lambda A, B, C: implica.BasicTerm(
             "S",
             implica.Arrow(
@@ -138,12 +141,8 @@ def graph_with_edges(
 ):
     graph = implica.Graph()
     graph.query().create(node="N1", type=type_a).create(node="N2", type=type_b).create(
-        node="N3", type=arrow_ab, term=term_ab
-    ).create(node="N4", type=arrow_ba, term=term_ba).create(
         edge="E1", start="N1", end="N2", type=arrow_ab, term=term_ab
-    ).create(
-        edge="E2", start="N2", end="N1", type=arrow_ba, term=term_ba
-    ).execute()
+    ).create(edge="E2", start="N2", end="N1", type=arrow_ba, term=term_ba).execute()
     return graph
 
 
