@@ -15,8 +15,10 @@ from .implica import (
     Query,
 )
 
-Type = Variable | Arrow
-Term = BasicTerm | Application
+from typing import Union
+
+Type = Union[Variable, Arrow]
+Term = Union[BasicTerm, Application]
 
 __all__ = [
     "Variable",
