@@ -43,6 +43,16 @@ def arrow_aa(type_a):
 
 
 @pytest.fixture
+def arrow_ac(type_a, type_c):
+    return implica.Arrow(type_a, type_c)
+
+
+@pytest.fixture
+def arrow_bc(type_b, type_c):
+    return implica.Arrow(type_b, type_c)
+
+
+@pytest.fixture
 def term_ab(arrow_ab):
     return implica.BasicTerm("f", arrow_ab)
 
@@ -55,6 +65,16 @@ def term_ba(arrow_ba):
 @pytest.fixture
 def term_aa(arrow_aa):
     return implica.BasicTerm("h", arrow_aa)
+
+
+@pytest.fixture
+def term_ac(arrow_ac):
+    return implica.BasicTerm("k", arrow_ac)
+
+
+@pytest.fixture
+def term_bc(arrow_bc):
+    return implica.BasicTerm("m", arrow_bc)
 
 
 @pytest.fixture

@@ -182,34 +182,44 @@ impl Graph {
     }
 
     pub fn set_node_term(&self, node_uid: &str, term: &Term) -> Result<(), ImplicaError> {
-        let nodes = self.nodes.read().map_err(|e| ImplicaError::LockError {
-            rw: "read".to_string(),
-            message: e.to_string(),
-            context: Some("set node term".to_string()),
-        })?;
-
-        match nodes.get(node_uid) {
-            Some(node_lock) => {
-                let mut node = node_lock.write().map_err(|e| ImplicaError::LockError {
-                    rw: "write".to_string(),
-                    message: e.to_string(),
-                    context: Some("set node term".to_string()),
-                })?;
-
-                let prev_term = node.term.clone();
-                node.term = Some(Arc::new(RwLock::new(term.clone())));
-
-                if prev_term.is_none() {
-                    self.update_node_terms(&node)?;
-                }
-
-                Ok(())
-            }
-            None => Err(ImplicaError::NodeNotFound {
-                uid: node_uid.to_string(),
+        let (should_update, node_for_update) = {
+            let nodes = self.nodes.read().map_err(|e| ImplicaError::LockError {
+                rw: "read".to_string(),
+                message: e.to_string(),
                 context: Some("set node term".to_string()),
-            }),
+            })?;
+
+            match nodes.get(node_uid) {
+                Some(node_lock) => {
+                    let mut node = node_lock.write().map_err(|e| ImplicaError::LockError {
+                        rw: "write".to_string(),
+                        message: e.to_string(),
+                        context: Some("set node term".to_string()),
+                    })?;
+
+                    let prev_term = node.term.clone();
+                    node.term = Some(Arc::new(RwLock::new(term.clone())));
+
+                    let should_update = prev_term.is_none();
+                    let node_clone = node.clone();
+
+                    (should_update, node_clone)
+                }
+                None => {
+                    return Err(ImplicaError::NodeNotFound {
+                        uid: node_uid.to_string(),
+                        context: Some("set node term".to_string()),
+                    });
+                }
+            }
+        }; // All locks released here
+
+        // Now call update_node_terms without holding any locks
+        if should_update {
+            self.update_node_terms(&node_for_update)?;
         }
+
+        Ok(())
     }
 
     pub fn add_edge(
@@ -219,47 +229,109 @@ impl Graph {
         end: Node,
         properties: Option<SharedPropertyMap>,
     ) -> Result<Edge, ImplicaError> {
-        let nodes = self.nodes.read().map_err(|e| ImplicaError::LockError {
-            rw: "read".to_string(),
-            message: e.to_string(),
-            context: Some("add edge".to_string()),
-        })?;
-        let start_ptr = match nodes.get(start.uid()) {
-            Some(ptr) => ptr.clone(),
-            None => {
-                return Err(ImplicaError::NodeNotFound {
-                    uid: start.uid().to_string(),
-                    context: Some("add edge".to_string()),
-                });
-            }
-        };
-        let end_ptr = match nodes.get(end.uid()) {
-            Some(ptr) => ptr.clone(),
-            None => {
-                return Err(ImplicaError::NodeNotFound {
-                    uid: end.uid().to_string(),
-                    context: Some("add edge".to_string()),
-                });
-            }
-        };
+        let mut new_start_term = None;
+        let mut new_end_term = None;
 
-        let edge = Edge::new(term, start_ptr, end_ptr, properties)?;
+        // Get node pointers and release the lock
+        let (start_ptr, end_ptr) = {
+            let nodes = self.nodes.read().map_err(|e| ImplicaError::LockError {
+                rw: "read".to_string(),
+                message: e.to_string(),
+                context: Some("add edge".to_string()),
+            })?;
+            let start_ptr = match nodes.get(start.uid()) {
+                Some(ptr) => ptr.clone(),
+                None => {
+                    return Err(ImplicaError::NodeNotFound {
+                        uid: start.uid().to_string(),
+                        context: Some("add edge".to_string()),
+                    });
+                }
+            };
+            let end_ptr = match nodes.get(end.uid()) {
+                Some(ptr) => ptr.clone(),
+                None => {
+                    return Err(ImplicaError::NodeNotFound {
+                        uid: end.uid().to_string(),
+                        context: Some("add edge".to_string()),
+                    });
+                }
+            };
+            (start_ptr, end_ptr)
+        }; // nodes lock released here
+
+        let edge = Edge::new(term.clone(), start_ptr.clone(), end_ptr.clone(), properties)?;
         let uid = edge.uid();
 
-        let mut edges = self.edges.write().map_err(|e| ImplicaError::LockError {
-            rw: "write".to_string(),
-            message: e.to_string(),
-            context: Some("add edge".to_string()),
-        })?;
-        if let Some(existing) = edges.get(uid) {
-            return Err(ImplicaError::EdgeAlreadyExists {
-                message: "Tried to add a node that already exists.".to_string(),
-                existing: existing.clone(),
-                new: Arc::new(RwLock::new(edge.clone())),
-            });
-        }
+        {
+            let mut edges = self.edges.write().map_err(|e| ImplicaError::LockError {
+                rw: "write".to_string(),
+                message: e.to_string(),
+                context: Some("add edge".to_string()),
+            })?;
+            if let Some(existing) = edges.get(uid) {
+                return Err(ImplicaError::EdgeAlreadyExists {
+                    message: "Tried to add a node that already exists.".to_string(),
+                    existing: existing.clone(),
+                    new: Arc::new(RwLock::new(edge.clone())),
+                });
+            }
 
-        edges.insert(uid.to_string(), Arc::new(RwLock::new(edge.clone())));
+            edges.insert(uid.to_string(), Arc::new(RwLock::new(edge.clone())));
+        } // edges lock released here
+
+        // Now compute new terms
+        {
+            let start_node = start_ptr.read().map_err(|e| ImplicaError::LockError {
+                rw: "read".to_string(),
+                message: e.to_string(),
+                context: Some("add edge".to_string()),
+            })?;
+
+            let end_node = end_ptr.read().map_err(|e| ImplicaError::LockError {
+                rw: "read".to_string(),
+                message: e.to_string(),
+                context: Some("add edge".to_string()),
+            })?;
+
+            if end.term.is_none() {
+                if let Some(start_term_lock) = start_node.term.as_ref() {
+                    let start_term =
+                        start_term_lock
+                            .read()
+                            .map_err(|e| ImplicaError::LockError {
+                                rw: "read".to_string(),
+                                message: e.to_string(),
+                                context: Some("add edge".to_string()),
+                            })?;
+                    new_end_term = Some(term.apply(&start_term)?);
+                }
+            }
+
+            if start.term.is_none() {
+                if let Some(end_term_lock) = end_node.term.as_ref() {
+                    let end_term = end_term_lock.read().map_err(|e| ImplicaError::LockError {
+                        rw: "read".to_string(),
+                        message: e.to_string(),
+                        context: Some("add edge".to_string()),
+                    })?;
+
+                    if let Some(end_app) = end_term.as_application() {
+                        if end_app.function == term {
+                            new_start_term = Some(end_app.argument.clone());
+                        }
+                    }
+                }
+            }
+        } // start_node and end_node locks released here
+
+        // Now we can safely call set_node_term without holding any locks
+        if let Some(start_term) = new_start_term {
+            self.set_node_term(start.uid(), &start_term)?;
+        }
+        if let Some(end_term) = new_end_term {
+            self.set_node_term(end.uid(), &end_term)?;
+        }
 
         Ok(edge)
     }
@@ -366,40 +438,53 @@ impl Graph {
                 self.add_edge(Arc::new(term.clone()), start.clone(), end.clone(), None)?;
             }
 
-            let edges = self.edges.read().map_err(|e| ImplicaError::LockError {
-                rw: "read".to_string(),
-                message: e.to_string(),
-                context: Some("update node terms".to_string()),
-            })?;
-
-            for edge_lock in edges.values() {
-                let edge = edge_lock.read().map_err(|e| ImplicaError::LockError {
+            // Collect all updates needed before acquiring any locks for recursive calls
+            let updates: Vec<(String, Arc<crate::typing::Term>)> = {
+                let edges = self.edges.read().map_err(|e| ImplicaError::LockError {
                     rw: "read".to_string(),
                     message: e.to_string(),
                     context: Some("update node terms".to_string()),
                 })?;
 
-                let start = edge.start.read().map_err(|e| ImplicaError::LockError {
-                    rw: "read".to_string(),
-                    message: e.to_string(),
-                    context: Some("update node terms".to_string()),
-                })?;
+                let mut updates = Vec::new();
 
-                let end = edge.end.read().map_err(|e| ImplicaError::LockError {
-                    rw: "read".to_string(),
-                    message: e.to_string(),
-                    context: Some("update node terms".to_string()),
-                })?;
+                for edge_lock in edges.values() {
+                    let edge = edge_lock.read().map_err(|e| ImplicaError::LockError {
+                        rw: "read".to_string(),
+                        message: e.to_string(),
+                        context: Some("update node terms".to_string()),
+                    })?;
 
-                if &*start == node {
-                    self.set_node_term(end.uid(), &edge.term.apply(&term)?)?;
-                } else if &*end == node {
-                    if let Some(app) = term.as_application() {
-                        if app.function == edge.term {
-                            self.set_node_term(start.uid(), &app.argument)?;
+                    let start = edge.start.read().map_err(|e| ImplicaError::LockError {
+                        rw: "read".to_string(),
+                        message: e.to_string(),
+                        context: Some("update node terms".to_string()),
+                    })?;
+
+                    let end = edge.end.read().map_err(|e| ImplicaError::LockError {
+                        rw: "read".to_string(),
+                        message: e.to_string(),
+                        context: Some("update node terms".to_string()),
+                    })?;
+
+                    if &*start == node {
+                        let new_term = edge.term.apply(&term)?;
+                        updates.push((end.uid().to_string(), Arc::new(new_term)));
+                    } else if &*end == node {
+                        if let Some(app) = term.as_application() {
+                            if app.function == edge.term {
+                                updates.push((start.uid().to_string(), app.argument.clone()));
+                            }
                         }
                     }
                 }
+
+                updates
+            }; // edges lock released here
+
+            // Now apply updates without holding any locks
+            for (node_uid, new_term) in updates {
+                self.set_node_term(&node_uid, &new_term)?;
             }
         }
 

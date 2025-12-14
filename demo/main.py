@@ -114,6 +114,8 @@ class Model:
     def visualize_force_graph(self) -> None:
         json_data = json.loads(self.graph.to_force_graph_json())
 
+        print(json_data)
+
         html = Path("./demo/viewer.html").read_text()
         html = html.replace("GRAPH_DATA", json.dumps(json_data))
 
@@ -134,7 +136,7 @@ if __name__ == "__main__":
         format="[%(asctime)s - %(levelname)s] %(message)s",
     )
 
-    model = Model(constants=[K, S], max_iterations=4)
+    model = Model(constants=[K, S], max_iterations=3)
 
     result = model.run("A -> A")
     print("Model run completed.")
