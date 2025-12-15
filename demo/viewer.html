@@ -19,7 +19,7 @@ const Graph = ForceGraph3D()(document.getElementById("graph"))
   .graphData(graphData)
   .nodeId("id")
   .nodeLabel(node => node.label)
-  .nodeColor(node => node.group === "term" ? "#3b82f6" : "#ef4444")
+  .nodeColor(node => node.group == 1 ? "#FF0000" : "#0000FF")
 
   // Directed edges
   .linkDirectionalArrowLength(6)

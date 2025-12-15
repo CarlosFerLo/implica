@@ -136,7 +136,7 @@ if __name__ == "__main__":
         format="[%(asctime)s - %(levelname)s] %(message)s",
     )
 
-    model = Model(constants=[K, S], max_iterations=3)
+    model = Model(constants=[K, S], max_iterations=4)
 
     result = model.run("A -> A")
     print("Model run completed.")

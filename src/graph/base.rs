@@ -468,11 +468,13 @@ impl Graph {
                     })?;
 
                     if &*start == node {
-                        let new_term = edge.term.apply(&term)?;
-                        updates.push((end.uid().to_string(), Arc::new(new_term)));
+                        if end.term.is_none() {
+                            let new_term = edge.term.apply(&term)?;
+                            updates.push((end.uid().to_string(), Arc::new(new_term)));
+                        }
                     } else if &*end == node {
                         if let Some(app) = term.as_application() {
-                            if app.function == edge.term {
+                            if start.term.is_none() && app.function == edge.term {
                                 updates.push((start.uid().to_string(), app.argument.clone()));
                             }
                         }
@@ -577,9 +579,9 @@ impl Graph {
                     (
                         "group".to_string(),
                         if node.term.is_none() {
-                            "no_term".to_string()
+                            0.to_string()
                         } else {
-                            "term".to_string()
+                            1.to_string()
                         },
                     ),
                 ]))
