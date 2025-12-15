@@ -1,7 +1,7 @@
 use fancy_regex::Regex;
 use pyo3::prelude::*;
 use pyo3::types::{PyBool, PyDict, PyFloat, PyInt, PyList, PyString};
-use rhai::{Dynamic, Engine, Map, Scope};
+use rhai::{Dynamic, Engine, EvalAltResult, Map, Scope};
 use std::collections::HashMap;
 
 use crate::errors::ImplicaError;
@@ -97,9 +97,12 @@ impl Evaluator {
             .eval_with_scope::<bool>(scope, &transpiled_query)
         {
             Ok(result) => Ok(result),
-            Err(e) => Err(ImplicaError::EvaluationError {
-                message: e.to_string(),
-            }),
+            Err(e) => match e.as_ref() {
+                EvalAltResult::ErrorMismatchOutputType(output, _, _) => Ok(output != "()"),
+                _ => Err(ImplicaError::EvaluationError {
+                    message: e.to_string(),
+                }),
+            },
         }
     }
 }
