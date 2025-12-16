@@ -1,15 +1,12 @@
-use crate::context::{python_to_context, Context, ContextElement};
 use crate::errors::ImplicaError;
-use crate::typing::{python_to_type, term_to_python, type_to_python, Arrow, Type, Variable};
+
 use crate::utils::validate_variable_name;
 use pyo3::prelude::*;
-use pyo3::types::PyDict;
 
 use std::fmt::Display;
-use std::sync::Arc;
 
 #[derive(Clone, Debug, PartialEq)]
-enum TypePattern {
+pub enum TypePattern {
     Wildcard,
     Variable(String),
     Arrow {
@@ -28,7 +25,7 @@ pub struct TypeSchema {
     #[pyo3(get)]
     pub pattern: String,
 
-    compiled: TypePattern,
+    pub compiled: TypePattern,
 }
 
 impl Display for TypeSchema {
@@ -42,67 +39,6 @@ impl TypeSchema {
     #[new]
     pub fn py_new(pattern: String) -> PyResult<Self> {
         TypeSchema::new(pattern).map_err(|e| e.into())
-    }
-
-    #[pyo3(name = "matches", signature = (r#type, context = None))]
-    pub fn py_matches(
-        &self,
-        py: Python,
-        r#type: Py<PyAny>,
-        context: Option<Py<PyAny>>,
-    ) -> PyResult<bool> {
-        let mut context_obj = match context.as_ref() {
-            Some(c) => python_to_context(c.bind(py))?,
-            None => Context::new(),
-        };
-        let type_obj = python_to_type(r#type.bind(py))?;
-
-        let result = self.matches(&type_obj, &mut context_obj)?;
-
-        if let Some(c) = context {
-            let dict = c.bind(py).cast::<PyDict>()?;
-
-            dict.clear();
-
-            for (k, v) in context_obj.iter() {
-                let t_obj = match v {
-                    ContextElement::Type(t) => type_to_python(py, t)?,
-                    ContextElement::Term(t) => term_to_python(py, t)?,
-                };
-                dict.set_item(k.clone(), t_obj)?;
-            }
-        }
-
-        Ok(result)
-    }
-
-    #[pyo3(name="as_type", signature=(context=None))]
-    pub fn py_as_type(&self, py: Python, context: Option<Py<PyAny>>) -> PyResult<Py<PyAny>> {
-        let context_obj = if let Some(ctx) = context {
-            python_to_context(ctx.bind(py))?
-        } else {
-            Context::new()
-        };
-        let r#type = self.as_type(&context_obj)?;
-        type_to_python(py, &r#type)
-    }
-
-    #[pyo3(signature=(context=None))]
-    pub fn get_type_vars(
-        &self,
-        py: Python,
-        context: Option<Py<PyAny>>,
-    ) -> PyResult<Vec<Py<PyAny>>> {
-        let context = match context {
-            Some(ctx) => python_to_context(ctx.bind(py))?,
-            None => Context::new(),
-        };
-        let r#type = self.as_type(&context)?;
-
-        match r#type {
-            Type::Variable(v) => v.py_get_type_vars(py),
-            Type::Arrow(arr) => arr.py_get_type_vars(py),
-        }
     }
 
     fn __eq__(&self, other: TypeSchema) -> bool {
@@ -123,18 +59,6 @@ impl TypeSchema {
         let compiled = Self::parse_pattern(&pattern)?;
 
         Ok(TypeSchema { pattern, compiled })
-    }
-
-    pub fn matches(&self, r#type: &Type, context: &mut Context) -> Result<bool, ImplicaError> {
-        Self::match_pattern(&self.compiled, r#type, context)
-    }
-
-    pub fn as_type(&self, context: &Context) -> Result<Type, ImplicaError> {
-        Self::generate_type(&self.compiled, context)
-    }
-
-    pub fn ordered_capture_keys(&self) -> Result<Vec<String>, ImplicaError> {
-        Self::ordered_capture_keys_recursive(&self.compiled)
     }
 
     fn parse_pattern(input: &str) -> Result<TypePattern, ImplicaError> {
@@ -250,137 +174,6 @@ impl TypeSchema {
 
         validate_variable_name(input)?;
         Ok(TypePattern::Variable(input.to_string()))
-    }
-
-    /// Recursively matches a pattern against a type.
-    fn match_pattern(
-        pattern: &TypePattern,
-        r#type: &Type,
-        context: &mut Context,
-    ) -> Result<bool, ImplicaError> {
-        match pattern {
-            TypePattern::Wildcard => {
-                // Wildcard matches anything
-                Ok(true)
-            }
-
-            TypePattern::Variable(name) => {
-                if let Ok(e) = context.get(name) {
-                    match e {
-                        ContextElement::Type(ref t) => {
-                            return Ok(r#type == t);
-                        }
-                        ContextElement::Term(_) => {
-                            return Err(ImplicaError::ContextConflict {
-                                message: "expected context element to be a type but is a term"
-                                    .to_string(),
-                                context: Some("type match pattern".to_string()),
-                            });
-                        }
-                    }
-                }
-                // Match only if type is a Variable with the same name
-                match r#type {
-                    Type::Variable(v) => Ok(v.name == *name),
-                    _ => Ok(false),
-                }
-            }
-
-            TypePattern::Arrow { left, right } => {
-                // Match only if type is an Arrow with matching parts
-                match r#type {
-                    Type::Arrow(app) => {
-                        let result = Self::match_pattern(left, &app.left, context)?
-                            && Self::match_pattern(right, &app.right, context)?;
-
-                        Ok(result)
-                    }
-                    _ => Ok(false),
-                }
-            }
-
-            TypePattern::Capture { name, pattern } => {
-                // Try to match the inner pattern
-                if Self::match_pattern(pattern, r#type, context)? {
-                    if let Ok(e) = context.get(name) {
-                        match e {
-                            ContextElement::Type(ref t) => Ok(r#type == t),
-                            ContextElement::Term(_) => Err(ImplicaError::ContextConflict {
-                                message: "expected context element to be a type but is a term"
-                                    .to_string(),
-                                context: Some("type match pattern".to_string()),
-                            }),
-                        }
-                    } else {
-                        // First time capturing this name, insert it
-                        context.add_type(name.clone(), r#type.clone())?;
-                        Ok(true)
-                    }
-                } else {
-                    Ok(false)
-                }
-            }
-        }
-    }
-
-    fn generate_type(pattern: &TypePattern, context: &Context) -> Result<Type, ImplicaError> {
-        match pattern {
-            TypePattern::Wildcard => Err(ImplicaError::InvalidPattern {
-                pattern: "*".to_string(),
-                reason: "cannot use a wild card when describing a type in a create operation"
-                    .to_string(),
-            }),
-            TypePattern::Capture { .. } => Err(ImplicaError::InvalidPattern {
-                pattern: "()".to_string(),
-                reason: "cannot use a capture when describing a type in a create operation"
-                    .to_string(),
-            }),
-            TypePattern::Arrow { left, right } => {
-                let left_type = Self::generate_type(left, context)?;
-                let right_type = Self::generate_type(right, context)?;
-
-                Ok(Type::Arrow(Arrow::new(
-                    Arc::new(left_type),
-                    Arc::new(right_type),
-                )))
-            }
-            TypePattern::Variable(name) => {
-                if let Ok(ref element) = context.get(name) {
-                    match element {
-                        ContextElement::Type(r#type) => Ok(r#type.clone()),
-                        ContextElement::Term(_) => Err(ImplicaError::ContextConflict {
-                            message: "Tried to access a type variable but it was a term variable."
-                                .to_string(),
-                            context: Some("generate_type".to_string()),
-                        }),
-                    }
-                } else {
-                    Ok(Type::Variable(Variable::new(name.clone())?))
-                }
-            }
-        }
-    }
-
-    fn ordered_capture_keys_recursive(pattern: &TypePattern) -> Result<Vec<String>, ImplicaError> {
-        match pattern {
-            TypePattern::Wildcard | TypePattern::Variable(_) => Ok(Vec::new()),
-            TypePattern::Capture { name, pattern } => {
-                let mut keys = vec![name.clone()];
-                let mut pattern_keys = Self::ordered_capture_keys_recursive(pattern)?;
-
-                keys.append(&mut pattern_keys);
-
-                Ok(keys)
-            }
-            TypePattern::Arrow { left, right } => {
-                let mut left_keys = Self::ordered_capture_keys_recursive(left)?;
-                let mut right_keys = Self::ordered_capture_keys_recursive(right)?;
-
-                left_keys.append(&mut right_keys);
-
-                Ok(left_keys)
-            }
-        }
     }
 }
 

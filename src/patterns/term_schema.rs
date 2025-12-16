@@ -1,18 +1,12 @@
 use pyo3::prelude::*;
-use pyo3::types::PyDict;
 
-use std::collections::HashMap;
 use std::fmt::Display;
-use std::sync::Arc;
 
-use crate::context::{python_to_context, Context, ContextElement};
 use crate::errors::ImplicaError;
-use crate::patterns::TypeSchema;
-use crate::typing::{python_to_term, term_to_python, type_to_python, Application, Constant, Term};
 use crate::utils::validate_variable_name;
 
 #[derive(Clone, Debug, PartialEq)]
-enum TermPattern {
+pub enum TermPattern {
     Wildcard,
     Variable(String),
     Application {
@@ -30,7 +24,7 @@ enum TermPattern {
 pub struct TermSchema {
     #[pyo3(get)]
     pub pattern: String,
-    compiled: TermPattern,
+    pub compiled: TermPattern,
 }
 
 impl Display for TermSchema {
@@ -44,65 +38,6 @@ impl TermSchema {
     #[new]
     pub fn py_new(pattern: String) -> PyResult<Self> {
         TermSchema::new(pattern).map_err(|e| e.into())
-    }
-
-    #[pyo3(name = "matches", signature=(term, context = None, constants=None))]
-    pub fn py_matches(
-        &self,
-        py: Python,
-        term: Py<PyAny>,
-        context: Option<Py<PyAny>>,
-        constants: Option<Vec<Constant>>,
-    ) -> PyResult<bool> {
-        let mut context_obj = match context.as_ref() {
-            Some(c) => python_to_context(c.bind(py))?,
-            None => Context::new(),
-        };
-        let term_obj = python_to_term(term.bind(py))?;
-        let constants = match constants {
-            Some(cts) => Arc::new(cts.iter().map(|c| (c.name.clone(), c.clone())).collect()),
-            None => Arc::new(HashMap::new()),
-        };
-
-        let result = self.matches(&term_obj, &mut context_obj, constants)?;
-
-        if let Some(c) = context {
-            let dict = c.bind(py).cast::<PyDict>()?;
-
-            dict.clear();
-
-            for (k, v) in context_obj.iter() {
-                let t_obj = match v {
-                    ContextElement::Type(t) => type_to_python(py, t)?,
-                    ContextElement::Term(t) => term_to_python(py, t)?,
-                };
-                dict.set_item(k.clone(), t_obj)?;
-            }
-        }
-
-        Ok(result)
-    }
-
-    #[pyo3(name="as_term", signature=(context=None, constants=None))]
-    pub fn py_as_term(
-        &self,
-        py: Python,
-        context: Option<Py<PyAny>>,
-        constants: Option<Vec<Constant>>,
-    ) -> PyResult<Py<PyAny>> {
-        let context_obj = if let Some(ctx) = context {
-            python_to_context(ctx.bind(py))?
-        } else {
-            Context::new()
-        };
-        let constants = match constants {
-            Some(cts) => Arc::new(cts.iter().map(|c| (c.name.clone(), c.clone())).collect()),
-            None => Arc::new(HashMap::new()),
-        };
-
-        let term = self.as_term(&context_obj, constants)?;
-
-        term_to_python(py, &term)
     }
 
     fn __eq__(&self, other: TermSchema) -> bool {
@@ -123,23 +58,6 @@ impl TermSchema {
         let compiled = Self::parse_pattern(&pattern)?;
 
         Ok(TermSchema { pattern, compiled })
-    }
-
-    pub fn matches(
-        &self,
-        term: &Term,
-        context: &mut Context,
-        constants: Arc<HashMap<String, Constant>>,
-    ) -> Result<bool, ImplicaError> {
-        Self::match_pattern(&self.compiled, term, context, constants)
-    }
-
-    pub fn as_term(
-        &self,
-        context: &Context,
-        constants: Arc<HashMap<String, Constant>>,
-    ) -> Result<Term, ImplicaError> {
-        Self::generate_term(&self.compiled, context, constants)
     }
 
     fn parse_pattern(input: &str) -> Result<TermPattern, ImplicaError> {
@@ -324,146 +242,5 @@ impl TermSchema {
         }
 
         Ok(args)
-    }
-
-    fn match_pattern(
-        pattern: &TermPattern,
-        term: &Term,
-        context: &mut Context,
-        constants: Arc<HashMap<String, Constant>>,
-    ) -> Result<bool, ImplicaError> {
-        match pattern {
-            TermPattern::Wildcard => {
-                // Wildcard matches anything
-                Ok(true)
-            }
-            TermPattern::Variable(var_name) => {
-                if let Ok(e) = context.get(var_name) {
-                    match e {
-                        ContextElement::Term(ref t) => Ok(term == t),
-                        ContextElement::Type(_) => Err(ImplicaError::ContextConflict {
-                            message: "expected context element to be a term but is a type"
-                                .to_string(),
-                            context: Some("term match pattern".to_string()),
-                        }),
-                    }
-                } else {
-                    // Capture the term
-                    context.add_term(var_name.clone(), term.clone())?;
-                    Ok(true)
-                }
-            }
-            TermPattern::Application { function, argument } => {
-                // Term must be an application
-                if let Some(app) = term.as_application() {
-                    // Match function and argument recursively
-                    let function_matches =
-                        Self::match_pattern(function, &app.function, context, constants.clone())?;
-                    if !function_matches {
-                        return Ok(false);
-                    }
-                    let argument_matches =
-                        Self::match_pattern(argument, &app.argument, context, constants.clone())?;
-                    Ok(argument_matches)
-                } else {
-                    Ok(false)
-                }
-            }
-            TermPattern::Constant { name, args } => {
-                if let Some(constant) = constants.get(name) {
-                    let args: Vec<_> = args
-                        .iter()
-                        .map(|s| match TypeSchema::new(s.to_string()) {
-                            Ok(schema) => {
-                                schema.as_type(context)
-                            }
-                            Err(e) => Err(ImplicaError::InvalidQuery {
-                                message: format!(
-                                    "could not parse type argument passed to constant: '{}', Error: '{}'",
-                                    s, e
-                                ),
-                                context: Some("match term schema".to_string()),
-                            }),
-                        })
-                        .collect::<Result<_, _ >>()?;
-
-                    let const_term = constant.apply(&args)?;
-                    Ok(term == &const_term)
-                } else {
-                    Err(ImplicaError::ConstantNotFound {
-                        name: name.clone(),
-                        context: Some("match term pattern".to_string()),
-                    })
-                }
-            }
-        }
-    }
-
-    fn generate_term(
-        pattern: &TermPattern,
-        context: &Context,
-        constants: Arc<HashMap<String, Constant>>,
-    ) -> Result<Term, ImplicaError> {
-        match pattern {
-            TermPattern::Wildcard => Err(ImplicaError::InvalidPattern {
-                pattern: "*".to_string(),
-                reason: "cannot use a wild card when describing a term in a create operation"
-                    .to_string(),
-            }),
-            TermPattern::Application { function, argument } => {
-                let function_term = Self::generate_term(function, context, constants.clone())?;
-                let argument_term = Self::generate_term(argument, context, constants.clone())?;
-
-                Ok(Term::Application(Application::new(
-                    function_term,
-                    argument_term,
-                )?))
-            }
-            TermPattern::Variable(name) => {
-                if let Ok(ref element) = context.get(name) {
-                    match element {
-                        ContextElement::Term(t) => Ok(t.clone()),
-                        ContextElement::Type(_) => Err(ImplicaError::ContextConflict {
-                            message: "Tried to access a term variable but it was a type variable."
-                                .to_string(),
-                            context: Some("generate_term".to_string()),
-                        }),
-                    }
-                } else {
-                    Err(ImplicaError::VariableNotFound {
-                        name: name.clone(),
-                        context: Some("generate_term".to_string()),
-                    })
-                }
-            }
-            TermPattern::Constant { name, args } => {
-                if let Some(constant) = constants.get(name) {
-                    let args: Vec<_> = args
-                        .iter()
-                        .map(|s| match TypeSchema::new(s.to_string()) {
-                            Ok(schema) => {
-                                schema.as_type(context)
-                            }
-                            Err(e) => Err(ImplicaError::InvalidQuery {
-                                message: format!(
-                                    "could not parse type argument passed to constant: '{}', Error: '{}'",
-                                    s, e
-                                ),
-                                context: Some("match term schema".to_string()),
-                            }),
-                        })
-                        .collect::<Result<_, _ >>()?;
-
-                    let const_term = constant.apply(&args)?;
-
-                    Ok(const_term)
-                } else {
-                    Err(ImplicaError::ConstantNotFound {
-                        name: name.clone(),
-                        context: Some("match term pattern".to_string()),
-                    })
-                }
-            }
-        }
     }
 }

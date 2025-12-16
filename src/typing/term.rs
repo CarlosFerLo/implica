@@ -1,9 +1,5 @@
 use pyo3::prelude::*;
-use sha2::{Digest, Sha256};
-use std::{
-    fmt::Display,
-    sync::{Arc, OnceLock},
-};
+use std::{fmt::Display, sync::Arc};
 
 use crate::{
     errors::ImplicaError,
@@ -11,7 +7,7 @@ use crate::{
     utils::validate_variable_name,
 };
 
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Term {
     Basic(BasicTerm),
     Application(Application),
@@ -39,13 +35,6 @@ impl Term {
         }
     }
 
-    pub fn uid(&self) -> &str {
-        match self {
-            Term::Basic(b) => b.uid(),
-            Term::Application(a) => a.uid(),
-        }
-    }
-
     pub fn apply(&self, other: &Term) -> Result<Term, ImplicaError> {
         Ok(Term::Application(Application::new(
             self.clone(),
@@ -69,7 +58,6 @@ pub struct BasicTerm {
     #[pyo3(get)]
     pub name: String,
     pub r#type: Arc<Type>,
-    uid_cache: OnceLock<String>,
 }
 
 impl Display for BasicTerm {
@@ -80,25 +68,15 @@ impl Display for BasicTerm {
 
 impl PartialEq for BasicTerm {
     fn eq(&self, other: &Self) -> bool {
-        self.uid() == other.uid()
+        (self.name == other.name) && (self.r#type == other.r#type)
     }
 }
 
 impl Eq for BasicTerm {}
 
-impl std::hash::Hash for BasicTerm {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.name.hash(state);
-    }
-}
-
 impl BasicTerm {
     pub fn new(name: String, r#type: Arc<Type>) -> Self {
-        BasicTerm {
-            name,
-            r#type,
-            uid_cache: OnceLock::new(),
-        }
+        BasicTerm { name, r#type }
     }
 }
 
@@ -111,27 +89,12 @@ impl BasicTerm {
         }
 
         let type_arc = Arc::new(python_to_type(r#type.bind(py))?);
-        Ok(BasicTerm {
-            name,
-            r#type: type_arc,
-            uid_cache: OnceLock::new(),
-        })
+        Ok(BasicTerm::new(name, type_arc))
     }
 
     #[pyo3(name = "type")]
     pub fn py_type(&self, py: Python) -> PyResult<Py<PyAny>> {
         type_to_python(py, &self.r#type)
-    }
-
-    pub fn uid(&self) -> &str {
-        self.uid_cache.get_or_init(|| {
-            let mut hasher = Sha256::new();
-            hasher.update(b"var:");
-            hasher.update(self.name.as_bytes());
-            hasher.update(b":");
-            hasher.update(self.r#type.to_string().as_bytes());
-            format!("{:x}", hasher.finalize())
-        })
     }
 
     fn __str__(&self) -> String {
@@ -140,15 +103,6 @@ impl BasicTerm {
 
     fn __repr__(&self) -> String {
         format!("BasicTerm(\"{}\")", self.name)
-    }
-
-    fn __hash__(&self) -> u64 {
-        use std::collections::hash_map::DefaultHasher;
-        use std::hash::{Hash, Hasher};
-        let mut hasher = DefaultHasher::new();
-        // Hash based on name (not the cache)
-        self.uid().hash(&mut hasher);
-        hasher.finish()
     }
 
     fn __eq__(&self, other: &Self) -> bool {
@@ -169,7 +123,6 @@ pub struct Application {
     pub function: Arc<Term>,
     pub argument: Arc<Term>,
     r#type: Arc<Type>,
-    uid_cache: OnceLock<String>,
 }
 
 impl Display for Application {
@@ -180,18 +133,11 @@ impl Display for Application {
 
 impl PartialEq for Application {
     fn eq(&self, other: &Self) -> bool {
-        self.uid() == other.uid()
+        (self.function == other.function) && (self.argument == other.argument)
     }
 }
 
 impl Eq for Application {}
-
-impl std::hash::Hash for Application {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.function.hash(state);
-        self.argument.hash(state);
-    }
-}
 
 impl Application {
     pub fn new(function: Term, argument: Term) -> Result<Self, ImplicaError> {
@@ -213,7 +159,6 @@ impl Application {
                         function: Arc::new(function),
                         argument: Arc::new(argument),
                         r#type: arr.right.clone(),
-                        uid_cache: OnceLock::new(),
                     })
                 }
             }
@@ -246,33 +191,12 @@ impl Application {
         type_to_python(py, &self.r#type)
     }
 
-    pub fn uid(&self) -> &str {
-        self.uid_cache.get_or_init(|| {
-            let mut hasher = Sha256::new();
-
-            hasher.update(b"app:");
-            hasher.update(self.function.uid().as_bytes());
-            hasher.update(b":");
-            hasher.update(self.argument.uid().as_bytes());
-            hasher.update(b":");
-            hasher.update(self.r#type.uid().as_bytes());
-
-            format!("{:x}", hasher.finalize())
-        })
-    }
-
     fn __str__(&self) -> String {
         format!("({} {})", self.function, self.argument)
     }
 
     fn __repr__(&self) -> String {
         format!("Application({}, {})", self.function, self.argument)
-    }
-
-    fn __hash__(&self) -> u64 {
-        let uid_str = self.uid();
-        let truncated = &uid_str[..16];
-        u64::from_str_radix(truncated, 16).unwrap_or(0)
     }
 
     fn __eq__(&self, other: &Self) -> bool {

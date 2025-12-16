@@ -1,32 +1,17 @@
 use pyo3::prelude::*;
-use sha2::{Digest, Sha256};
 use std::fmt;
-use std::sync::{Arc, OnceLock};
+use std::sync::Arc;
 
 use crate::errors::ImplicaError;
 use crate::utils::validate_variable_name;
 
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Type {
     Variable(Variable),
     Arrow(Arrow),
 }
 
 impl Type {
-    pub fn uid(&self) -> &str {
-        match self {
-            Type::Variable(v) => v.uid(),
-            Type::Arrow(a) => a.uid(),
-        }
-    }
-
-    pub fn get_type_vars(&self) -> Vec<Variable> {
-        match self {
-            Type::Variable(v) => v.get_type_vars(),
-            Type::Arrow(arr) => arr.get_type_vars(),
-        }
-    }
-
     pub fn as_variable(&self) -> Option<&Variable> {
         match self {
             Type::Variable(v) => Some(v),
@@ -54,15 +39,8 @@ impl fmt::Display for Type {
 #[pyclass]
 #[derive(Clone, Debug)]
 pub struct Variable {
+    #[pyo3(get)]
     pub name: String,
-    /// Cached UID for performance - computed once and reused
-    uid_cache: OnceLock<String>,
-}
-
-impl Variable {
-    pub fn get_type_vars(&self) -> Vec<Variable> {
-        vec![self.clone()]
-    }
 }
 
 #[pymethods]
@@ -74,38 +52,7 @@ impl Variable {
             return Err(e.into());
         }
 
-        Ok(Variable {
-            name,
-            uid_cache: OnceLock::new(),
-        })
-    }
-
-    #[getter]
-    pub fn name(&self) -> &str {
-        &self.name
-    }
-
-    pub fn uid(&self) -> &str {
-        self.uid_cache.get_or_init(|| {
-            let mut hasher = Sha256::new();
-            hasher.update(b"var:");
-            hasher.update(self.name.as_bytes());
-            format!("{:x}", hasher.finalize())
-        })
-    }
-
-    #[pyo3(name = "get_type_vars")]
-    pub fn py_get_type_vars(&self, py: Python) -> PyResult<Vec<Py<PyAny>>> {
-        let vars = self.get_type_vars();
-
-        let mut result = Vec::with_capacity(vars.len());
-
-        for v in vars {
-            let obj = type_to_python(py, &Type::Variable(v))?;
-            result.push(obj);
-        }
-
-        Ok(result)
+        Ok(Variable { name })
     }
 
     fn __str__(&self) -> &str {
@@ -116,15 +63,9 @@ impl Variable {
         format!("Variable(\"{}\")", self.name)
     }
 
-    fn __hash__(&self) -> u64 {
-        let uid_str = self.uid();
-        let truncated = &uid_str[..16];
-        u64::from_str_radix(truncated, 16).unwrap_or(0)
-    }
-
     fn __eq__(&self, other: &Self) -> bool {
         // Equality based on uid
-        self.uid() == other.uid()
+        self == other
     }
 }
 
@@ -137,43 +78,22 @@ impl fmt::Display for Variable {
 
 impl PartialEq for Variable {
     fn eq(&self, other: &Self) -> bool {
-        self.uid() == other.uid()
+        self.name == other.name
     }
 }
 
 impl Eq for Variable {}
-
-impl std::hash::Hash for Variable {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.name.hash(state);
-    }
-}
 
 #[pyclass]
 #[derive(Clone, Debug)]
 pub struct Arrow {
     pub left: Arc<Type>,
     pub right: Arc<Type>,
-    /// Cached UID for performance - computed once and reused
-    uid_cache: OnceLock<String>,
 }
 
 impl Arrow {
     pub fn new(left: Arc<Type>, right: Arc<Type>) -> Self {
-        Arrow {
-            left,
-            right,
-            uid_cache: OnceLock::new(),
-        }
-    }
-
-    pub fn get_type_vars(&self) -> Vec<Variable> {
-        let right_vars = self.right.get_type_vars();
-        let left_vars = self.left.get_type_vars();
-
-        let mut result: Vec<Variable> = right_vars.into_iter().chain(left_vars).collect();
-        result.dedup();
-        result
+        Arrow { left, right }
     }
 }
 
@@ -187,7 +107,6 @@ impl Arrow {
         Ok(Arrow {
             left: Arc::new(left_obj),
             right: Arc::new(right_obj),
-            uid_cache: OnceLock::new(),
         })
     }
 
@@ -201,31 +120,6 @@ impl Arrow {
         type_to_python(py, &self.right)
     }
 
-    pub fn uid(&self) -> &str {
-        self.uid_cache.get_or_init(|| {
-            let mut hasher = Sha256::new();
-            hasher.update(b"app:");
-            hasher.update(self.left.uid().as_bytes());
-            hasher.update(b":");
-            hasher.update(self.right.uid().as_bytes());
-            format!("{:x}", hasher.finalize())
-        })
-    }
-
-    #[pyo3(name = "get_type_vars")]
-    pub fn py_get_type_vars(&self, py: Python) -> PyResult<Vec<Py<PyAny>>> {
-        let vars = self.get_type_vars();
-
-        let mut result = Vec::with_capacity(vars.len());
-
-        for v in vars {
-            let obj = type_to_python(py, &Type::Variable(v))?;
-            result.push(obj);
-        }
-
-        Ok(result)
-    }
-
     fn __str__(&self) -> String {
         format!("({} -> {})", self.left, self.right)
     }
@@ -234,19 +128,9 @@ impl Arrow {
         format!("Arrow({}, {})", self.left, self.right)
     }
 
-    fn __hash__(&self) -> u64 {
-        use std::collections::hash_map::DefaultHasher;
-        use std::hash::{Hash, Hasher};
-        let mut hasher = DefaultHasher::new();
-        // Hash based on left and right (not the cache)
-        self.left.hash(&mut hasher);
-        self.right.hash(&mut hasher);
-        hasher.finish()
-    }
-
     fn __eq__(&self, other: &Self) -> bool {
         // Equality based on uid
-        self.uid() == other.uid()
+        self == other
     }
 }
 
@@ -258,18 +142,11 @@ impl fmt::Display for Arrow {
 
 impl PartialEq for Arrow {
     fn eq(&self, other: &Self) -> bool {
-        self.uid() == other.uid()
+        (self.right == other.right) && (self.left == other.left)
     }
 }
 
 impl Eq for Arrow {}
-
-impl std::hash::Hash for Arrow {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.left.hash(state);
-        self.right.hash(state);
-    }
-}
 
 pub(crate) fn python_to_type(obj: &Bound<'_, PyAny>) -> Result<Type, ImplicaError> {
     // Verificar que es del tipo correcto primero
