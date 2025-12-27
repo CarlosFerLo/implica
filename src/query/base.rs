@@ -24,10 +24,13 @@ mod __limit;
 mod __match;
 #[path = "executors/order_by.rs"]
 mod __order_by;
+
 #[path = "executors/put.rs"]
 mod __put;
 #[path = "executors/set.rs"]
 mod __set;
+#[path = "executors/shuffle.rs"]
+mod __shuffle;
 #[path = "executors/skip.rs"]
 mod __skip;
 #[path = "executors/where.rs"]
@@ -60,6 +63,7 @@ pub enum QueryOperation {
     Delete(Vec<String>),
     With(Vec<String>),
     OrderBy(Vec<String>, bool),
+    Shuffle,
     Limit(usize),
     Skip(usize),
 }
@@ -88,6 +92,7 @@ impl Clone for QueryOperation {
             QueryOperation::Delete(vars) => QueryOperation::Delete(vars.clone()),
             QueryOperation::With(w) => QueryOperation::With(w.clone()),
             QueryOperation::OrderBy(v, asc) => QueryOperation::OrderBy(v.clone(), *asc),
+            QueryOperation::Shuffle => QueryOperation::Shuffle,
             QueryOperation::Limit(l) => QueryOperation::Limit(*l),
             QueryOperation::Skip(s) => QueryOperation::Skip(*s),
         })
@@ -446,6 +451,11 @@ impl Query {
         Ok(self.clone())
     }
 
+    pub fn shuffle(&mut self) -> PyResult<Self> {
+        self.operations.push(QueryOperation::Shuffle);
+        Ok(self.clone())
+    }
+
     pub fn limit(&mut self, count: usize) -> PyResult<Self> {
         self.operations.push(QueryOperation::Limit(count));
         Ok(self.clone())
@@ -616,6 +626,9 @@ impl Query {
                 }
                 QueryOperation::OrderBy(vars, ascending) => {
                     self.execute_order_by(vars, ascending)?;
+                }
+                QueryOperation::Shuffle => {
+                    self.execute_shuffle()?;
                 }
                 QueryOperation::Limit(count) => {
                     self.execute_limit(count)?;
