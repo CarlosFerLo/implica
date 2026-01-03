@@ -13,6 +13,101 @@ pub enum MatchElement {
     Edge((Uid, Uid)),
 }
 
+impl MatchElement {
+    pub fn as_type(&self, var: &str, context: Option<String>) -> Result<Uid, ImplicaError> {
+        match self {
+            MatchElement::Type(t) => Ok(*t),
+            MatchElement::Term(_) => Err(ImplicaError::ContextConflict {
+                name: var.to_string(),
+                original: "term".to_string(),
+                new: "type".to_string(),
+                context,
+            }),
+            MatchElement::Node(_) => Err(ImplicaError::ContextConflict {
+                name: var.to_string(),
+                original: "node".to_string(),
+                new: "type".to_string(),
+                context,
+            }),
+            MatchElement::Edge(_) => Err(ImplicaError::ContextConflict {
+                name: var.to_string(),
+                original: "edge".to_string(),
+                new: "type".to_string(),
+                context,
+            }),
+        }
+    }
+    pub fn as_term(&self, var: &str, context: Option<String>) -> Result<Uid, ImplicaError> {
+        match self {
+            MatchElement::Term(t) => Ok(*t),
+            MatchElement::Type(_) => Err(ImplicaError::ContextConflict {
+                name: var.to_string(),
+                original: "type".to_string(),
+                new: "term".to_string(),
+                context,
+            }),
+            MatchElement::Node(_) => Err(ImplicaError::ContextConflict {
+                name: var.to_string(),
+                original: "node".to_string(),
+                new: "term".to_string(),
+                context,
+            }),
+            MatchElement::Edge(_) => Err(ImplicaError::ContextConflict {
+                name: var.to_string(),
+                original: "edge".to_string(),
+                new: "term".to_string(),
+                context,
+            }),
+        }
+    }
+    pub fn as_node(&self, var: &str, context: Option<String>) -> Result<Uid, ImplicaError> {
+        match self {
+            MatchElement::Node(t) => Ok(*t),
+            MatchElement::Type(_) => Err(ImplicaError::ContextConflict {
+                name: var.to_string(),
+                original: "type".to_string(),
+                new: "node".to_string(),
+                context,
+            }),
+            MatchElement::Term(_) => Err(ImplicaError::ContextConflict {
+                name: var.to_string(),
+                original: "term".to_string(),
+                new: "node".to_string(),
+                context,
+            }),
+            MatchElement::Edge(_) => Err(ImplicaError::ContextConflict {
+                name: var.to_string(),
+                original: "edge".to_string(),
+                new: "node".to_string(),
+                context,
+            }),
+        }
+    }
+    pub fn as_edge(&self, var: &str, context: Option<String>) -> Result<(Uid, Uid), ImplicaError> {
+        match self {
+            MatchElement::Edge(t) => Ok(*t),
+            MatchElement::Type(_) => Err(ImplicaError::ContextConflict {
+                name: var.to_string(),
+                original: "type".to_string(),
+                new: "edge".to_string(),
+                context,
+            }),
+            MatchElement::Term(_) => Err(ImplicaError::ContextConflict {
+                name: var.to_string(),
+                original: "term".to_string(),
+                new: "edge".to_string(),
+                context,
+            }),
+            MatchElement::Node(_) => Err(ImplicaError::ContextConflict {
+                name: var.to_string(),
+                original: "node".to_string(),
+                new: "edge".to_string(),
+                context,
+            }),
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct Match {
     previous: Option<Arc<Match>>,

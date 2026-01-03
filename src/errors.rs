@@ -72,6 +72,11 @@ pub enum ImplicaError {
         new: String,
         context: Option<String>,
     },
+
+    IndexCorruption {
+        message: String,
+        context: Option<String>,
+    },
 }
 
 impl Display for ImplicaError {
@@ -166,6 +171,13 @@ impl Display for ImplicaError {
                 }
                 Ok(())
             }
+            ImplicaError::IndexCorruption { message, context } => {
+                write!(f, "Index Corruption: '{}'", message)?;
+                if let Some(context) = context {
+                    write!(f, " ({})", context)?;
+                }
+                Ok(())
+            }
         }
     }
 }
@@ -185,7 +197,9 @@ impl std::error::Error for ImplicaError {}
 impl From<ImplicaError> for PyErr {
     fn from(err: ImplicaError) -> PyErr {
         match err {
-            ImplicaError::TypeMismatch { .. } => exceptions::PyTypeError::new_err(err.to_string()),
+            ImplicaError::TypeMismatch { .. } | ImplicaError::InvalidType { .. } => {
+                exceptions::PyTypeError::new_err(err.to_string())
+            }
 
             ImplicaError::InvalidPattern { .. }
             | ImplicaError::InvalidIdentifier { .. }
@@ -197,14 +211,15 @@ impl From<ImplicaError> for PyErr {
             ImplicaError::VariableAlreadyExists { .. }
             | ImplicaError::TypeNotFound { .. }
             | ImplicaError::TermNotFound { .. } => exceptions::PyKeyError::new_err(err.to_string()),
-            ImplicaError::PythonError { .. } => {
+            ImplicaError::PythonError { .. }
+            | ImplicaError::RuntimeError { .. }
+            | ImplicaError::EvaluationError { .. }
+            | ImplicaError::LockError { .. } => {
                 exceptions::PyRuntimeError::new_err(err.to_string())
             }
-            ImplicaError::EvaluationError { .. } | ImplicaError::RuntimeError { .. } => {
-                exceptions::PyRuntimeError::new_err(err.to_string())
+            ImplicaError::IndexCorruption { .. } => {
+                exceptions::PyIndexError::new_err(err.to_string())
             }
-            ImplicaError::InvalidType { .. } => exceptions::PyTypeError::new_err(err.to_string()),
-            ImplicaError::LockError { .. } => exceptions::PyRuntimeError::new_err(err.to_string()),
         }
     }
 }

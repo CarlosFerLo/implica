@@ -550,18 +550,18 @@ pub(in crate::patterns) fn parse_node_pattern(s: &str) -> PyResult<NodePattern> 
     let mut variable = None;
     let mut type_schema = None;
     let mut term_schema = None;
-    let mut properties = None;
+    let mut _properties = None;
 
     if inner.is_empty() {
         // Empty node pattern - matches any node
-        return NodePattern::new(None, None, None, None, None, None);
+        return NodePattern::new(None, None, None);
     }
 
     // Check for properties - need to find the LAST { that's not inside parentheses
     let content = if let Some(brace_idx) = find_properties_start(inner) {
         // Has properties - extract and parse them
         let props_str = &inner[brace_idx..];
-        properties = Some(parse_properties(props_str)?);
+        _properties = Some(parse_properties(props_str)?);
         inner[..brace_idx].trim()
     } else {
         inner
@@ -625,7 +625,7 @@ pub(in crate::patterns) fn parse_node_pattern(s: &str) -> PyResult<NodePattern> 
         }
     }
 
-    NodePattern::new(variable, None, type_schema, None, term_schema, properties)
+    NodePattern::new(variable, type_schema, term_schema)
 }
 
 pub(in crate::patterns) fn parse_edge_pattern(s: &str) -> PyResult<EdgePattern> {
@@ -673,14 +673,14 @@ pub(in crate::patterns) fn parse_edge_pattern(s: &str) -> PyResult<EdgePattern> 
     let mut variable = None;
     let mut type_schema = None;
     let mut term_schema = None;
-    let mut properties = None;
+    let mut _properties = None;
 
     if !inner.is_empty() {
         // Check for properties - need to find the LAST { that's not inside parentheses
         let content = if let Some(brace_idx) = find_properties_start(inner) {
             // Has properties - extract and parse them
             let props_str = &inner[brace_idx..];
-            properties = Some(parse_properties(props_str)?);
+            _properties = Some(parse_properties(props_str)?);
             inner[..brace_idx].trim()
         } else {
             inner
@@ -739,13 +739,5 @@ pub(in crate::patterns) fn parse_edge_pattern(s: &str) -> PyResult<EdgePattern> 
             }
         }
     }
-    EdgePattern::new(
-        variable,
-        None,
-        type_schema,
-        None,
-        term_schema,
-        properties,
-        direction.to_string(),
-    )
+    EdgePattern::new(variable, type_schema, term_schema, direction.to_string())
 }

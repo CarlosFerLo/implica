@@ -16,6 +16,25 @@ pub struct PathPattern {
     pub edges: Vec<EdgePattern>,
 }
 
+impl PathPattern {
+    pub fn validate(&self) -> Result<(), ImplicaError> {
+        if self.nodes.is_empty() {
+            return Err(ImplicaError::InvalidPattern {
+                pattern: format!("{:?}", self),
+                reason: "a path pattern cannot be empty".to_string(),
+            });
+        }
+
+        if self.nodes.len() != self.edges.len() + 1 {
+            return Err(ImplicaError::InvalidPattern {
+                pattern: format!("{:?}", self),
+                reason: "the number of nodes should be the number of edges plus 1".to_string(),
+            });
+        }
+        Ok(())
+    }
+}
+
 #[pymethods]
 impl PathPattern {
     #[new]
