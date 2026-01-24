@@ -7,18 +7,24 @@ use rayon::prelude::*;
 
 use crate::errors::ImplicaError;
 use crate::matches::{next_match_id, Match, MatchSet};
-use crate::typing::{Term, Type};
+use crate::patterns::{TermPattern, TermSchema, TypePattern, TypeSchema};
+use crate::typing::{Application, Arrow, BasicTerm, Term, Type, Variable};
 
 #[path = "matches/edge.rs"]
-mod __edge_pattern;
+mod __matches_edge_pattern;
 #[path = "matches/node.rs"]
-mod __node_pattern;
+mod __matches_node_pattern;
 #[path = "matches/path.rs"]
-mod __path_pattern;
+mod __matches_path_pattern;
 #[path = "matches/term_schema.rs"]
-mod __term_schema;
+mod __matches_term_schema;
 #[path = "matches/type_schema.rs"]
-mod __type_schema;
+mod __matches_type_schema;
+
+#[path = "create/edge.rs"]
+mod __create_edge;
+#[path = "create/node.rs"]
+mod __create_node;
 
 pub type Uid = [u8; 32];
 
@@ -282,5 +288,195 @@ impl Graph {
         let initial_uid: Uid = [0u8; 32];
         map.insert(next_match_id(), (initial_uid, Arc::new(Match::new(None))));
         map
+    }
+}
+
+impl Graph {
+    pub fn type_schema_to_type(
+        &self,
+        type_schema: &TypeSchema,
+        r#match: Arc<Match>,
+    ) -> Result<Type, ImplicaError> {
+        self.pattern_to_type_recursive(&type_schema.compiled, r#match)
+            .map_err(|e| match e {
+                ImplicaError::InvalidPattern { pattern: _, reason } => {
+                    ImplicaError::InvalidPattern {
+                        pattern: type_schema.pattern.clone(),
+                        reason,
+                    }
+                }
+                _ => e,
+            })
+    }
+
+    fn pattern_to_type_recursive(
+        &self,
+        pattern: &TypePattern,
+        r#match: Arc<Match>,
+    ) -> Result<Type, ImplicaError> {
+        match pattern {
+            TypePattern::Wildcard => Err(ImplicaError::InvalidPattern {
+                pattern: "".to_string(),
+                reason: "Cannot convert wildcard to type".to_string(),
+            }),
+            TypePattern::Arrow { left, right } => {
+                let left_type = self.pattern_to_type_recursive(left, r#match.clone())?;
+                let right_type = self.pattern_to_type_recursive(right, r#match.clone())?;
+
+                Ok(Type::Arrow(Arrow {
+                    left: Arc::new(left_type),
+                    right: Arc::new(right_type),
+                }))
+            }
+            TypePattern::Variable(var) => {
+                if let Some(match_element) = r#match.get(var) {
+                    let matched_type_uid = match_element
+                        .as_type(var, Some("pattern to type recursive".to_string()))?;
+
+                    self.type_from_uid(&matched_type_uid)
+                } else {
+                    Ok(Type::Variable(Variable { name: var.clone() }))
+                }
+            }
+            TypePattern::Capture { name, pattern: _ } => {
+                if let Some(match_element) = r#match.get(name) {
+                    let matched_type_uid = match_element
+                        .as_type(name, Some("pattern to type recursive".to_string()))?;
+
+                    self.type_from_uid(&matched_type_uid)
+                } else {
+                    Ok(Type::Variable(Variable { name: name.clone() }))
+                }
+            }
+        }
+    }
+
+    fn type_from_uid(&self, uid: &Uid) -> Result<Type, ImplicaError> {
+        if let Some(entry) = self.type_index.get(uid) {
+            let type_repr = entry.value().clone();
+
+            match type_repr {
+                TypeRep::Variable(var) => Ok(Type::Variable(Variable { name: var })),
+                TypeRep::Arrow(left, right) => {
+                    let left_type =
+                        self.type_from_uid(&left)
+                            .map_err(|_| ImplicaError::IndexCorruption {
+                                message:
+                                    "type repr points to a uid that does not belong to the index!"
+                                        .to_string(),
+                                context: Some("type from uid".to_string()),
+                            })?;
+                    let right_type =
+                        self.type_from_uid(&right)
+                            .map_err(|_| ImplicaError::IndexCorruption {
+                                message:
+                                    "type repr points to a uid that does not belong to the index!"
+                                        .to_string(),
+                                context: Some("type from uid".to_string()),
+                            })?;
+
+                    Ok(Type::Arrow(Arrow {
+                        left: Arc::new(left_type),
+                        right: Arc::new(right_type),
+                    }))
+                }
+            }
+        } else {
+            Err(ImplicaError::TypeNotFound {
+                uid: *uid,
+                context: Some("type from uid".to_string()),
+            })
+        }
+    }
+}
+
+impl Graph {
+    pub fn term_schema_to_term(
+        &self,
+        term_schema: &TermSchema,
+        r#match: Arc<Match>,
+    ) -> Result<Term, ImplicaError> {
+        self.pattern_to_term_recursive(&term_schema.compiled, r#match)
+            .map_err(|e| match e {
+                ImplicaError::InvalidPattern { pattern: _, reason } => {
+                    ImplicaError::InvalidPattern {
+                        pattern: term_schema.pattern.clone(),
+                        reason,
+                    }
+                }
+                _ => e,
+            })
+    }
+
+    fn pattern_to_term_recursive(
+        &self,
+        pattern: &TermPattern,
+        r#match: Arc<Match>,
+    ) -> Result<Term, ImplicaError> {
+        match pattern {
+            TermPattern::Wildcard => Err(ImplicaError::InvalidPattern {
+                pattern: "".to_string(),
+                reason: "Cannot convert wildcard to term".to_string(),
+            }),
+            TermPattern::Application { function, argument } => {
+                let function_term = self.pattern_to_term_recursive(function, r#match.clone())?;
+                let argument_term = self.pattern_to_term_recursive(argument, r#match.clone())?;
+
+                Ok(Term::Application(Application::new(
+                    function_term,
+                    argument_term,
+                )?))
+            }
+            TermPattern::Variable(var) => {
+                if let Some(match_element) = r#match.get(var) {
+                    let term_uid = match_element
+                        .as_term(var, Some("pattern to term recursive".to_string()))?;
+
+                    self.term_from_uid(&term_uid)
+                } else {
+                    Err(ImplicaError::InvalidPattern {
+                        pattern: "".to_string(),
+                        reason: format!(
+                            "Cannot convert to term a schema with an unmatched variable '{}'",
+                            var
+                        ),
+                    })
+                }
+            }
+            TermPattern::Constant { name: _, args: _ } => {
+                todo!("Constants are not implemented yet!")
+            }
+        }
+    }
+
+    fn term_from_uid(&self, uid: &Uid) -> Result<Term, ImplicaError> {
+        if let Some(entry) = self.term_index.get(uid) {
+            let term_repr = entry.value().clone();
+
+            let term_type = self.type_from_uid(uid).map_err(|e| {
+                match e {
+                    ImplicaError::TypeNotFound { .. } => ImplicaError::IndexCorruption { message: "Found a term in the TermIndex without its corresponding type in the TypeIndex".to_string(), context: Some("term from uid".to_string()) },
+                    _ => e
+                }
+            })?;
+
+            match term_repr {
+                TermRep::Base(var) => Ok(Term::Basic(BasicTerm {
+                    name: var.clone(),
+                    r#type: Arc::new(term_type),
+                })),
+                TermRep::Application(left, right) => {
+                    let left_term = self.term_from_uid(&left)?;
+                    let right_term = self.term_from_uid(&right)?;
+
+                    Ok(Term::Application(Application::new(left_term, right_term)?))
+                }
+            }
+        } else {
+            Err(ImplicaError::TermNotFound {
+                uid: *uid,
+                context: Some("term from uid".to_string()),
+            })
+        }
     }
 }
