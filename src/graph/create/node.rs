@@ -3,7 +3,12 @@ use std::{ops::ControlFlow, sync::Arc};
 use dashmap::DashMap;
 use rayon::prelude::*;
 
-use crate::{errors::ImplicaError, graph::base::Graph, matches::MatchSet, patterns::NodePattern};
+use crate::{
+    errors::ImplicaError,
+    graph::base::Graph,
+    matches::{next_match_id, Match, MatchElement, MatchSet},
+    patterns::NodePattern,
+};
 
 impl Graph {
     pub fn create_node(
@@ -49,7 +54,19 @@ impl Graph {
             };
 
             match self.add_node(node_type, node_term) {
-                Ok(_) => ControlFlow::Continue(()),
+                Ok(uid) => {
+                    let new_match = Arc::new(Match::new(Some(r#match)));
+
+                    if let Some(var) = &node_pattern.variable {
+                        match new_match.insert(var, MatchElement::Node(uid)) {
+                            Ok(()) => (),
+                            Err(e) => return ControlFlow::Break(e),
+                        }
+                    }
+
+                    out_map.insert(next_match_id(), (_prev_uid, new_match));
+                    ControlFlow::Continue(())
+                }
                 Err(e) => ControlFlow::Break(e),
             }
         });

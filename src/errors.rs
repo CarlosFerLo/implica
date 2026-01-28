@@ -77,6 +77,11 @@ pub enum ImplicaError {
         message: String,
         context: Option<String>,
     },
+    IndexOutOfRange {
+        index: usize,
+        max_len: usize,
+        context: Option<String>,
+    },
 }
 
 impl Display for ImplicaError {
@@ -178,6 +183,21 @@ impl Display for ImplicaError {
                 }
                 Ok(())
             }
+            ImplicaError::IndexOutOfRange {
+                index,
+                max_len,
+                context,
+            } => {
+                write!(
+                    f,
+                    "Index Out of Range: tried to access index {} from an iterable of length {}",
+                    index, max_len
+                )?;
+                if let Some(context) = context {
+                    write!(f, " ({})", context)?;
+                }
+                Ok(())
+            }
         }
     }
 }
@@ -219,6 +239,9 @@ impl From<ImplicaError> for PyErr {
             }
             ImplicaError::IndexCorruption { .. } => {
                 exceptions::PyIndexError::new_err(err.to_string())
+            }
+            ImplicaError::IndexOutOfRange { .. } => {
+                exceptions::PyKeyError::new_err(err.to_string())
             }
         }
     }

@@ -2,11 +2,11 @@ use std::ops::ControlFlow;
 use std::sync::Arc;
 
 use dashmap::DashMap;
-use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
+use rayon::prelude::*;
 
 use crate::errors::ImplicaError;
 use crate::graph::base::Graph;
-use crate::matches::MatchSet;
+use crate::matches::{next_match_id, Match, MatchElement, MatchSet};
 use crate::patterns::EdgePattern;
 
 impl Graph {
@@ -30,7 +30,7 @@ impl Graph {
             }
 
             let term = match &edge_pattern.term_schema {
-                Some(term_schema) => match self.term_schema_to_term(term_schema, r#match) {
+                Some(term_schema) => match self.term_schema_to_term(term_schema, r#match.clone()) {
                     Ok(t) => t,
                     Err(e) => return  ControlFlow::Break(e)
                 },
@@ -40,7 +40,20 @@ impl Graph {
             };
 
             match self.add_edge(term) {
-                Ok(_) => ControlFlow::Continue(()),
+                Ok(uid) => {
+
+                    let new_match = Arc::new(Match::new(Some(r#match)));
+
+                    if let Some(var) = &edge_pattern.variable {
+                        match new_match.insert(var, MatchElement::Edge(uid)) {
+                            Ok(()) => (),
+                            Err(e) => return ControlFlow::Break(e)
+                        }
+                    }
+
+                    out_map.insert(next_match_id(), (_prev_uid, new_match));
+                    ControlFlow::Continue(())
+                },
                 Err(e) => ControlFlow::Break(e)
             }
         });

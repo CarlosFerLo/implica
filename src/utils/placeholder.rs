@@ -18,8 +18,8 @@ impl PlaceholderGenerator {
     fn format(n: usize) -> String {
         format!("__ph_{}", n)
     }
+}
 
-    pub fn prev(&self) -> impl Iterator<Item = String> {
-        (0..self.counter.load(Ordering::SeqCst)).map(Self::format)
-    }
+pub(crate) fn is_placeholder(name: &str) -> bool {
+    name.starts_with("__ph_")
 }

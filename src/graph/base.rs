@@ -25,6 +25,8 @@ mod __matches_type_schema;
 mod __create_edge;
 #[path = "create/node.rs"]
 mod __create_node;
+#[path = "create/path.rs"]
+mod __create_path;
 
 pub type Uid = [u8; 32];
 
@@ -100,10 +102,10 @@ impl Graph {
     }
 
     pub fn add_node(&self, r#type: Type, term: Option<Term>) -> Result<Uid, ImplicaError> {
-        let type_uid = self.insert_type(r#type);
+        let type_uid = self.insert_type(&r#type);
 
         if let Some(term) = term {
-            self.insert_term(term);
+            self.insert_term(&term);
         }
 
         self.nodes.insert(type_uid);
@@ -116,7 +118,7 @@ impl Graph {
     }
 
     pub fn add_edge(&self, term: Term) -> Result<(Uid, Uid), ImplicaError> {
-        let term_uid = self.insert_term(term);
+        let term_uid = self.insert_term(&term);
 
         let edge_uid = if let Some(ref type_rep) = self.type_index.get(&term_uid) {
             match type_rep.value() {
@@ -238,18 +240,18 @@ impl Graph {
         Ok(Some(uid))
     }
 
-    pub fn insert_type(&self, r#type: Type) -> Uid {
+    pub fn insert_type(&self, r#type: &Type) -> Uid {
         match r#type {
             Type::Variable(var) => {
-                let type_rep = TypeRep::Variable(var.name);
+                let type_rep = TypeRep::Variable(var.name.clone());
                 let type_uid = type_rep.uid();
 
                 self.type_index.insert(type_uid, type_rep);
                 type_uid
             }
             Type::Arrow(arr) => {
-                let left_uid = self.insert_type(arr.left.as_ref().clone());
-                let right_uid = self.insert_type(arr.right.as_ref().clone());
+                let left_uid = self.insert_type(arr.left.as_ref());
+                let right_uid = self.insert_type(arr.right.as_ref());
 
                 let type_rep = TypeRep::Arrow(left_uid, right_uid);
                 let type_uid = type_rep.uid();
@@ -261,19 +263,19 @@ impl Graph {
         }
     }
 
-    pub fn insert_term(&self, term: Term) -> Uid {
+    pub fn insert_term(&self, term: &Term) -> Uid {
         let term_type = term.r#type();
-        let type_uid = self.insert_type(term_type.as_ref().clone());
+        let type_uid = self.insert_type(term_type.as_ref());
 
         match term {
             Term::Basic(term) => {
-                let term_rep = TermRep::Base(term.name);
+                let term_rep = TermRep::Base(term.name.clone());
 
                 self.term_index.insert(type_uid, term_rep);
             }
             Term::Application(app) => {
-                let function_uid = self.insert_term(app.function.as_ref().clone());
-                let argument_uid = self.insert_term(app.argument.as_ref().clone());
+                let function_uid = self.insert_term(app.function.as_ref());
+                let argument_uid = self.insert_term(app.argument.as_ref());
 
                 let term_rep = TermRep::Application(function_uid, argument_uid);
                 self.term_index.insert(type_uid, term_rep);
