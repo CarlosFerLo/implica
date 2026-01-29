@@ -6,13 +6,14 @@ use rayon::prelude::*;
 
 use crate::errors::ImplicaError;
 use crate::graph::base::Graph;
-use crate::matches::{Match, MatchSet};
+use crate::graph::Uid;
+use crate::matches::{next_match_id, Match, MatchElement, MatchSet};
 use crate::patterns::{CompiledDirection, PathPattern};
 use crate::typing::{Arrow, Term, Type};
-use crate::utils::{is_placeholder, DataQueue, PlaceholderGenerator, QueueItem};
+use crate::utils::{DataQueue, QueueItem};
 
 struct NodeData {
-    variable: String,
+    variable: Option<String>,
     r#type: Option<Type>,
     term: Option<Term>,
     type_matched: bool,
@@ -20,7 +21,7 @@ struct NodeData {
 }
 
 impl NodeData {
-    pub fn new(variable: String) -> Self {
+    pub fn new(variable: Option<String>) -> Self {
         NodeData {
             variable,
             r#type: None,
@@ -32,7 +33,7 @@ impl NodeData {
 }
 
 struct EdgeData {
-    variable: String,
+    variable: Option<String>,
     direction: CompiledDirection,
     r#type: Option<Type>,
     term: Option<Term>,
@@ -41,7 +42,7 @@ struct EdgeData {
 }
 
 impl EdgeData {
-    pub fn new(variable: String, direction: CompiledDirection) -> Self {
+    pub fn new(variable: Option<String>, direction: CompiledDirection) -> Self {
         EdgeData {
             variable,
             direction,
@@ -67,20 +68,13 @@ impl Graph {
             let (_prev_uid, r#match) = row.value().clone();
 
             let mut new_match = Arc::new(Match::new(Some(r#match.clone())));
-            let ph_generator = PlaceholderGenerator::new();
 
             // -- Initialization of data holders
             let mut nodes_data: Vec<NodeData> = pattern
                 .nodes
                 .iter()
                 .map(|np| {
-                    let variable = if let Some(ref var) = np.variable {
-                        var.clone()
-                    } else {
-                        ph_generator.next()
-                    };
-
-                    NodeData::new(variable)
+                    NodeData::new(np.variable.clone())
                 })
                 .collect();
 
@@ -88,13 +82,7 @@ impl Graph {
                 .edges
                 .iter()
                 .map(|ep| {
-                    let variable = if let Some(ref var) = ep.variable {
-                        var.clone()
-                    } else {
-                        ph_generator.next()
-                    };
-
-                    EdgeData::new(variable, ep.compiled_direction.clone())
+                    EdgeData::new(ep.variable.clone(), ep.compiled_direction.clone())
                 })
                 .collect();
 
@@ -119,10 +107,10 @@ impl Graph {
                     let mut term_update = None;
 
                     // -- Populate if already matched
-                    if !is_placeholder(&node_data.variable) {
-                        if let Some(element) = new_match.get(&node_data.variable) {
+                    if let Some(node_var) = &node_data.variable {
+                        if let Some(element) = new_match.get(node_var) {
                             let node = match element.as_node(
-                                &node_data.variable,
+                                node_var,
                                 Some(
                                     "create path - node data inference - node already matched"
                                         .to_string(),
@@ -483,10 +471,10 @@ impl Graph {
                     let mut term_update = None;
 
                     // -- Populate if already matched
-                    if !is_placeholder(&edge_data.variable) {
-                        if let Some(element) = new_match.get(&edge_data.variable) {
+                    if let Some(edge_var) = &edge_data.variable {
+                        if let Some(element) = new_match.get(edge_var) {
                             let edge = match element.as_edge(
-                                &edge_data.variable,
+                                edge_var,
                                 Some(
                                     "create path - edge data inference - edge already matched"
                                         .to_string(),
@@ -697,8 +685,87 @@ impl Graph {
                 }
             }
 
-            // TODO: Add nodes + edges to the graph
+            // -- Check Inference Succeeded
 
+            for nd in nodes_data.iter() {
+                if nd.r#type.is_none() {
+                    return ControlFlow::Break(ImplicaError::InvalidPattern { pattern: format!("{:?}", pattern), reason: "Unable to infer the type of a node contained in the pattern".to_string() })
+                }
+
+                if !nd.type_matched {
+                    return ControlFlow::Break(ImplicaError::InvalidPattern { pattern: format!("{:?}", pattern), reason: "Inferred type for node does not match the provided schema".to_string() });
+                }
+
+                if nd.term.is_some() && !nd.term_matched {
+                    return ControlFlow::Break(ImplicaError::InvalidPattern { pattern: format!("{:?}", pattern), reason: "Inferred term for node does not match the provided schema".to_string() });
+                }
+            }
+
+            for ed in edges_data.iter() {
+                if ed.term.is_none() {
+                    return ControlFlow::Break(ImplicaError::InvalidPattern { pattern: format!("{:?}", pattern), reason: "Unable to infer the term of an edge contained in the pattern".to_string() });
+                }
+
+                if !ed.term_matched {
+                    return ControlFlow::Break(ImplicaError::InvalidPattern { pattern: format!("{:?}", pattern), reason: "Inferred term for edge does not match the provided schema".to_string() });
+                }
+
+                if !ed.type_matched {
+                   return ControlFlow::Break(ImplicaError::InvalidPattern { pattern: format!("{:?}", pattern), reason: "Inferred type for edge does not match the provided schema".to_string() });
+                }
+            }
+
+            // -- Add nodes + edges to the graph
+
+            let mut prev_uid: Uid = [0; 32];
+
+            for nd in nodes_data.into_iter() {
+                if let Some(node_var) = &nd.variable {
+                    if !new_match.contains_key(node_var) {
+
+                    prev_uid = match self.add_node(nd.r#type.unwrap(), nd.term) {
+                        Ok(n) => n,
+                        Err(e) => return ControlFlow::Break(e)
+                    };
+
+                    match new_match.insert(node_var, MatchElement::Node(prev_uid)) {
+                        Ok(()) => (),
+                        Err(e) => return ControlFlow::Break(e)
+                    }
+                }
+                } else {
+                    match self.add_node(nd.r#type.unwrap(), nd.term) {
+                        Ok(..) => (),
+                        Err(e) => return ControlFlow::Break(e)
+                    }
+                }
+            }
+
+            for ed in edges_data.into_iter() {
+                if let Some(edge_var) = &ed.variable {
+                    if !new_match.contains_key(edge_var) {
+                    let edge = match self.add_edge(ed.term.unwrap()) {
+                        Ok(e) => e,
+                        Err(e) => return ControlFlow::Break(e)
+                    };
+
+                    match new_match.insert(edge_var, MatchElement::Edge(edge)) {
+                        Ok(()) => (),
+                        Err(e) => return ControlFlow::Break(e)
+                    }
+                }
+                } else {
+                    match self.add_edge(ed.term.unwrap()) {
+                        Ok(..) => (),
+                        Err(e) => return ControlFlow::Break(e)
+                    }
+                }
+
+            }
+
+            // -- Add new match to the out map
+
+            out_map.insert(next_match_id(), (prev_uid, new_match));
 
             ControlFlow::Continue(())
         });
