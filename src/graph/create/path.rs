@@ -9,7 +9,7 @@ use crate::graph::base::Graph;
 use crate::matches::{Match, MatchSet};
 use crate::patterns::{CompiledDirection, PathPattern};
 use crate::typing::{Arrow, Term, Type};
-use crate::utils::{is_placeholder, PlaceholderGenerator};
+use crate::utils::{is_placeholder, DataQueue, PlaceholderGenerator, QueueItem};
 
 struct NodeData {
     variable: String,
@@ -50,17 +50,6 @@ impl EdgeData {
             type_matched: false,
             term_matched: false,
         }
-    }
-}
-
-struct QueueItem {
-    index: usize,
-    is_node: bool,
-}
-
-impl QueueItem {
-    pub fn new(index: usize, is_node: bool) -> Self {
-        QueueItem { index, is_node }
     }
 }
 
@@ -110,13 +99,9 @@ impl Graph {
                 .collect();
 
             // -- Initialize Queue
-            let mut queue: Vec<QueueItem> = Vec::new();
-
-            queue.extend((0..nodes_data.len()).map(|i| QueueItem::new(i, true)));
-            queue.extend((0..edges_data.len()).map(|i| QueueItem::new(i, false)));
+            let mut queue= DataQueue::new(nodes_data.len());
 
             // -- Consume the Queue
-            // TODO: if term is present we can infer type
             while let Some(item) = queue.pop() {
                 if item.is_node {
                     let node_data = match nodes_data.get(item.index) {
@@ -262,14 +247,18 @@ impl Graph {
                                         }
                                     }
                                     None => {
-                                        // TODO: make this handle not found term variables
                                         term_update = match self
                                             .term_schema_to_term(term_schema, new_match.clone())
                                         {
-                                            Ok(t) => Some(t),
-                                            Err(e) => return ControlFlow::Break(e),
+                                            Ok(t) => {
+                                                term_matched = Some(true);
+                                                Some(t)
+                                            },
+                                            Err(e) => match e {
+                                                ImplicaError::VariableNotFound { .. } => None,
+                                                _ => return ControlFlow::Break(e)
+                                            }
                                         };
-                                        term_matched = Some(true);
                                     }
                                 }
                             } else {
@@ -451,6 +440,14 @@ impl Graph {
                             mut_node_data.term_matched = m;
                         }
 
+                        if mut_node_data.r#type.is_none() {
+                            if let Some(term) = &mut_node_data.term {
+                                mut_node_data.r#type = Some((*term.r#type()).clone());
+
+                                changed = true;
+                            }
+                        }
+
                         if changed {
                             if item.index > 0 {
                                 queue.push(QueueItem::new(item.index - 1, false));
@@ -599,12 +596,17 @@ impl Graph {
                                         }
                                     }
                                     None => {
-                                        // TODO: make this handle not found term variables
                                         term_update = match self.term_schema_to_term(term_schema, new_match.clone()) {
-                                            Ok(t) => Some(t),
-                                            Err(e) => return ControlFlow::Break(e)
+                                            Ok(t) => {
+                                                term_matched = Some(true);
+                                                Some(t)
+                                            },
+                                            Err(e) => match e {
+                                                ImplicaError::VariableNotFound { .. } => None,
+                                                _ => return ControlFlow::Break(e)
+                                            }
                                         };
-                                        term_matched = Some(true);
+
                                     }
                                 }
                             } else {
@@ -675,6 +677,14 @@ impl Graph {
                             mut_edge_data.term_matched = m;
                         }
 
+                        if mut_edge_data.r#type.is_none() {
+                            if let Some(term) = &mut_edge_data.term {
+                                mut_edge_data.r#type = Some((*term.r#type()).clone());
+
+                                changed = true;
+                            }
+                        }
+
                         if changed {
                             queue.push(QueueItem::new(item.index, true));
                             queue.push(QueueItem::new(item.index + 1, true));
@@ -686,6 +696,9 @@ impl Graph {
 
                 }
             }
+
+            // TODO: Add nodes + edges to the graph
+
 
             ControlFlow::Continue(())
         });

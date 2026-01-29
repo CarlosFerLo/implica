@@ -436,12 +436,9 @@ impl Graph {
 
                     self.term_from_uid(&term_uid)
                 } else {
-                    Err(ImplicaError::InvalidPattern {
-                        pattern: "".to_string(),
-                        reason: format!(
-                            "Cannot convert to term a schema with an unmatched variable '{}'",
-                            var
-                        ),
+                    Err(ImplicaError::VariableNotFound {
+                        name: var.clone(),
+                        context: Some("pattern to term recursive".to_string()),
                     })
                 }
             }

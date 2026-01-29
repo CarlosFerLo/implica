@@ -65,6 +65,10 @@ pub enum ImplicaError {
         name: String,
         context: Option<String>,
     },
+    VariableNotFound {
+        name: String,
+        context: Option<String>,
+    },
 
     ContextConflict {
         name: String,
@@ -164,6 +168,14 @@ impl Display for ImplicaError {
                 }
                 Ok(())
             }
+
+            ImplicaError::VariableNotFound { name, context } => {
+                write!(f, "Variable not found: '{}'", name)?;
+                if let Some(context) = context {
+                    write!(f, " ({})", context)?;
+                }
+                Ok(())
+            }
             ImplicaError::ContextConflict {
                 name,
                 original,
@@ -229,6 +241,7 @@ impl From<ImplicaError> for PyErr {
                 exceptions::PyValueError::new_err(err.to_string())
             }
             ImplicaError::VariableAlreadyExists { .. }
+            | ImplicaError::VariableNotFound { .. }
             | ImplicaError::TypeNotFound { .. }
             | ImplicaError::TermNotFound { .. } => exceptions::PyKeyError::new_err(err.to_string()),
             ImplicaError::PythonError { .. }
