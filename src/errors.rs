@@ -62,6 +62,15 @@ pub enum ImplicaError {
         context: Option<String>,
     },
 
+    NodeNotFound {
+        uid: Uid,
+        context: Option<String>,
+    },
+    EdgeNotFound {
+        uid: (Uid, Uid),
+        context: Option<String>,
+    },
+
     VariableAlreadyExists {
         name: String,
         context: Option<String>,
@@ -163,6 +172,22 @@ impl Display for ImplicaError {
                 Ok(())
             }
 
+            ImplicaError::NodeNotFound { uid, context } => {
+                write!(f, "Node with Uid '{}' not found", hex::encode(uid))?;
+                if let Some(context) = context {
+                    write!(f, " ({})", context)?;
+                }
+                Ok(())
+            }
+
+            ImplicaError::EdgeNotFound { uid, context } => {
+                write!(f, "Edge with Uid '({}, {})' not found", hex::encode(uid.0), hex::encode(uid.1))?;
+                if let Some(context) = context {
+                    write!(f, " ({})", context)?;
+                }
+                Ok(())
+            }
+
             ImplicaError::VariableAlreadyExists { name, context } => {
                 write!(f, "Variable already exists: '{}'", name)?;
                 if let Some(context) = context {
@@ -245,6 +270,8 @@ impl From<ImplicaError> for PyErr {
             }
             ImplicaError::VariableAlreadyExists { .. }
             | ImplicaError::VariableNotFound { .. }
+            | ImplicaError::NodeNotFound { .. }
+            | ImplicaError::EdgeNotFound { .. }
             | ImplicaError::TypeNotFound { .. }
             | ImplicaError::TermNotFound { .. } => exceptions::PyKeyError::new_err(err.to_string()),
             ImplicaError::PythonError { .. }

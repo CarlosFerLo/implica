@@ -52,6 +52,16 @@ impl Graph {
                         }
                     }
 
+                    if let Some(ref properties) = pattern.properties {
+                        let res = self.check_node_matches_properties(&old, properties);
+
+                        match res {
+                            Ok(true) => (),
+                            Ok(false) => return ControlFlow::Continue(()),
+                            Err(e) => return ControlFlow::Break(e),
+                        }
+                    }
+
                     out_map.insert(next_match_id(), (old, new_match));
 
                     return ControlFlow::Continue(());
@@ -73,6 +83,16 @@ impl Graph {
                         match self.check_term_matches(&prev_uid, &term_schema.compiled, m.clone()) {
                             Ok(m) => match m {
                                 Some(m) => {
+                                    if let Some(ref properties) = pattern.properties {
+                                        match self
+                                            .check_node_matches_properties(&prev_uid, properties)
+                                        {
+                                            Ok(true) => (),
+                                            Ok(false) => return ControlFlow::Continue(()),
+                                            Err(e) => return ControlFlow::Break(e),
+                                        }
+                                    }
+
                                     if let Some(ref var) = pattern.variable {
                                         match m.insert(var, MatchElement::Node(prev_uid)) {
                                             Ok(_) => (),
@@ -92,6 +112,14 @@ impl Graph {
                             },
                         }
                     } else {
+                        if let Some(ref properties) = pattern.properties {
+                            match self.check_node_matches_properties(&prev_uid, properties) {
+                                Ok(true) => (),
+                                Ok(false) => return ControlFlow::Continue(()),
+                                Err(e) => return ControlFlow::Break(e),
+                            }
+                        }
+
                         if let Some(ref var) = pattern.variable {
                             match m.insert(var, MatchElement::Node(prev_uid)) {
                                 Ok(_) => (),
@@ -113,6 +141,14 @@ impl Graph {
                 match_set.par_iter().try_for_each(|entry| {
                     let (prev_uid, m) = entry.value().clone();
 
+                    if let Some(ref properties) = pattern.properties {
+                        match self.check_node_matches_properties(&prev_uid, properties) {
+                            Ok(true) => (),
+                            Ok(false) => return ControlFlow::Continue(()),
+                            Err(e) => return ControlFlow::Break(e),
+                        }
+                    }
+
                     if let Some(ref var) = pattern.variable {
                         match m.insert(var, MatchElement::Node(prev_uid)) {
                             Ok(_) => (),
@@ -127,6 +163,15 @@ impl Graph {
             } else {
                 self.nodes.par_iter().try_for_each(|entry| {
                     let new_uid = *entry.key();
+
+                    if let Some(ref properties) = pattern.properties {
+                        match self.check_node_matches_properties(&new_uid, properties) {
+                            Ok(true) => (),
+                            Ok(false) => return ControlFlow::Continue(()),
+                            Err(e) => return ControlFlow::Break(e),
+                        }
+                    }
+
                     let new_matches = r#match.clone();
 
                     if let Some(ref var) = pattern.variable {

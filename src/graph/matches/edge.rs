@@ -90,6 +90,17 @@ impl Graph {
                             }
                         }
 
+                        // Check if properties match
+                        if let Some(ref properties) = pattern.properties {
+                            match self
+                                .check_edge_matches_properties(&old_edge, properties)
+                            {
+                                Ok(true) => (),
+                                Ok(false) => return ControlFlow::Continue(()),
+                                Err(e) => return ControlFlow::Break(e),
+                            }
+                        }
+
                         out_map.insert(next_match_id(), (old_edge_type, new_match));
 
                         return ControlFlow::Continue(());
@@ -146,6 +157,17 @@ impl Graph {
                             }
                         }
 
+                        // Check if its properties match
+                        if let Some(ref properties) = pattern.properties {
+                            match self
+                                .check_edge_matches_properties(&edge, properties)
+                            {
+                                Ok(true) => (),
+                                Ok(false) => return ControlFlow::Continue(()),
+                                Err(e) => return ControlFlow::Break(e),
+                            }
+                        }
+
                         // Insert edge to the match if var is specified
                         if let Some(ref var) = pattern.variable {
                             if let Err(e) = new_match.insert(var, MatchElement::Edge(edge)) {
@@ -192,6 +214,17 @@ impl Graph {
                             return cf;
                         }
 
+                        // Check if its properties match
+                        if let Some(ref properties) = pattern.properties {
+                            match self
+                                .check_edge_matches_properties(&edge, properties)
+                            {
+                                Ok(true) => (),
+                                Ok(false) => return ControlFlow::Continue(()),
+                                Err(e) => return ControlFlow::Break(e),
+                            }
+                        }
+
                         // Insert edge to the match if var is specified
                         if let Some(ref var) = pattern.variable {
                             if let Err(e) = new_match.insert(var, MatchElement::Edge(edge)) {
@@ -233,6 +266,16 @@ impl Graph {
                             None => return ControlFlow::Continue(()),
                         };
 
+                        if let Some(ref properties) = pattern.properties {
+                                        match self
+                                            .check_edge_matches_properties(&(start_node, end_node), properties)
+                                        {
+                                            Ok(true) => (),
+                                            Ok(false) => return ControlFlow::Continue(()),
+                                            Err(e) => return ControlFlow::Break(e),
+                                        }
+                                    }
+
                         if let Some(ref var) = pattern.variable {
                             if let Err(e) = new_match.insert(var, MatchElement::Edge((start_node, end_node))) {
                                 return ControlFlow::Break(e);
@@ -251,6 +294,16 @@ impl Graph {
 
                         possible_edges.par_iter().try_for_each(|edge| {
                             let edge = *edge.key();
+
+                            if let Some(ref properties) = pattern.properties {
+                                match self
+                                    .check_edge_matches_properties(&edge, properties)
+                                {
+                                    Ok(true) => (),
+                                    Ok(false) => return ControlFlow::Continue(()),
+                                    Err(e) => return ControlFlow::Break(e),
+                                }
+                            }
 
                             let new_match = Arc::new(Match::new(Some(r#match.clone())));
 
@@ -287,6 +340,16 @@ impl Graph {
                         possible_edges.par_iter().try_for_each(|edge| {
                             let edge = *edge.key();
 
+                            if let Some(ref properties) = pattern.properties {
+                                match self
+                                    .check_edge_matches_properties(&edge, properties)
+                                {
+                                    Ok(true) => (),
+                                    Ok(false) => return ControlFlow::Continue(()),
+                                    Err(e) => return ControlFlow::Break(e),
+                                }
+                            }
+
                             let new_match = Arc::new(Match::new(Some(r#match.clone())));
 
                             if let Some(ref start) = start {
@@ -315,6 +378,17 @@ impl Graph {
                     (None, None) => {
                         self.edges.par_iter().try_for_each(|edge| {
                             let edge = *edge.key();
+
+                            if let Some(ref properties) = pattern.properties {
+                                match self
+                                    .check_edge_matches_properties(&edge, properties)
+                                {
+                                    Ok(true) => (),
+                                    Ok(false) => return ControlFlow::Continue(()),
+                                    Err(e) => return ControlFlow::Break(e),
+                                }
+                            }
+
                             let new_match = Arc::new(Match::new(Some(r#match.clone())));
 
                             if let Some(ref start) = start {

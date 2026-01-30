@@ -1,5 +1,6 @@
 use pyo3::prelude::*;
 use pyo3::types::{PyBool, PyDict, PyFloat, PyInt, PyList, PyString};
+use rayon::prelude::*;
 use rhai::{Dynamic, Map};
 use std::sync::{Arc, RwLock};
 
@@ -66,6 +67,46 @@ impl PropertyMap {
 
         data_lock.insert(key.into(), value);
         Ok(())
+    }
+
+    pub fn get(&self, key: &str) -> Result<Option<Dynamic>, ImplicaError> {
+        let data_lock = self.data.read().map_err(|e| ImplicaError::LockError {
+            rw: "read".to_string(),
+            message: e.to_string(),
+            context: Some("property map - get".to_string()),
+        })?;
+
+        Ok(data_lock.get(key).cloned())
+    }
+
+    pub fn try_par_compare<F>(&self, func: F) -> Result<bool, ImplicaError>
+    where
+        F: Fn(&str, &Dynamic) -> Result<bool, ImplicaError> + Send + Sync,
+    {
+        let data_lock = self.data.read().map_err(|e| ImplicaError::LockError {
+            rw: "read".to_string(),
+            message: e.to_string(),
+            context: Some("property map - try par compare".to_string()),
+        })?;
+
+        enum BreakReason {
+            PredicateFailed,
+            RuntimeError(ImplicaError),
+        }
+
+        let result = data_lock
+            .par_iter()
+            .try_for_each(|(key, value)| match func(key, value) {
+                Ok(true) => Ok(()),
+                Ok(false) => Err(BreakReason::PredicateFailed),
+                Err(e) => Err(BreakReason::RuntimeError(e)),
+            });
+
+        match result {
+            Ok(()) => Ok(true),
+            Err(BreakReason::PredicateFailed) => Ok(false),
+            Err(BreakReason::RuntimeError(e)) => Err(e),
+        }
     }
 }
 

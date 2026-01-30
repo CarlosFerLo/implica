@@ -17,6 +17,8 @@ mod __matches_edge_pattern;
 mod __matches_node_pattern;
 #[path = "matches/path.rs"]
 mod __matches_path_pattern;
+#[path = "matches/properties.rs"]
+mod __matches_properties;
 #[path = "matches/term_schema.rs"]
 mod __matches_term_schema;
 #[path = "matches/type_schema.rs"]
