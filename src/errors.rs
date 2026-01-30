@@ -1,5 +1,6 @@
 use pyo3::pyclass::PyClassGuardError;
 use pyo3::{exceptions, PyErr};
+use std::convert::Infallible;
 use std::fmt::{Display, Formatter, Result};
 
 use crate::graph::Uid;
@@ -86,6 +87,7 @@ pub enum ImplicaError {
         max_len: usize,
         context: Option<String>,
     },
+    Infallible {},
 }
 
 impl Display for ImplicaError {
@@ -210,6 +212,7 @@ impl Display for ImplicaError {
                 }
                 Ok(())
             }
+            ImplicaError::Infallible {  } => write!(f, "FATAL: An infallible error was returned, please contact the developers of the Implica Library as this should not occur.")
         }
     }
 }
@@ -256,6 +259,7 @@ impl From<ImplicaError> for PyErr {
             ImplicaError::IndexOutOfRange { .. } => {
                 exceptions::PyKeyError::new_err(err.to_string())
             }
+            ImplicaError::Infallible {} => exceptions::PySystemError::new_err(err.to_string()),
         }
     }
 }
@@ -275,5 +279,11 @@ impl From<PyClassGuardError<'_, '_>> for ImplicaError {
             message: value.to_string(),
             context: None,
         }
+    }
+}
+
+impl From<Infallible> for ImplicaError {
+    fn from(_value: Infallible) -> Self {
+        ImplicaError::Infallible {}
     }
 }

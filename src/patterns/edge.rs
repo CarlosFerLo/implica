@@ -4,6 +4,7 @@ use std::fmt::Display;
 use crate::errors::ImplicaError;
 use crate::patterns::term_schema::TermSchema;
 use crate::patterns::type_schema::TypeSchema;
+use crate::properties::PropertyMap;
 use crate::utils::validate_variable_name;
 
 #[derive(Clone, Debug, PartialEq)]
@@ -46,6 +47,7 @@ pub struct EdgePattern {
     pub type_schema: Option<TypeSchema>,
     #[pyo3(get)]
     pub term_schema: Option<TermSchema>,
+    pub properties: Option<PropertyMap>,
 }
 
 impl Clone for EdgePattern {
@@ -55,6 +57,7 @@ impl Clone for EdgePattern {
             compiled_direction: self.compiled_direction.clone(),
             type_schema: self.type_schema.clone(),
             term_schema: self.term_schema.clone(),
+            properties: self.properties.clone(),
         }
     }
 }
@@ -106,7 +109,8 @@ impl EdgePattern {
         type_schema: Option<TypeSchema>,
         term_schema: Option<TermSchema>,
         direction: String,
-    ) -> PyResult<Self> {
+        properties: Option<PropertyMap>,
+    ) -> Result<Self, ImplicaError> {
         if let Some(ref var) = variable {
             validate_variable_name(var)?;
         }
@@ -118,6 +122,7 @@ impl EdgePattern {
             compiled_direction,
             type_schema,
             term_schema,
+            properties,
         })
     }
 }

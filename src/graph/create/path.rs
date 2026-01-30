@@ -9,6 +9,7 @@ use crate::graph::base::Graph;
 use crate::graph::Uid;
 use crate::matches::{next_match_id, Match, MatchElement, MatchSet};
 use crate::patterns::{CompiledDirection, PathPattern};
+use crate::properties::PropertyMap;
 use crate::typing::{Arrow, Term, Type};
 use crate::utils::{DataQueue, QueueItem};
 
@@ -18,16 +19,20 @@ struct NodeData {
     term: Option<Term>,
     type_matched: bool,
     term_matched: bool,
+    properties: PropertyMap,
 }
 
 impl NodeData {
-    pub fn new(variable: Option<String>) -> Self {
+    pub fn new(variable: Option<String>, properties: Option<PropertyMap>) -> Self {
+        let properties = properties.unwrap_or_else(PropertyMap::empty);
+
         NodeData {
             variable,
             r#type: None,
             term: None,
             type_matched: false,
             term_matched: false,
+            properties,
         }
     }
 }
@@ -39,10 +44,17 @@ struct EdgeData {
     term: Option<Term>,
     type_matched: bool,
     term_matched: bool,
+    properties: PropertyMap,
 }
 
 impl EdgeData {
-    pub fn new(variable: Option<String>, direction: CompiledDirection) -> Self {
+    pub fn new(
+        variable: Option<String>,
+        direction: CompiledDirection,
+        properties: Option<PropertyMap>,
+    ) -> Self {
+        let properties = properties.unwrap_or_else(PropertyMap::empty);
+
         EdgeData {
             variable,
             direction,
@@ -50,6 +62,7 @@ impl EdgeData {
             term: None,
             type_matched: false,
             term_matched: false,
+            properties,
         }
     }
 }
@@ -74,7 +87,7 @@ impl Graph {
                 .nodes
                 .iter()
                 .map(|np| {
-                    NodeData::new(np.variable.clone())
+                    NodeData::new(np.variable.clone(), np.properties.clone())
                 })
                 .collect();
 
@@ -82,7 +95,7 @@ impl Graph {
                 .edges
                 .iter()
                 .map(|ep| {
-                    EdgeData::new(ep.variable.clone(), ep.compiled_direction.clone())
+                    EdgeData::new(ep.variable.clone(), ep.compiled_direction.clone(), ep.properties.clone())
                 })
                 .collect();
 
@@ -723,7 +736,7 @@ impl Graph {
                 if let Some(node_var) = &nd.variable {
                     if !new_match.contains_key(node_var) {
 
-                    prev_uid = match self.add_node(nd.r#type.unwrap(), nd.term) {
+                    prev_uid = match self.add_node(nd.r#type.unwrap(), nd.term, nd.properties) {
                         Ok(n) => n,
                         Err(e) => return ControlFlow::Break(e)
                     };
@@ -734,7 +747,7 @@ impl Graph {
                     }
                 }
                 } else {
-                    match self.add_node(nd.r#type.unwrap(), nd.term) {
+                    match self.add_node(nd.r#type.unwrap(), nd.term, nd.properties) {
                         Ok(..) => (),
                         Err(e) => return ControlFlow::Break(e)
                     }
@@ -744,7 +757,7 @@ impl Graph {
             for ed in edges_data.into_iter() {
                 if let Some(edge_var) = &ed.variable {
                     if !new_match.contains_key(edge_var) {
-                    let edge = match self.add_edge(ed.term.unwrap()) {
+                    let edge = match self.add_edge(ed.term.unwrap(), ed.properties) {
                         Ok(e) => e,
                         Err(e) => return ControlFlow::Break(e)
                     };
@@ -755,7 +768,7 @@ impl Graph {
                     }
                 }
                 } else {
-                    match self.add_edge(ed.term.unwrap()) {
+                    match self.add_edge(ed.term.unwrap(), ed.properties) {
                         Ok(..) => (),
                         Err(e) => return ControlFlow::Break(e)
                     }

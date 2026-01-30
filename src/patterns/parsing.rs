@@ -1,12 +1,11 @@
-use pyo3::prelude::*;
-
-use std::collections::HashMap;
+use rhai::Dynamic;
 
 use crate::errors::ImplicaError;
 
 use crate::patterns::term_schema::TermSchema;
 use crate::patterns::type_schema::TypeSchema;
 use crate::patterns::{edge::EdgePattern, node::NodePattern};
+use crate::properties::PropertyMap;
 
 #[derive(Debug, PartialEq)]
 pub(in crate::patterns) enum TokenKind {
@@ -20,7 +19,7 @@ pub(in crate::patterns) struct Token {
     pub(in crate::patterns) text: String,
 }
 
-pub(in crate::patterns) fn tokenize_pattern(pattern: &str) -> PyResult<Vec<Token>> {
+pub(in crate::patterns) fn tokenize_pattern(pattern: &str) -> Result<Vec<Token>, ImplicaError> {
     let mut tokens = Vec::new();
     let mut node_buffer = String::new();
     let mut edge_buffer = String::new();
@@ -72,8 +71,7 @@ pub(in crate::patterns) fn tokenize_pattern(pattern: &str) -> PyResult<Vec<Token
                                 "Unexpected character '{}' outside of node or edge pattern",
                                 c
                             ),
-                        }
-                        .into());
+                        });
                     }
                 }
             }
@@ -128,8 +126,7 @@ pub(in crate::patterns) fn tokenize_pattern(pattern: &str) -> PyResult<Vec<Token
                         return Err(ImplicaError::InvalidPattern {
                             pattern: pattern.to_string(),
                             reason: format!("Unexpected character '{}' in edge pattern", c),
-                        }
-                        .into());
+                        });
                     }
                 }
 
@@ -164,15 +161,13 @@ pub(in crate::patterns) fn tokenize_pattern(pattern: &str) -> PyResult<Vec<Token
         return Err(ImplicaError::InvalidPattern {
             pattern: pattern.to_string(),
             reason: "Unmatched parentheses in pattern".to_string(),
-        }
-        .into());
+        });
     }
     if edge_bracket_depth != 0 {
         return Err(ImplicaError::InvalidPattern {
             pattern: pattern.to_string(),
             reason: "Unmatched brackets in pattern".to_string(),
-        }
-        .into());
+        });
     }
 
     // Check final state
@@ -180,16 +175,13 @@ pub(in crate::patterns) fn tokenize_pattern(pattern: &str) -> PyResult<Vec<Token
         return Err(ImplicaError::InvalidPattern {
             pattern: pattern.to_string(),
             reason: "Pattern cannot end with an edge".to_string(),
-        }
-        .into());
+        });
     }
 
     Ok(tokens)
 }
 
-pub(in crate::patterns) fn parse_properties(
-    props_str: &str,
-) -> PyResult<HashMap<String, Py<PyAny>>> {
+pub(in crate::patterns) fn parse_properties(props_str: &str) -> Result<PropertyMap, ImplicaError> {
     let props_str = props_str.trim();
 
     // Check for proper braces
@@ -197,111 +189,104 @@ pub(in crate::patterns) fn parse_properties(
         return Err(ImplicaError::InvalidPattern {
             pattern: props_str.to_string(),
             reason: "Properties must be enclosed in braces {}".to_string(),
-        }
-        .into());
+        });
     }
 
     let inner = props_str[1..props_str.len() - 1].trim();
 
     // Empty properties
     if inner.is_empty() {
-        return Ok(HashMap::new());
+        return Ok(PropertyMap::empty());
     }
 
-    Python::attach(|py| {
-        let mut properties = HashMap::new();
+    let properties = PropertyMap::empty();
 
-        // Split by comma, but be careful with nested structures
-        let mut current_key = String::new();
-        let mut current_value = String::new();
-        let mut in_string = false;
-        let mut string_char = ' ';
-        let mut after_colon = false;
-        let mut depth = 0;
+    // Split by comma, but be careful with nested structures
+    let mut current_key = String::new();
+    let mut current_value = String::new();
+    let mut in_string = false;
+    let mut string_char = ' ';
+    let mut after_colon = false;
+    let mut depth = 0;
 
-        for c in inner.chars() {
-            match c {
-                '"' | '\'' => {
-                    if !in_string {
-                        in_string = true;
-                        string_char = c;
-                    } else if c == string_char {
-                        in_string = false;
-                    }
+    for c in inner.chars() {
+        match c {
+            '"' | '\'' => {
+                if !in_string {
+                    in_string = true;
+                    string_char = c;
+                } else if c == string_char {
+                    in_string = false;
+                }
+                current_value.push(c);
+            }
+            ':' if !in_string && depth == 0 => {
+                if after_colon {
+                    return Err(ImplicaError::InvalidPattern {
+                        pattern: props_str.to_string(),
+                        reason: "Unexpected colon in property value".to_string(),
+                    });
+                }
+                after_colon = true;
+                current_key = current_key.trim().to_string();
+                if current_key.is_empty() {
+                    return Err(ImplicaError::InvalidPattern {
+                        pattern: props_str.to_string(),
+                        reason: "Empty property key".to_string(),
+                    });
+                }
+            }
+            ',' if !in_string && depth == 0 => {
+                if !after_colon {
+                    return Err(ImplicaError::InvalidPattern {
+                        pattern: props_str.to_string(),
+                        reason: "Missing colon in property definition".to_string(),
+                    });
+                }
+
+                // Parse the value and add to properties
+                let value = parse_property_value(current_value.trim())?;
+                properties.insert(current_key.clone(), value)?;
+
+                // Reset for next property
+                current_key.clear();
+                current_value.clear();
+                after_colon = false;
+            }
+            '{' | '[' if !in_string => {
+                depth += 1;
+                current_value.push(c);
+            }
+            '}' | ']' if !in_string => {
+                depth -= 1;
+                current_value.push(c);
+            }
+            _ => {
+                if after_colon {
                     current_value.push(c);
-                }
-                ':' if !in_string && depth == 0 => {
-                    if after_colon {
-                        return Err(ImplicaError::InvalidPattern {
-                            pattern: props_str.to_string(),
-                            reason: "Unexpected colon in property value".to_string(),
-                        }
-                        .into());
-                    }
-                    after_colon = true;
-                    current_key = current_key.trim().to_string();
-                    if current_key.is_empty() {
-                        return Err(ImplicaError::InvalidPattern {
-                            pattern: props_str.to_string(),
-                            reason: "Empty property key".to_string(),
-                        }
-                        .into());
-                    }
-                }
-                ',' if !in_string && depth == 0 => {
-                    if !after_colon {
-                        return Err(ImplicaError::InvalidPattern {
-                            pattern: props_str.to_string(),
-                            reason: "Missing colon in property definition".to_string(),
-                        }
-                        .into());
-                    }
-
-                    // Parse the value and add to properties
-                    let value = parse_property_value(py, current_value.trim())?;
-                    properties.insert(current_key.clone(), value);
-
-                    // Reset for next property
-                    current_key.clear();
-                    current_value.clear();
-                    after_colon = false;
-                }
-                '{' | '[' if !in_string => {
-                    depth += 1;
-                    current_value.push(c);
-                }
-                '}' | ']' if !in_string => {
-                    depth -= 1;
-                    current_value.push(c);
-                }
-                _ => {
-                    if after_colon {
-                        current_value.push(c);
-                    } else {
-                        current_key.push(c);
-                    }
+                } else {
+                    current_key.push(c);
                 }
             }
         }
+    }
 
-        // Handle the last property
-        if !current_key.is_empty() {
-            if !after_colon {
-                return Err(ImplicaError::InvalidPattern {
-                    pattern: props_str.to_string(),
-                    reason: "Missing colon in property definition".to_string(),
-                }
-                .into());
-            }
-            let value = parse_property_value(py, current_value.trim())?;
-            properties.insert(current_key.trim().to_string(), value);
+    // Handle the last property
+    if !current_key.is_empty() {
+        if !after_colon {
+            return Err(ImplicaError::InvalidPattern {
+                pattern: props_str.to_string(),
+                reason: "Missing colon in property definition".to_string(),
+            });
         }
+        let value = parse_property_value(current_value.trim())?;
+        properties.insert(current_key.trim().to_string(), value)?;
+    }
 
-        Ok(properties)
-    })
+    Ok(properties)
 }
 
-fn parse_property_value(py: Python, value_str: &str) -> PyResult<Py<PyAny>> {
+fn parse_property_value(value_str: &str) -> Result<Dynamic, ImplicaError> {
     let value_str = value_str.trim();
 
     // Check for empty value
@@ -309,8 +294,7 @@ fn parse_property_value(py: Python, value_str: &str) -> PyResult<Py<PyAny>> {
         return Err(ImplicaError::InvalidPattern {
             pattern: value_str.to_string(),
             reason: "Empty property value".to_string(),
-        }
-        .into());
+        });
     }
 
     // Try to parse as quoted string (with escape handling)
@@ -322,41 +306,37 @@ fn parse_property_value(py: Python, value_str: &str) -> PyResult<Py<PyAny>> {
             return Err(ImplicaError::InvalidPattern {
                 pattern: value_str.to_string(),
                 reason: format!("Unclosed string literal (expected closing {})", quote_char),
-            }
-            .into());
+            });
         }
 
         let string_content = &value_str[1..value_str.len() - 1];
 
         // Handle escape sequences
         let unescaped = unescape_string(string_content)?;
-        let py_str = unescaped.into_pyobject(py)?;
-        return Ok(py_str.into_any().unbind());
+
+        return Ok(Dynamic::from(unescaped));
     }
 
     // Try to parse as boolean (case-sensitive)
     match value_str {
         "true" => {
-            let py_bool = true.into_pyobject(py)?.to_owned();
-            return Ok(py_bool.into_any().unbind());
+            return Ok(Dynamic::from(true));
         }
         "false" => {
-            let py_bool = false.into_pyobject(py)?.to_owned();
-            return Ok(py_bool.into_any().unbind());
+            return Ok(Dynamic::from(false));
         }
         _ => {}
     }
 
     // Try to parse as null/None
     if value_str == "null" || value_str == "None" {
-        return Ok(py.None());
+        return Ok(Dynamic::UNIT);
     }
 
     // Try to parse as integer first (to avoid losing precision)
     // This will handle negative numbers too
     if let Ok(int_val) = value_str.parse::<i64>() {
-        let py_int = int_val.into_pyobject(py)?;
-        return Ok(py_int.into_any().unbind());
+        return Ok(Dynamic::from(int_val));
     }
 
     // Try to parse as float (including scientific notation)
@@ -367,11 +347,9 @@ fn parse_property_value(py: Python, value_str: &str) -> PyResult<Py<PyAny>> {
             return Err(ImplicaError::InvalidPattern {
                 pattern: value_str.to_string(),
                 reason: "Invalid numeric value (NaN or Infinity not supported)".to_string(),
-            }
-            .into());
+            });
         }
-        let py_float = float_val.into_pyobject(py)?;
-        return Ok(py_float.into_any().unbind());
+        return Ok(Dynamic::from(float_val));
     }
 
     // If nothing else works, it's an error (unquoted strings are not allowed)
@@ -379,11 +357,10 @@ fn parse_property_value(py: Python, value_str: &str) -> PyResult<Py<PyAny>> {
         pattern: value_str.to_string(),
         reason: "Invalid property value. Strings must be quoted, e.g., \"value\" or 'value'"
             .to_string(),
-    }
-    .into())
+    })
 }
 
-fn unescape_string(s: &str) -> PyResult<String> {
+fn unescape_string(s: &str) -> Result<String, ImplicaError> {
     let mut result = String::new();
     let mut chars = s.chars();
 
@@ -406,8 +383,7 @@ fn unescape_string(s: &str) -> PyResult<String> {
                     return Err(ImplicaError::InvalidPattern {
                         pattern: s.to_string(),
                         reason: "String ends with incomplete escape sequence".to_string(),
-                    }
-                    .into())
+                    })
                 }
             }
         } else {
@@ -439,7 +415,7 @@ fn find_properties_start(s: &str) -> Option<usize> {
     None
 }
 
-fn smart_split_colons(s: &str) -> PyResult<Vec<String>> {
+fn smart_split_colons(s: &str) -> Result<Vec<String>, ImplicaError> {
     // Split by colons, but ignore colons inside parentheses, brackets, and braces
     let mut parts = Vec::new();
     let mut current = String::new();
@@ -459,8 +435,7 @@ fn smart_split_colons(s: &str) -> PyResult<Vec<String>> {
                     return Err(ImplicaError::InvalidPattern {
                         pattern: s.to_string(),
                         reason: "Unbalanced parentheses in pattern".to_string(),
-                    }
-                    .into());
+                    });
                 }
                 current.push(c);
             }
@@ -474,8 +449,7 @@ fn smart_split_colons(s: &str) -> PyResult<Vec<String>> {
                     return Err(ImplicaError::InvalidPattern {
                         pattern: s.to_string(),
                         reason: "Unbalanced brackets in pattern".to_string(),
-                    }
-                    .into());
+                    });
                 }
                 current.push(c);
             }
@@ -489,8 +463,7 @@ fn smart_split_colons(s: &str) -> PyResult<Vec<String>> {
                     return Err(ImplicaError::InvalidPattern {
                         pattern: s.to_string(),
                         reason: "Unbalanced braces in pattern".to_string(),
-                    }
-                    .into());
+                    });
                 }
                 current.push(c);
             }
@@ -512,36 +485,32 @@ fn smart_split_colons(s: &str) -> PyResult<Vec<String>> {
         return Err(ImplicaError::InvalidPattern {
             pattern: s.to_string(),
             reason: "Unbalanced parentheses in pattern".to_string(),
-        }
-        .into());
+        });
     }
 
     if bracket_depth != 0 {
         return Err(ImplicaError::InvalidPattern {
             pattern: s.to_string(),
             reason: "Unbalanced brackets in pattern".to_string(),
-        }
-        .into());
+        });
     }
 
     if brace_depth != 0 {
         return Err(ImplicaError::InvalidPattern {
             pattern: s.to_string(),
             reason: "Unbalanced braces in pattern".to_string(),
-        }
-        .into());
+        });
     }
 
     Ok(parts)
 }
-pub(in crate::patterns) fn parse_node_pattern(s: &str) -> PyResult<NodePattern> {
+pub(in crate::patterns) fn parse_node_pattern(s: &str) -> Result<NodePattern, ImplicaError> {
     let s = s.trim();
     if !s.starts_with('(') || !s.ends_with(')') {
         return Err(ImplicaError::InvalidPattern {
             pattern: s.to_string(),
             reason: "Node pattern must be enclosed in parentheses".to_string(),
-        }
-        .into());
+        });
     }
 
     let inner = &s[1..s.len() - 1].trim();
@@ -550,18 +519,18 @@ pub(in crate::patterns) fn parse_node_pattern(s: &str) -> PyResult<NodePattern> 
     let mut variable = None;
     let mut type_schema = None;
     let mut term_schema = None;
-    let mut _properties = None;
+    let mut properties = None;
 
     if inner.is_empty() {
         // Empty node pattern - matches any node
-        return NodePattern::new(None, None, None);
+        return NodePattern::new(None, None, None, None);
     }
 
     // Check for properties - need to find the LAST { that's not inside parentheses
     let content = if let Some(brace_idx) = find_properties_start(inner) {
         // Has properties - extract and parse them
         let props_str = &inner[brace_idx..];
-        _properties = Some(parse_properties(props_str)?);
+        properties = Some(parse_properties(props_str)?);
         inner[..brace_idx].trim()
     } else {
         inner
@@ -620,15 +589,14 @@ pub(in crate::patterns) fn parse_node_pattern(s: &str) -> PyResult<NodePattern> 
             return Err(ImplicaError::InvalidPattern{
                 pattern: s.to_string(),
                 reason: "Node pattern has too many ':' separators. Expected format: (var:TypeSchema:TermSchema)".to_string(),
-            }
-            .into());
+            });
         }
     }
 
-    NodePattern::new(variable, type_schema, term_schema)
+    NodePattern::new(variable, type_schema, term_schema, properties)
 }
 
-pub(in crate::patterns) fn parse_edge_pattern(s: &str) -> PyResult<EdgePattern> {
+pub(in crate::patterns) fn parse_edge_pattern(s: &str) -> Result<EdgePattern, ImplicaError> {
     let s = s.trim();
 
     // Extract the part inside brackets first
@@ -645,8 +613,7 @@ pub(in crate::patterns) fn parse_edge_pattern(s: &str) -> PyResult<EdgePattern> 
         return Err(ImplicaError::InvalidPattern {
             pattern: s.to_string(),
             reason: "Brackets are mismatched".to_string(),
-        }
-        .into());
+        });
     }
 
     // Determine direction based on arrows OUTSIDE the brackets
@@ -658,8 +625,7 @@ pub(in crate::patterns) fn parse_edge_pattern(s: &str) -> PyResult<EdgePattern> 
         return Err(ImplicaError::InvalidPattern {
             pattern: s.to_string(),
             reason: "Cannot have both <- and -> in same edge".to_string(),
-        }
-        .into());
+        });
     } else if before_bracket.contains("<-") || before_bracket.contains('<') {
         "backward"
     } else if after_bracket.contains("->") || after_bracket.contains('>') {
@@ -673,14 +639,14 @@ pub(in crate::patterns) fn parse_edge_pattern(s: &str) -> PyResult<EdgePattern> 
     let mut variable = None;
     let mut type_schema = None;
     let mut term_schema = None;
-    let mut _properties = None;
+    let mut properties = None;
 
     if !inner.is_empty() {
         // Check for properties - need to find the LAST { that's not inside parentheses
         let content = if let Some(brace_idx) = find_properties_start(inner) {
             // Has properties - extract and parse them
             let props_str = &inner[brace_idx..];
-            _properties = Some(parse_properties(props_str)?);
+            properties = Some(parse_properties(props_str)?);
             inner[..brace_idx].trim()
         } else {
             inner
@@ -734,10 +700,15 @@ pub(in crate::patterns) fn parse_edge_pattern(s: &str) -> PyResult<EdgePattern> 
                 return Err(ImplicaError::InvalidPattern{
                     pattern: s.to_string(),
                     reason: "Edge pattern has too many ':' separators. Expected format: [var:TypeSchema:TermSchema]".to_string(),
-                }
-                .into());
+                });
             }
         }
     }
-    EdgePattern::new(variable, type_schema, term_schema, direction.to_string())
+    EdgePattern::new(
+        variable,
+        type_schema,
+        term_schema,
+        direction.to_string(),
+        properties,
+    )
 }

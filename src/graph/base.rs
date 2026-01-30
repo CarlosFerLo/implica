@@ -8,6 +8,7 @@ use rayon::prelude::*;
 use crate::errors::ImplicaError;
 use crate::matches::{next_match_id, Match, MatchSet};
 use crate::patterns::{TermPattern, TermSchema, TypePattern, TypeSchema};
+use crate::properties::PropertyMap;
 use crate::typing::{Application, Arrow, BasicTerm, Term, Type, Variable};
 
 #[path = "matches/edge.rs"]
@@ -62,14 +63,12 @@ enum TermRep {
     Base(String),
     Application(Uid, Uid),
 }
-
-type NodeSet = Arc<DashSet<Uid>>;
 type EdgeSet = Arc<DashSet<(Uid, Uid)>>;
 
 #[derive(Clone, Debug)]
 pub struct Graph {
-    nodes: NodeSet,
-    edges: EdgeSet,
+    nodes: Arc<DashMap<Uid, PropertyMap>>,
+    edges: Arc<DashMap<(Uid, Uid), PropertyMap>>,
 
     type_index: Arc<DashMap<Uid, TypeRep>>,
     term_index: Arc<DashMap<Uid, TermRep>>,
@@ -90,8 +89,8 @@ impl Default for Graph {
 impl Graph {
     pub fn new() -> Self {
         Graph {
-            nodes: Arc::new(DashSet::new()),
-            edges: Arc::new(DashSet::new()),
+            nodes: Arc::new(DashMap::new()),
+            edges: Arc::new(DashMap::new()),
             type_index: Arc::new(DashMap::new()),
             term_index: Arc::new(DashMap::new()),
             type_to_edge_index: Arc::new(DashMap::new()),
@@ -101,14 +100,19 @@ impl Graph {
         }
     }
 
-    pub fn add_node(&self, r#type: Type, term: Option<Term>) -> Result<Uid, ImplicaError> {
+    pub fn add_node(
+        &self,
+        r#type: Type,
+        term: Option<Term>,
+        properties: PropertyMap,
+    ) -> Result<Uid, ImplicaError> {
         let type_uid = self.insert_type(&r#type);
 
         if let Some(term) = term {
             self.insert_term(&term);
         }
 
-        self.nodes.insert(type_uid);
+        self.nodes.insert(type_uid, properties);
         self.start_to_edge_index
             .insert(type_uid, Arc::new(DashSet::new()));
         self.end_to_edge_index
@@ -117,7 +121,11 @@ impl Graph {
         Ok(type_uid)
     }
 
-    pub fn add_edge(&self, term: Term) -> Result<(Uid, Uid), ImplicaError> {
+    pub fn add_edge(
+        &self,
+        term: Term,
+        properties: PropertyMap,
+    ) -> Result<(Uid, Uid), ImplicaError> {
         let term_uid = self.insert_term(&term);
 
         let edge_uid = if let Some(ref type_rep) = self.type_index.get(&term_uid) {
@@ -163,25 +171,30 @@ impl Graph {
             });
         }
 
-        self.edges.insert(edge_uid);
+        self.edges.insert(edge_uid, properties);
 
         Ok(edge_uid)
     }
 
     pub fn remove_node(&self, node_uid: &Uid) -> Result<Option<Uid>, ImplicaError> {
-        if let Some(uid) = self.nodes.remove(node_uid) {
-            let edges_to_remove: Vec<(Uid, Uid)> = self
-                .edges
-                .par_iter()
-                .filter_map(|element| {
-                    if uid == element.0 || uid == element.1 {
-                        Some(*element)
-                    } else {
-                        None
-                    }
-                })
-                .collect();
+        if let Some((uid, _)) = self.nodes.remove(node_uid) {
+            let start_by_node: Vec<(Uid, Uid)> = match self.start_to_edge_index.get(&uid) {
+                Some(l) => l.value().clone(),
+                None => Arc::new(DashSet::new()),
+            }
+            .par_iter()
+            .map(|e| *e.key())
+            .collect();
+            let ends_by_node: Vec<(Uid, Uid)> = match self.end_to_edge_index.get(&uid) {
+                Some(l) => l.value().clone(),
+                None => Arc::new(DashSet::new()),
+            }
+            .par_iter()
+            .map(|e| *e.key())
+            .collect();
 
+            let edges_to_remove: Vec<(Uid, Uid)> =
+                start_by_node.into_iter().chain(ends_by_node).collect();
             for edge in edges_to_remove {
                 self.remove_edge(&edge)?;
             }
@@ -196,7 +209,7 @@ impl Graph {
     }
 
     pub fn remove_edge(&self, edge_uid: &(Uid, Uid)) -> Result<Option<(Uid, Uid)>, ImplicaError> {
-        let uid = match self.edges.remove(edge_uid) {
+        let (uid, _) = match self.edges.remove(edge_uid) {
             Some(uid) => uid,
             None => return Ok(None),
         };

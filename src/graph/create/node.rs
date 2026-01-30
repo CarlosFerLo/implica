@@ -8,6 +8,7 @@ use crate::{
     graph::base::Graph,
     matches::{next_match_id, Match, MatchElement, MatchSet},
     patterns::NodePattern,
+    properties::PropertyMap,
 };
 
 impl Graph {
@@ -53,7 +54,12 @@ impl Graph {
                 None => None,
             };
 
-            match self.add_node(node_type, node_term) {
+            let properties = match &node_pattern.properties {
+                Some(properties) => properties.clone(),
+                None => PropertyMap::empty(),
+            };
+
+            match self.add_node(node_type, node_term, properties) {
                 Ok(uid) => {
                     let new_match = Arc::new(Match::new(Some(r#match)));
 

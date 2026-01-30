@@ -8,6 +8,7 @@ use crate::errors::ImplicaError;
 use crate::graph::base::Graph;
 use crate::matches::{next_match_id, Match, MatchElement, MatchSet};
 use crate::patterns::EdgePattern;
+use crate::properties::PropertyMap;
 
 impl Graph {
     pub fn create_edge(
@@ -39,7 +40,12 @@ impl Graph {
                 }
             };
 
-            match self.add_edge(term) {
+            let properties = match &edge_pattern.properties {
+                Some(properties) => properties.clone(),
+                None => PropertyMap::empty()
+            };
+
+            match self.add_edge(term, properties) {
                 Ok(uid) => {
 
                     let new_match = Arc::new(Match::new(Some(r#match)));
