@@ -1,7 +1,9 @@
 use pyo3::prelude::*;
 use pyo3::types::{PyBool, PyDict, PyFloat, PyInt, PyList, PyString};
+use pyo3::IntoPyObject;
 use rayon::prelude::*;
 use rhai::{Dynamic, Map};
+use std::fmt::Display;
 use std::sync::{Arc, RwLock};
 
 use crate::errors::ImplicaError;
@@ -18,6 +20,43 @@ impl Clone for PyOpaque {
 #[derive(Debug, Clone)]
 pub struct PropertyMap {
     data: Arc<RwLock<Map>>,
+}
+
+impl Display for PropertyMap {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let data_lock = self.data.read().map_err(|_| std::fmt::Error)?;
+
+        write!(f, "{{")?;
+        let mut first = true;
+        for (key, value) in data_lock.iter() {
+            if !first {
+                write!(f, ", ")?;
+            }
+            first = false;
+            write!(f, "{}: {:?}", key, value)?;
+        }
+        write!(f, "}}")
+    }
+}
+
+impl<'py> IntoPyObject<'py> for PropertyMap {
+    type Target = PyAny;
+    type Output = Bound<'py, Self::Target>;
+    type Error = PyErr;
+
+    fn into_pyobject(self, py: Python<'py>) -> Result<Self::Output, Self::Error> {
+        let data_lock = self.data.read().map_err(|e| ImplicaError::LockError {
+            rw: "read".to_string(),
+            message: e.to_string(),
+            context: Some("property map - into py object".to_string()),
+        })?;
+
+        let dict = PyDict::new(py);
+        for (key, value) in data_lock.iter() {
+            dict.set_item(key.to_string(), rhai_to_py(value.clone(), py)?)?;
+        }
+        Ok(dict.into_any())
+    }
 }
 
 impl PropertyMap {
@@ -148,7 +187,7 @@ fn py_to_rhai(obj: &Bound<PyAny>) -> Result<Dynamic, ImplicaError> {
     Ok(Dynamic::from(PyOpaque(obj.clone().unbind())))
 }
 
-fn _rhai_to_py<'py>(val: Dynamic, py: Python<'py>) -> Result<Bound<'py, PyAny>, ImplicaError> {
+fn rhai_to_py<'py>(val: Dynamic, py: Python<'py>) -> Result<Bound<'py, PyAny>, ImplicaError> {
     if val.is::<PyOpaque>() {
         let opaque = val.cast::<PyOpaque>();
         return Ok(opaque.0.bind(py).clone());
@@ -170,7 +209,7 @@ fn _rhai_to_py<'py>(val: Dynamic, py: Python<'py>) -> Result<Bound<'py, PyAny>, 
     if let Some(map) = val.clone().try_cast::<Map>() {
         let dict = PyDict::new(py);
         for (k, v) in map {
-            dict.set_item(k.to_string(), _rhai_to_py(v, py)?)?;
+            dict.set_item(k.to_string(), rhai_to_py(v, py)?)?;
         }
         return Ok(dict.into_any());
     }
@@ -178,7 +217,7 @@ fn _rhai_to_py<'py>(val: Dynamic, py: Python<'py>) -> Result<Bound<'py, PyAny>, 
     if let Some(vec) = val.clone().try_cast::<Vec<Dynamic>>() {
         let list = PyList::empty(py);
         for item in vec {
-            list.append(_rhai_to_py(item, py)?)?;
+            list.append(rhai_to_py(item, py)?)?;
         }
         return Ok(list.into_any());
     }

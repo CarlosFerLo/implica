@@ -1,4 +1,3 @@
-use pyo3::prelude::*;
 use std::fmt::Display;
 
 use crate::errors::ImplicaError;
@@ -7,17 +6,11 @@ use crate::patterns::type_schema::TypeSchema;
 use crate::properties::PropertyMap;
 use crate::utils::validate_variable_name;
 
-#[pyclass]
 #[derive(Debug)]
 pub struct NodePattern {
-    #[pyo3(get)]
     pub variable: Option<String>,
-    #[pyo3(get)]
     pub type_schema: Option<TypeSchema>,
-
-    #[pyo3(get)]
     pub term_schema: Option<TermSchema>,
-
     pub properties: Option<PropertyMap>,
 }
 
@@ -49,17 +42,6 @@ impl Display for NodePattern {
         }
 
         write!(f, "NodePattern({})", content.join(", "))
-    }
-}
-
-#[pymethods]
-impl NodePattern {
-    fn __str__(&self) -> String {
-        self.to_string()
-    }
-
-    fn __repr__(&self) -> String {
-        self.to_string()
     }
 }
 

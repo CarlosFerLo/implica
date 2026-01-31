@@ -11,7 +11,7 @@ use crate::matches::{next_match_id, MatchSet};
 use crate::patterns::PathPattern;
 
 impl Graph {
-    pub fn match_path_pattern(
+    pub(crate) fn match_path_pattern(
         &self,
         pattern: &PathPattern,
         matches: MatchSet,

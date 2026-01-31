@@ -1,3 +1,4 @@
+use pyo3::prelude::*;
 use rayon::iter::IntoParallelRefIterator;
 use sha2::{Digest, Sha256};
 use std::sync::Arc;
@@ -6,9 +7,10 @@ use dashmap::{DashMap, DashSet};
 use rayon::prelude::*;
 
 use crate::errors::ImplicaError;
-use crate::matches::{next_match_id, Match, MatchSet};
+use crate::matches::Match;
 use crate::patterns::{TermPattern, TermSchema, TypePattern, TypeSchema};
 use crate::properties::PropertyMap;
+use crate::query::Query;
 use crate::typing::{Application, Arrow, BasicTerm, Term, Type, Variable};
 
 #[path = "matches/edge.rs"]
@@ -24,12 +26,8 @@ mod __matches_term_schema;
 #[path = "matches/type_schema.rs"]
 mod __matches_type_schema;
 
-#[path = "create/edge.rs"]
-mod __create_edge;
-#[path = "create/node.rs"]
-mod __create_node;
-#[path = "create/path.rs"]
-mod __create_path;
+#[path = "create.rs"]
+mod __create;
 
 pub type Uid = [u8; 32];
 
@@ -89,7 +87,7 @@ impl Default for Graph {
 }
 
 impl Graph {
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Graph {
             nodes: Arc::new(DashMap::new()),
             edges: Arc::new(DashMap::new()),
@@ -102,7 +100,7 @@ impl Graph {
         }
     }
 
-    pub fn add_node(
+    pub(in crate::graph) fn add_node(
         &self,
         r#type: Type,
         term: Option<Term>,
@@ -123,7 +121,7 @@ impl Graph {
         Ok(type_uid)
     }
 
-    pub fn add_edge(
+    pub(in crate::graph) fn add_edge(
         &self,
         term: Term,
         properties: PropertyMap,
@@ -178,7 +176,7 @@ impl Graph {
         Ok(edge_uid)
     }
 
-    pub fn remove_node(&self, node_uid: &Uid) -> Result<Option<Uid>, ImplicaError> {
+    pub(crate) fn remove_node(&self, node_uid: &Uid) -> Result<Option<Uid>, ImplicaError> {
         if let Some((uid, _)) = self.nodes.remove(node_uid) {
             let start_by_node: Vec<(Uid, Uid)> = match self.start_to_edge_index.get(&uid) {
                 Some(l) => l.value().clone(),
@@ -210,7 +208,10 @@ impl Graph {
         }
     }
 
-    pub fn remove_edge(&self, edge_uid: &(Uid, Uid)) -> Result<Option<(Uid, Uid)>, ImplicaError> {
+    pub(crate) fn remove_edge(
+        &self,
+        edge_uid: &(Uid, Uid),
+    ) -> Result<Option<(Uid, Uid)>, ImplicaError> {
         let (uid, _) = match self.edges.remove(edge_uid) {
             Some(uid) => uid,
             None => return Ok(None),
@@ -255,7 +256,7 @@ impl Graph {
         Ok(Some(uid))
     }
 
-    pub fn insert_type(&self, r#type: &Type) -> Uid {
+    pub(in crate::graph) fn insert_type(&self, r#type: &Type) -> Uid {
         match r#type {
             Type::Variable(var) => {
                 let type_rep = TypeRep::Variable(var.name.clone());
@@ -278,7 +279,7 @@ impl Graph {
         }
     }
 
-    pub fn insert_term(&self, term: &Term) -> Uid {
+    pub(in crate::graph) fn insert_term(&self, term: &Term) -> Uid {
         let term_type = term.r#type();
         let type_uid = self.insert_type(term_type.as_ref());
 
@@ -299,17 +300,10 @@ impl Graph {
 
         type_uid
     }
-
-    pub fn start_match(&self) -> MatchSet {
-        let map = Arc::new(DashMap::new());
-        let initial_uid: Uid = [0u8; 32];
-        map.insert(next_match_id(), (initial_uid, Arc::new(Match::new(None))));
-        map
-    }
 }
 
 impl Graph {
-    pub fn type_schema_to_type(
+    pub(in crate::graph) fn type_schema_to_type(
         &self,
         type_schema: &TypeSchema,
         r#match: Arc<Match>,
@@ -352,7 +346,7 @@ impl Graph {
 
                     self.type_from_uid(&matched_type_uid)
                 } else {
-                    Ok(Type::Variable(Variable { name: var.clone() }))
+                    Ok(Type::Variable(Variable::new(var.clone())?))
                 }
             }
             TypePattern::Capture { name, pattern: _ } => {
@@ -362,7 +356,7 @@ impl Graph {
 
                     self.type_from_uid(&matched_type_uid)
                 } else {
-                    Ok(Type::Variable(Variable { name: name.clone() }))
+                    Ok(Type::Variable(Variable::new(name.clone())?))
                 }
             }
         }
@@ -373,7 +367,7 @@ impl Graph {
             let type_repr = entry.value().clone();
 
             match type_repr {
-                TypeRep::Variable(var) => Ok(Type::Variable(Variable { name: var })),
+                TypeRep::Variable(var) => Ok(Type::Variable(Variable::new(var)?)),
                 TypeRep::Arrow(left, right) => {
                     let left_type =
                         self.type_from_uid(&left)
@@ -408,7 +402,7 @@ impl Graph {
 }
 
 impl Graph {
-    pub fn term_schema_to_term(
+    pub(in crate::graph) fn term_schema_to_term(
         &self,
         term_schema: &TermSchema,
         r#match: Arc<Match>,
@@ -475,10 +469,10 @@ impl Graph {
             })?;
 
             match term_repr {
-                TermRep::Base(var) => Ok(Term::Basic(BasicTerm {
-                    name: var.clone(),
-                    r#type: Arc::new(term_type),
-                })),
+                TermRep::Base(var) => Ok(Term::Basic(BasicTerm::new(
+                    var.clone(),
+                    Arc::new(term_type),
+                )?)),
                 TermRep::Application(left, right) => {
                     let left_term = self.term_from_uid(&left)?;
                     let right_term = self.term_from_uid(&right)?;
@@ -492,5 +486,151 @@ impl Graph {
                 context: Some("term from uid".to_string()),
             })
         }
+    }
+}
+
+impl Graph {
+    pub(crate) fn type_to_string(&self, r#type: &Uid) -> Result<String, ImplicaError> {
+        if let Some(entry) = self.type_index.get(r#type) {
+            let type_rep = entry.value();
+
+            match type_rep {
+                TypeRep::Variable(var) => Ok(var.clone()),
+                TypeRep::Arrow(left, right) => Ok(format!(
+                    "({} -> {})",
+                    self.type_to_string(left)?,
+                    self.type_to_string(right)?
+                )),
+            }
+        } else {
+            Err(ImplicaError::TypeNotFound {
+                uid: *r#type,
+                context: Some("type to string".to_string()),
+            })
+        }
+    }
+
+    pub(crate) fn term_to_string(&self, term: &Uid) -> Result<String, ImplicaError> {
+        if let Some(entry) = self.term_index.get(term) {
+            let term_rep = entry.value();
+
+            match term_rep {
+                TermRep::Base(var) => Ok(var.clone()),
+                TermRep::Application(func, arg) => Ok(format!(
+                    "({} {})",
+                    self.term_to_string(func)?,
+                    self.term_to_string(arg)?
+                )),
+            }
+        } else {
+            Err(ImplicaError::TermNotFound {
+                uid: *term,
+                context: Some("term to string".to_string()),
+            })
+        }
+    }
+
+    pub(crate) fn node_to_string(&self, node: &Uid) -> Result<String, ImplicaError> {
+        if let Some(entry) = self.nodes.get(node) {
+            let props = entry.value();
+
+            Ok(format!(
+                "Node({}:{}:{})",
+                self.type_to_string(node)?,
+                self.term_to_string(node).unwrap_or_else(|_| "".to_string()),
+                props
+            ))
+        } else {
+            Err(ImplicaError::NodeNotFound {
+                uid: *node,
+                context: Some("edge to string".to_string()),
+            })
+        }
+    }
+
+    pub(crate) fn edge_to_string(&self, edge: &(Uid, Uid)) -> Result<String, ImplicaError> {
+        if let Some(entry) = self.edges.get(edge) {
+            let props = entry.value();
+
+            let edge_type = match self.edge_to_type_index.get(edge) {
+                Some(t) => *t.value(),
+                None => return Err(ImplicaError::IndexCorruption { message: "missing entry of edge that appears in the EdgeIndex but not in the EdgeToTypeIndex".to_string(), context: Some("edge to string".to_string()) })
+            };
+
+            Ok(format!(
+                "Edge({}:{}:{})",
+                self.type_to_string(&edge_type)?,
+                self.term_to_string(&edge_type)?,
+                props
+            )
+            .to_string())
+        } else {
+            Err(ImplicaError::EdgeNotFound {
+                uid: *edge,
+                context: Some("edge to string".to_string()),
+            })
+        }
+    }
+}
+
+impl Graph {
+    pub(crate) fn node_properties(&self, node: &Uid) -> Result<PropertyMap, ImplicaError> {
+        if let Some(entry) = self.nodes.get(node) {
+            Ok(entry.value().clone())
+        } else {
+            Err(ImplicaError::NodeNotFound {
+                uid: *node,
+                context: Some("node properties".to_string()),
+            })
+        }
+    }
+
+    pub(crate) fn edge_properties(&self, edge: &(Uid, Uid)) -> Result<PropertyMap, ImplicaError> {
+        if let Some(entry) = self.edges.get(edge) {
+            Ok(entry.value().clone())
+        } else {
+            Err(ImplicaError::EdgeNotFound {
+                uid: *edge,
+                context: Some("edge properties".to_string()),
+            })
+        }
+    }
+}
+
+impl Graph {
+    pub(crate) fn set_node_properties(&self, node: &Uid, properties: PropertyMap) {
+        self.nodes.insert(*node, properties);
+    }
+
+    pub(crate) fn set_edge_properties(&self, edge: &(Uid, Uid), properties: PropertyMap) {
+        self.edges.insert(*edge, properties);
+    }
+}
+
+#[pyclass(name = "Graph")]
+#[derive(Debug, Clone)]
+pub struct PyGraph {
+    graph: Arc<Graph>,
+}
+
+impl Default for PyGraph {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[pymethods]
+impl PyGraph {
+    #[new]
+    pub fn new() -> Self {
+        let graph = Graph::new();
+
+        PyGraph {
+            graph: Arc::new(graph),
+        }
+    }
+
+    pub fn query(&self) -> Query {
+        Query::new(self.graph.clone())
     }
 }

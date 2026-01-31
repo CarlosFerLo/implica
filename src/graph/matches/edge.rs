@@ -11,7 +11,7 @@ use crate::matches::{next_match_id, Match, MatchElement, MatchSet};
 use crate::patterns::{CompiledDirection, EdgePattern};
 
 impl Graph {
-    pub fn match_edge_pattern(
+    pub(super) fn match_edge_pattern(
         &self,
         pattern: &EdgePattern,
         start: Option<String>,

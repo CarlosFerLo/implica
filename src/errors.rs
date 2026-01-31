@@ -97,6 +97,12 @@ pub enum ImplicaError {
         context: Option<String>,
     },
     Infallible {},
+
+    InvalidQuery {
+        query: String,
+        reason: String,
+        context: Option<String>,
+    },
 }
 
 impl Display for ImplicaError {
@@ -237,7 +243,16 @@ impl Display for ImplicaError {
                 }
                 Ok(())
             }
-            ImplicaError::Infallible {  } => write!(f, "FATAL: An infallible error was returned, please contact the developers of the Implica Library as this should not occur.")
+            ImplicaError::Infallible {  } => write!(f, "FATAL: An infallible error was returned, please contact the developers of the Implica Library as this should not occur."),
+            ImplicaError::InvalidQuery { query, reason, context } => {
+                write!(f, "Invalid Query:\n{}\n\nReason: {}", query, reason)?;
+
+                if let Some(context) = context {
+                    write!(f, "\n({})", context)?;
+                }
+
+                Ok(())
+            }
         }
     }
 }
@@ -261,7 +276,8 @@ impl From<ImplicaError> for PyErr {
                 exceptions::PyTypeError::new_err(err.to_string())
             }
 
-            ImplicaError::InvalidPattern { .. }
+            ImplicaError::InvalidQuery { .. }
+            | ImplicaError::InvalidPattern { .. }
             | ImplicaError::InvalidIdentifier { .. }
             | ImplicaError::InvalidTerm { .. }
             | ImplicaError::SchemaValidation { .. }

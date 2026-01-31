@@ -1,4 +1,3 @@
-use pyo3::prelude::*;
 use std::fmt;
 use std::sync::Arc;
 
@@ -12,7 +11,7 @@ pub enum Type {
 }
 
 impl Type {
-    pub fn as_variable(&self) -> Option<&Variable> {
+    pub fn _as_variable(&self) -> Option<&Variable> {
         match self {
             Type::Variable(v) => Some(v),
             _ => None,
@@ -36,36 +35,15 @@ impl fmt::Display for Type {
     }
 }
 
-#[pyclass]
 #[derive(Clone, Debug)]
 pub struct Variable {
-    #[pyo3(get)]
     pub name: String,
 }
 
-#[pymethods]
 impl Variable {
-    #[new]
-    pub fn new(name: String) -> PyResult<Self> {
-        // Validate that the name is not empty or whitespace-only
-        if let Err(e) = validate_variable_name(&name) {
-            return Err(e.into());
-        }
-
+    pub fn new(name: String) -> Result<Self, ImplicaError> {
+        validate_variable_name(&name)?;
         Ok(Variable { name })
-    }
-
-    fn __str__(&self) -> &str {
-        &self.name
-    }
-
-    fn __repr__(&self) -> String {
-        format!("Variable(\"{}\")", self.name)
-    }
-
-    fn __eq__(&self, other: &Self) -> bool {
-        // Equality based on uid
-        self == other
     }
 }
 
@@ -84,7 +62,6 @@ impl PartialEq for Variable {
 
 impl Eq for Variable {}
 
-#[pyclass]
 #[derive(Clone, Debug)]
 pub struct Arrow {
     pub left: Arc<Type>,
@@ -94,43 +71,6 @@ pub struct Arrow {
 impl Arrow {
     pub fn new(left: Arc<Type>, right: Arc<Type>) -> Self {
         Arrow { left, right }
-    }
-}
-
-#[pymethods]
-impl Arrow {
-    #[new]
-    pub fn py_new(py: Python, left: Py<PyAny>, right: Py<PyAny>) -> PyResult<Self> {
-        let left_obj = python_to_type(left.bind(py))?;
-        let right_obj = python_to_type(right.bind(py))?;
-
-        Ok(Arrow {
-            left: Arc::new(left_obj),
-            right: Arc::new(right_obj),
-        })
-    }
-
-    #[getter]
-    pub fn left(&self, py: Python) -> PyResult<Py<PyAny>> {
-        type_to_python(py, &self.left)
-    }
-
-    #[getter]
-    pub fn right(&self, py: Python) -> PyResult<Py<PyAny>> {
-        type_to_python(py, &self.right)
-    }
-
-    fn __str__(&self) -> String {
-        format!("({} -> {})", self.left, self.right)
-    }
-
-    fn __repr__(&self) -> String {
-        format!("Arrow({}, {})", self.left, self.right)
-    }
-
-    fn __eq__(&self, other: &Self) -> bool {
-        // Equality based on uid
-        self == other
     }
 }
 
@@ -147,36 +87,3 @@ impl PartialEq for Arrow {
 }
 
 impl Eq for Arrow {}
-
-pub(crate) fn python_to_type(obj: &Bound<'_, PyAny>) -> Result<Type, ImplicaError> {
-    // Verificar que es del tipo correcto primero
-    if obj.is_instance_of::<Variable>() {
-        let var = obj.extract::<Variable>()?;
-        // Validar integridad
-
-        validate_variable_name(&var.name)?;
-
-        Ok(Type::Variable(var))
-    } else if obj.is_instance_of::<Arrow>() {
-        Ok(Type::Arrow(obj.extract::<Arrow>()?))
-    } else {
-        Err(ImplicaError::PythonError {
-            message: format!(
-                "Expected Variable or Arrow, got {} of type {}",
-                obj,
-                obj.get_type()
-                    .name()
-                    .map(|n| { n.to_string() })
-                    .unwrap_or("undefined".to_string())
-            ),
-            context: Some("python_to_type".to_string()),
-        })
-    }
-}
-
-pub(crate) fn type_to_python(py: Python, typ: &Type) -> PyResult<Py<PyAny>> {
-    match typ {
-        Type::Variable(v) => Ok(Py::new(py, v.clone())?.into()),
-        Type::Arrow(a) => Ok(Py::new(py, a.clone())?.into()),
-    }
-}

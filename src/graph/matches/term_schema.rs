@@ -10,7 +10,7 @@ use crate::matches::{next_match_id, Match, MatchElement, MatchSet};
 use crate::patterns::{TermPattern, TermSchema};
 
 impl Graph {
-    pub fn match_term_schema(
+    pub(super) fn match_term_schema(
         &self,
         term_schema: &TermSchema,
         matches: MatchSet,

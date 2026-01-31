@@ -1,9 +1,7 @@
-use crate::errors::ImplicaError;
-
-use crate::utils::validate_variable_name;
-use pyo3::prelude::*;
-
 use std::fmt::Display;
+
+use crate::errors::ImplicaError;
+use crate::utils::validate_variable_name;
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum TypePattern {
@@ -19,10 +17,8 @@ pub enum TypePattern {
     },
 }
 
-#[pyclass]
 #[derive(Clone, Debug)]
 pub struct TypeSchema {
-    #[pyo3(get)]
     pub pattern: String,
 
     pub compiled: TypePattern,
@@ -31,26 +27,6 @@ pub struct TypeSchema {
 impl Display for TypeSchema {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "TypeSchema('{}')", self.pattern)
-    }
-}
-
-#[pymethods]
-impl TypeSchema {
-    #[new]
-    pub fn py_new(pattern: String) -> PyResult<Self> {
-        TypeSchema::new(pattern).map_err(|e| e.into())
-    }
-
-    fn __eq__(&self, other: TypeSchema) -> bool {
-        self.compiled == other.compiled
-    }
-
-    fn __str__(&self) -> String {
-        self.to_string()
-    }
-
-    fn __repr__(&self) -> String {
-        self.to_string()
     }
 }
 

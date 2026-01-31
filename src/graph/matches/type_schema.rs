@@ -10,7 +10,7 @@ use crate::matches::{next_match_id, Match, MatchElement, MatchSet};
 use crate::patterns::{TypePattern, TypeSchema};
 
 impl Graph {
-    pub fn match_type_schema(
+    pub(super) fn match_type_schema(
         &self,
         type_schema: &TypeSchema,
         matches: MatchSet,
@@ -48,7 +48,7 @@ impl Graph {
         }
     }
 
-    pub fn check_type_matches(
+    pub(super) fn check_type_matches(
         &self,
         type_uid: &Uid,
         pattern: &TypePattern,

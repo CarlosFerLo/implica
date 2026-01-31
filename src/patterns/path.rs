@@ -1,4 +1,4 @@
-use pyo3::prelude::*;
+use std::fmt::Display;
 
 use crate::errors::ImplicaError;
 use crate::patterns::{
@@ -7,27 +7,32 @@ use crate::patterns::{
     parsing::{parse_edge_pattern, parse_node_pattern, tokenize_pattern, TokenKind},
 };
 
-#[pyclass]
 #[derive(Clone, Debug)]
 pub struct PathPattern {
-    #[pyo3(get)]
+    pattern: String,
+
     pub nodes: Vec<NodePattern>,
-    #[pyo3(get)]
     pub edges: Vec<EdgePattern>,
+}
+
+impl Display for PathPattern {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.pattern)
+    }
 }
 
 impl PathPattern {
     pub fn validate(&self) -> Result<(), ImplicaError> {
         if self.nodes.is_empty() {
             return Err(ImplicaError::InvalidPattern {
-                pattern: format!("{:?}", self),
+                pattern: self.to_string(),
                 reason: "a path pattern cannot be empty".to_string(),
             });
         }
 
         if self.nodes.len() != self.edges.len() + 1 {
             return Err(ImplicaError::InvalidPattern {
-                pattern: format!("{:?}", self),
+                pattern: self.to_string(),
                 reason: "the number of nodes should be the number of edges plus 1".to_string(),
             });
         }
@@ -35,33 +40,11 @@ impl PathPattern {
     }
 }
 
-#[pymethods]
 impl PathPattern {
-    #[new]
-    #[pyo3(signature = (pattern=None))]
-    pub fn new(pattern: Option<String>) -> PyResult<Self> {
-        if let Some(p) = pattern {
-            PathPattern::parse(p)
-        } else {
-            Ok(PathPattern {
-                nodes: Vec::new(),
-                edges: Vec::new(),
-            })
-        }
+    pub fn new(pattern: String) -> Result<Self, ImplicaError> {
+        PathPattern::parse(pattern)
     }
-
-    pub fn add_node(&mut self, pattern: NodePattern) -> Self {
-        self.nodes.push(pattern);
-        self.clone()
-    }
-
-    pub fn add_edge(&mut self, pattern: EdgePattern) -> Self {
-        self.edges.push(pattern);
-        self.clone()
-    }
-
-    #[staticmethod]
-    pub fn parse(pattern: String) -> PyResult<Self> {
+    pub fn parse(pattern: String) -> Result<Self, ImplicaError> {
         // Enhanced parser for Cypher-like path patterns
         // Supports: (n)-[e]->(m), (n:A)-[e:term]->(m:B), etc.
 
@@ -70,8 +53,7 @@ impl PathPattern {
             return Err(ImplicaError::InvalidPattern {
                 pattern: pattern.to_string(),
                 reason: "Pattern cannot be empty".to_string(),
-            }
-            .into());
+            });
         }
 
         let mut nodes = Vec::new();
@@ -102,8 +84,7 @@ impl PathPattern {
             return Err(ImplicaError::InvalidPattern {
                 pattern: pattern.to_string(),
                 reason: "Pattern must contain at least one node".to_string(),
-            }
-            .into());
+            });
         }
 
         // Validate: edges should be between nodes
@@ -111,11 +92,14 @@ impl PathPattern {
             return Err(ImplicaError::InvalidPattern {
                 pattern: pattern.to_string(),
                 reason: "Invalid pattern: too many edges for the number of nodes".to_string(),
-            }
-            .into());
+            });
         }
 
-        Ok(PathPattern { nodes, edges })
+        Ok(PathPattern {
+            pattern: pattern.to_string(),
+            nodes,
+            edges,
+        })
     }
 
     fn __repr__(&self) -> String {

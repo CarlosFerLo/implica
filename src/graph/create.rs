@@ -68,7 +68,7 @@ impl EdgeData {
 }
 
 impl Graph {
-    pub fn create_path(
+    pub(crate) fn create_path(
         &self,
         pattern: &PathPattern,
         matches: MatchSet,
@@ -702,29 +702,29 @@ impl Graph {
 
             for nd in nodes_data.iter() {
                 if nd.r#type.is_none() {
-                    return ControlFlow::Break(ImplicaError::InvalidPattern { pattern: format!("{:?}", pattern), reason: "Unable to infer the type of a node contained in the pattern".to_string() })
+                    return ControlFlow::Break(ImplicaError::InvalidPattern { pattern: pattern.to_string(), reason: "Unable to infer the type of a node contained in the pattern".to_string() })
                 }
 
                 if !nd.type_matched {
-                    return ControlFlow::Break(ImplicaError::InvalidPattern { pattern: format!("{:?}", pattern), reason: "Inferred type for node does not match the provided schema".to_string() });
+                    return ControlFlow::Break(ImplicaError::InvalidPattern { pattern: pattern.to_string(), reason: "Inferred type for node does not match the provided schema".to_string() });
                 }
 
                 if nd.term.is_some() && !nd.term_matched {
-                    return ControlFlow::Break(ImplicaError::InvalidPattern { pattern: format!("{:?}", pattern), reason: "Inferred term for node does not match the provided schema".to_string() });
+                    return ControlFlow::Break(ImplicaError::InvalidPattern { pattern: pattern.to_string(), reason: "Inferred term for node does not match the provided schema".to_string() });
                 }
             }
 
             for ed in edges_data.iter() {
                 if ed.term.is_none() {
-                    return ControlFlow::Break(ImplicaError::InvalidPattern { pattern: format!("{:?}", pattern), reason: "Unable to infer the term of an edge contained in the pattern".to_string() });
+                    return ControlFlow::Break(ImplicaError::InvalidPattern { pattern: pattern.to_string(), reason: "Unable to infer the term of an edge contained in the pattern".to_string() });
                 }
 
                 if !ed.term_matched {
-                    return ControlFlow::Break(ImplicaError::InvalidPattern { pattern: format!("{:?}", pattern), reason: "Inferred term for edge does not match the provided schema".to_string() });
+                    return ControlFlow::Break(ImplicaError::InvalidPattern { pattern: pattern.to_string(), reason: "Inferred term for edge does not match the provided schema".to_string() });
                 }
 
                 if !ed.type_matched {
-                   return ControlFlow::Break(ImplicaError::InvalidPattern { pattern: format!("{:?}", pattern), reason: "Inferred type for edge does not match the provided schema".to_string() });
+                   return ControlFlow::Break(ImplicaError::InvalidPattern { pattern: pattern.to_string(), reason: "Inferred type for edge does not match the provided schema".to_string() });
                 }
             }
 

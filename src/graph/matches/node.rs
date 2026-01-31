@@ -10,7 +10,7 @@ use crate::matches::{next_match_id, MatchElement, MatchSet};
 use crate::patterns::NodePattern;
 
 impl Graph {
-    pub fn match_node_pattern(
+    pub(super) fn match_node_pattern(
         &self,
         pattern: &NodePattern,
         matches: MatchSet,

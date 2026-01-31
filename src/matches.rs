@@ -153,6 +153,16 @@ impl Match {
         self.elements.insert(key.to_string(), element);
         Ok(())
     }
+
+    pub fn remove(&self, key: &str) -> Option<MatchElement> {
+        if let Some((_, element)) = self.elements.remove(key) {
+            Some(element)
+        } else if let Some(previous) = &self.previous {
+            previous.remove(key)
+        } else {
+            None
+        }
+    }
 }
 
 pub type MatchSet = Arc<DashMap<u64, (Uid, Arc<Match>)>>;

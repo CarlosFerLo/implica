@@ -1,40 +1,5 @@
-from .implica import (
-    Variable,
-    Arrow,
-    BasicTerm,
-    Application,
-    Constant,
-    TypeSchema,
-    TermSchema,
-    NodePattern,
-    EdgePattern,
-    PathPattern,
-    Node,
-    Edge,
-    Graph,
-    Query,
-)
+from .implica import Graph, Query, Edge, Node, Term, Type
 
-from typing import Union
+type Element = Edge | Node | Term | Type
 
-Type = Union[Variable, Arrow]
-Term = Union[BasicTerm, Application]
-
-__all__ = [
-    "Variable",
-    "Arrow",
-    "Type",
-    "Term",
-    "Constant",
-    "BasicTerm",
-    "Application",
-    "TypeSchema",
-    "TermSchema",
-    "NodePattern",
-    "EdgePattern",
-    "PathPattern",
-    "Node",
-    "Edge",
-    "Graph",
-    "Query",
-]
+__all__ = ["Graph", "Query", "Edge", "Node", "Term", "Type", "Element"]

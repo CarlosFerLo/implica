@@ -1,11 +1,6 @@
-use pyo3::prelude::*;
 use std::{fmt::Display, sync::Arc};
 
-use crate::{
-    errors::ImplicaError,
-    typing::{python_to_type, type_to_python, Type},
-    utils::validate_variable_name,
-};
+use crate::{errors::ImplicaError, typing::Type, utils::validate_variable_name};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Term {
@@ -21,7 +16,7 @@ impl Term {
         }
     }
 
-    pub fn as_basic(&self) -> Option<&BasicTerm> {
+    pub fn _as_basic(&self) -> Option<&BasicTerm> {
         match self {
             Term::Basic(basic) => Some(basic),
             Term::Application(_) => None,
@@ -52,12 +47,17 @@ impl Display for Term {
     }
 }
 
-#[pyclass]
 #[derive(Clone, Debug)]
 pub struct BasicTerm {
-    #[pyo3(get)]
     pub name: String,
     pub r#type: Arc<Type>,
+}
+
+impl BasicTerm {
+    pub fn new(name: String, r#type: Arc<Type>) -> Result<Self, ImplicaError> {
+        validate_variable_name(&name)?;
+        Ok(BasicTerm { name, r#type })
+    }
 }
 
 impl Display for BasicTerm {
@@ -74,50 +74,6 @@ impl PartialEq for BasicTerm {
 
 impl Eq for BasicTerm {}
 
-impl BasicTerm {
-    pub fn new(name: String, r#type: Arc<Type>) -> Self {
-        BasicTerm { name, r#type }
-    }
-}
-
-#[pymethods]
-impl BasicTerm {
-    #[new]
-    pub fn py_new(py: Python, name: String, r#type: Py<PyAny>) -> PyResult<Self> {
-        if let Err(e) = validate_variable_name(&name) {
-            return Err(e.into());
-        }
-
-        let type_arc = Arc::new(python_to_type(r#type.bind(py))?);
-        Ok(BasicTerm::new(name, type_arc))
-    }
-
-    #[pyo3(name = "type")]
-    pub fn py_type(&self, py: Python) -> PyResult<Py<PyAny>> {
-        type_to_python(py, &self.r#type)
-    }
-
-    fn __str__(&self) -> String {
-        self.name.to_string()
-    }
-
-    fn __repr__(&self) -> String {
-        format!("BasicTerm(\"{}\")", self.name)
-    }
-
-    fn __eq__(&self, other: &Self) -> bool {
-        self == other
-    }
-
-    fn __call__(&self, py: Python, other: Py<PyAny>) -> PyResult<Py<PyAny>> {
-        let other_term = python_to_term(other.bind(py))?;
-        let self_term = Term::Basic(self.clone());
-        let result = self_term.apply(&other_term)?;
-        term_to_python(py, &result)
-    }
-}
-
-#[pyclass]
 #[derive(Clone, Debug)]
 pub struct Application {
     pub function: Arc<Term>,
@@ -163,71 +119,5 @@ impl Application {
                 }
             }
         }
-    }
-}
-
-#[pymethods]
-impl Application {
-    #[new]
-    pub fn py_new(py: Python, function: Py<PyAny>, argument: Py<PyAny>) -> PyResult<Self> {
-        let function_obj = python_to_term(function.bind(py))?;
-        let argument_obj = python_to_term(argument.bind(py))?;
-
-        Application::new(function_obj, argument_obj).map_err(|e| e.into())
-    }
-
-    #[getter]
-    pub fn get_function(&self, py: Python) -> PyResult<Py<PyAny>> {
-        term_to_python(py, &self.function)
-    }
-
-    #[getter]
-    pub fn get_argument(&self, py: Python) -> PyResult<Py<PyAny>> {
-        term_to_python(py, &self.argument)
-    }
-
-    #[pyo3(name = "type")]
-    pub fn py_type(&self, py: Python) -> PyResult<Py<PyAny>> {
-        type_to_python(py, &self.r#type)
-    }
-
-    fn __str__(&self) -> String {
-        format!("({} {})", self.function, self.argument)
-    }
-
-    fn __repr__(&self) -> String {
-        format!("Application({}, {})", self.function, self.argument)
-    }
-
-    fn __eq__(&self, other: &Self) -> bool {
-        self == other
-    }
-
-    fn __call__(&self, py: Python, other: Py<PyAny>) -> PyResult<Py<PyAny>> {
-        let other_term = python_to_term(other.bind(py))?;
-        let self_term = Term::Application(self.clone());
-        let result = self_term.apply(&other_term)?;
-        term_to_python(py, &result)
-    }
-}
-
-pub(crate) fn python_to_term(obj: &Bound<'_, PyAny>) -> PyResult<Term> {
-    if let Ok(basic) = obj.extract::<BasicTerm>() {
-        Ok(Term::Basic(basic))
-    } else if let Ok(app) = obj.extract::<Application>() {
-        Ok(Term::Application(app))
-    } else {
-        Err(ImplicaError::PythonError {
-            message: format!("Error converting python object '{}' to term.", obj),
-            context: Some("python_to_term".to_string()),
-        }
-        .into())
-    }
-}
-
-pub(crate) fn term_to_python(py: Python, term: &Term) -> PyResult<Py<PyAny>> {
-    match term {
-        Term::Basic(b) => Ok(Py::new(py, b.clone())?.into()),
-        Term::Application(a) => Ok(Py::new(py, a.clone())?.into()),
     }
 }

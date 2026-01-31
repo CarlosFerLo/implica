@@ -1,4 +1,3 @@
-use pyo3::prelude::*;
 use std::fmt::Display;
 
 use crate::errors::ImplicaError;
@@ -35,17 +34,11 @@ impl CompiledDirection {
         }
     }
 }
-
-#[pyclass]
 #[derive(Debug)]
 pub struct EdgePattern {
-    #[pyo3(get)]
     pub variable: Option<String>,
-
     pub(crate) compiled_direction: CompiledDirection,
-    #[pyo3(get)]
     pub type_schema: Option<TypeSchema>,
-    #[pyo3(get)]
     pub term_schema: Option<TermSchema>,
     pub properties: Option<PropertyMap>,
 }
@@ -84,22 +77,6 @@ impl Display for EdgePattern {
         ));
 
         write!(f, "EdgePattern({})", content.join(", "))
-    }
-}
-
-#[pymethods]
-impl EdgePattern {
-    #[getter]
-    pub fn direction(&self) -> String {
-        self.compiled_direction.to_string().to_string()
-    }
-
-    fn __str__(&self) -> String {
-        self.to_string()
-    }
-
-    fn __repr__(&self) -> String {
-        self.to_string()
     }
 }
 
