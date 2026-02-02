@@ -1,3 +1,4 @@
+use error_stack::ResultExt;
 use pyo3::prelude::*;
 use rayon::iter::IntoParallelRefIterator;
 use sha2::{Digest, Sha256};
@@ -6,12 +7,14 @@ use std::sync::Arc;
 use dashmap::{DashMap, DashSet};
 use rayon::prelude::*;
 
-use crate::errors::ImplicaError;
+use crate::ctx;
+use crate::errors::{ImplicaError, ImplicaResult};
 use crate::matches::Match;
 use crate::patterns::{TermPattern, TermSchema, TypePattern, TypeSchema};
 use crate::properties::PropertyMap;
 use crate::query::Query;
 use crate::typing::{Application, Arrow, BasicTerm, Term, Type, Variable};
+use crate::{EdgeRef, NodeRef};
 
 #[path = "matches/edge.rs"]
 mod __matches_edge_pattern;
@@ -105,7 +108,7 @@ impl Graph {
         r#type: Type,
         term: Option<Term>,
         properties: PropertyMap,
-    ) -> Result<Uid, ImplicaError> {
+    ) -> Uid {
         let type_uid = self.insert_type(&r#type);
 
         if let Some(term) = term {
@@ -118,14 +121,15 @@ impl Graph {
         self.end_to_edge_index
             .insert(type_uid, Arc::new(DashSet::new()));
 
-        Ok(type_uid)
+        type_uid
     }
 
     pub(in crate::graph) fn add_edge(
+        // TODO: revisar logica de esta funcion
         &self,
         term: Term,
         properties: PropertyMap,
-    ) -> Result<(Uid, Uid), ImplicaError> {
+    ) -> ImplicaResult<(Uid, Uid)> {
         let term_uid = self.insert_term(&term);
 
         let edge_uid = if let Some(ref type_rep) = self.type_index.get(&term_uid) {
@@ -135,14 +139,16 @@ impl Graph {
                     return Err(ImplicaError::InvalidTerm {
                         reason: "to create an edge you must provide a term of an arrow type"
                             .to_string(),
-                    });
+                    }
+                    .into());
                 }
             }
         } else {
             return Err(ImplicaError::RuntimeError {
                 message: "unable to get term rep of a just initialized term".to_string(),
                 context: Some("new edge".to_string()),
-            });
+            }
+            .into());
         };
 
         self.type_to_edge_index.insert(term_uid, edge_uid);
@@ -157,7 +163,8 @@ impl Graph {
                 message: "start_to_edge_index not initialized for some node already in the graph"
                     .to_string(),
                 context: Some("add edge".to_string()),
-            });
+            }
+            .into());
         }
         if let Some(end_to_edge_index) = self.end_to_edge_index.get(&edge_uid.1) {
             let index = end_to_edge_index.value().clone();
@@ -168,7 +175,8 @@ impl Graph {
                 message: "end_to_edge_index not initialized for some node already in the graph"
                     .to_string(),
                 context: Some("add edge".to_string()),
-            });
+            }
+            .into());
         }
 
         self.edges.insert(edge_uid, properties);
@@ -176,7 +184,7 @@ impl Graph {
         Ok(edge_uid)
     }
 
-    pub(crate) fn remove_node(&self, node_uid: &Uid) -> Result<Option<Uid>, ImplicaError> {
+    pub(crate) fn remove_node(&self, node_uid: &Uid) -> ImplicaResult<Option<Uid>> {
         if let Some((uid, _)) = self.nodes.remove(node_uid) {
             let start_by_node: Vec<(Uid, Uid)> = match self.start_to_edge_index.get(&uid) {
                 Some(l) => l.value().clone(),
@@ -196,7 +204,8 @@ impl Graph {
             let edges_to_remove: Vec<(Uid, Uid)> =
                 start_by_node.into_iter().chain(ends_by_node).collect();
             for edge in edges_to_remove {
-                self.remove_edge(&edge)?;
+                self.remove_edge(&edge)
+                    .attach(ctx!("graph - remove node"))?;
             }
 
             self.start_to_edge_index.remove(&uid);
@@ -208,10 +217,7 @@ impl Graph {
         }
     }
 
-    pub(crate) fn remove_edge(
-        &self,
-        edge_uid: &(Uid, Uid),
-    ) -> Result<Option<(Uid, Uid)>, ImplicaError> {
+    pub(crate) fn remove_edge(&self, edge_uid: &(Uid, Uid)) -> ImplicaResult<Option<(Uid, Uid)>> {
         let (uid, _) = match self.edges.remove(edge_uid) {
             Some(uid) => uid,
             None => return Ok(None),
@@ -238,7 +244,8 @@ impl Graph {
                 message: "start_to_edge_index not initialized for some node already in the graph"
                     .to_string(),
                 context: Some("add edge".to_string()),
-            });
+            }
+            .into());
         }
 
         if let Some(end_to_edge_index) = self.end_to_edge_index.get(&edge_uid.1) {
@@ -250,7 +257,8 @@ impl Graph {
                 message: "start_to_edge_index not initialized for some node already in the graph"
                     .to_string(),
                 context: Some("add edge".to_string()),
-            });
+            }
+            .into());
         }
 
         Ok(Some(uid))
@@ -307,32 +315,42 @@ impl Graph {
         &self,
         type_schema: &TypeSchema,
         r#match: Arc<Match>,
-    ) -> Result<Type, ImplicaError> {
+    ) -> ImplicaResult<Type> {
         self.pattern_to_type_recursive(&type_schema.compiled, r#match)
-            .map_err(|e| match e {
-                ImplicaError::InvalidPattern { pattern: _, reason } => {
-                    ImplicaError::InvalidPattern {
+            .map_err(|e| {
+                if let Some(reason) = match e.current_context() {
+                    ImplicaError::InvalidPattern { pattern: _, reason } => Some(reason.clone()),
+                    _ => None,
+                } {
+                    e.change_context(ImplicaError::InvalidPattern {
                         pattern: type_schema.pattern.clone(),
-                        reason,
-                    }
+                        reason: reason.clone(),
+                    })
+                } else {
+                    e
                 }
-                _ => e,
             })
+            .attach(ctx!("graph - type schema to type"))
     }
 
     fn pattern_to_type_recursive(
         &self,
         pattern: &TypePattern,
         r#match: Arc<Match>,
-    ) -> Result<Type, ImplicaError> {
+    ) -> ImplicaResult<Type> {
         match pattern {
             TypePattern::Wildcard => Err(ImplicaError::InvalidPattern {
                 pattern: "".to_string(),
                 reason: "Cannot convert wildcard to type".to_string(),
-            }),
+            }
+            .into()),
             TypePattern::Arrow { left, right } => {
-                let left_type = self.pattern_to_type_recursive(left, r#match.clone())?;
-                let right_type = self.pattern_to_type_recursive(right, r#match.clone())?;
+                let left_type = self
+                    .pattern_to_type_recursive(left, r#match.clone())
+                    .attach(ctx!("graph - pattern to type recursive"))?;
+                let right_type = self
+                    .pattern_to_type_recursive(right, r#match.clone())
+                    .attach(ctx!("graph - pattern to type recursive"))?;
 
                 Ok(Type::Arrow(Arrow {
                     left: Arc::new(left_type),
@@ -342,36 +360,47 @@ impl Graph {
             TypePattern::Variable(var) => {
                 if let Some(match_element) = r#match.get(var) {
                     let matched_type_uid = match_element
-                        .as_type(var, Some("pattern to type recursive".to_string()))?;
+                        .as_type(var, Some("pattern to type recursive".to_string()))
+                        .attach(ctx!("graph - pattern to type recursive"))?;
 
                     self.type_from_uid(&matched_type_uid)
                 } else {
-                    Ok(Type::Variable(Variable::new(var.clone())?))
+                    Ok(Type::Variable(
+                        Variable::new(var.clone())
+                            .attach(ctx!("graph - pattern to type recursive"))?,
+                    ))
                 }
             }
             TypePattern::Capture { name, pattern: _ } => {
                 if let Some(match_element) = r#match.get(name) {
                     let matched_type_uid = match_element
-                        .as_type(name, Some("pattern to type recursive".to_string()))?;
+                        .as_type(name, Some("pattern to type recursive".to_string()))
+                        .attach(ctx!("graph - pattern to type recursive"))?;
 
                     self.type_from_uid(&matched_type_uid)
                 } else {
-                    Ok(Type::Variable(Variable::new(name.clone())?))
+                    Ok(Type::Variable(
+                        Variable::new(name.clone())
+                            .attach(ctx!("graph - pattern to type recursive"))?,
+                    ))
                 }
             }
         }
     }
 
-    fn type_from_uid(&self, uid: &Uid) -> Result<Type, ImplicaError> {
+    fn type_from_uid(&self, uid: &Uid) -> ImplicaResult<Type> {
         if let Some(entry) = self.type_index.get(uid) {
             let type_repr = entry.value().clone();
 
             match type_repr {
-                TypeRep::Variable(var) => Ok(Type::Variable(Variable::new(var)?)),
+                TypeRep::Variable(var) => Ok(Type::Variable(
+                    Variable::new(var).attach(ctx!("graph - type from uid"))?,
+                )),
                 TypeRep::Arrow(left, right) => {
                     let left_type =
                         self.type_from_uid(&left)
                             .map_err(|_| ImplicaError::IndexCorruption {
+                                // TODO: revisar esta logica
                                 message:
                                     "type repr points to a uid that does not belong to the index!"
                                         .to_string(),
@@ -380,6 +409,7 @@ impl Graph {
                     let right_type =
                         self.type_from_uid(&right)
                             .map_err(|_| ImplicaError::IndexCorruption {
+                                // Revisar esta logica
                                 message:
                                     "type repr points to a uid that does not belong to the index!"
                                         .to_string(),
@@ -396,7 +426,8 @@ impl Graph {
             Err(ImplicaError::TypeNotFound {
                 uid: *uid,
                 context: Some("type from uid".to_string()),
-            })
+            }
+            .into())
         }
     }
 }
@@ -406,32 +437,42 @@ impl Graph {
         &self,
         term_schema: &TermSchema,
         r#match: Arc<Match>,
-    ) -> Result<Term, ImplicaError> {
+    ) -> ImplicaResult<Term> {
         self.pattern_to_term_recursive(&term_schema.compiled, r#match)
-            .map_err(|e| match e {
-                ImplicaError::InvalidPattern { pattern: _, reason } => {
-                    ImplicaError::InvalidPattern {
+            .map_err(|e| {
+                if let Some(reason) = match e.current_context() {
+                    ImplicaError::InvalidPattern { pattern: _, reason } => Some(reason.clone()),
+                    _ => None,
+                } {
+                    e.change_context(ImplicaError::InvalidPattern {
                         pattern: term_schema.pattern.clone(),
-                        reason,
-                    }
+                        reason: reason.clone(),
+                    })
+                } else {
+                    e
                 }
-                _ => e,
             })
+            .attach(ctx!("graph - term schema to term"))
     }
 
     fn pattern_to_term_recursive(
         &self,
         pattern: &TermPattern,
         r#match: Arc<Match>,
-    ) -> Result<Term, ImplicaError> {
+    ) -> ImplicaResult<Term> {
         match pattern {
             TermPattern::Wildcard => Err(ImplicaError::InvalidPattern {
                 pattern: "".to_string(),
                 reason: "Cannot convert wildcard to term".to_string(),
-            }),
+            }
+            .into()),
             TermPattern::Application { function, argument } => {
-                let function_term = self.pattern_to_term_recursive(function, r#match.clone())?;
-                let argument_term = self.pattern_to_term_recursive(argument, r#match.clone())?;
+                let function_term = self
+                    .pattern_to_term_recursive(function, r#match.clone())
+                    .attach(ctx!("graph - pattern to term recursive"))?;
+                let argument_term = self
+                    .pattern_to_term_recursive(argument, r#match.clone())
+                    .attach(ctx!("graph - pattern to term recursive"))?;
 
                 Ok(Term::Application(Application::new(
                     function_term,
@@ -441,14 +482,16 @@ impl Graph {
             TermPattern::Variable(var) => {
                 if let Some(match_element) = r#match.get(var) {
                     let term_uid = match_element
-                        .as_term(var, Some("pattern to term recursive".to_string()))?;
+                        .as_term(var, Some("pattern to term recursive".to_string()))
+                        .attach(ctx!("graph - pattern to term recursive"))?;
 
                     self.term_from_uid(&term_uid)
                 } else {
                     Err(ImplicaError::VariableNotFound {
                         name: var.clone(),
                         context: Some("pattern to term recursive".to_string()),
-                    })
+                    }
+                    .into())
                 }
             }
             TermPattern::Constant { name: _, args: _ } => {
@@ -457,13 +500,14 @@ impl Graph {
         }
     }
 
-    fn term_from_uid(&self, uid: &Uid) -> Result<Term, ImplicaError> {
+    fn term_from_uid(&self, uid: &Uid) -> ImplicaResult<Term> {
+        // TODO: Revisar Logica
         if let Some(entry) = self.term_index.get(uid) {
             let term_repr = entry.value().clone();
 
             let term_type = self.type_from_uid(uid).map_err(|e| {
-                match e {
-                    ImplicaError::TypeNotFound { .. } => ImplicaError::IndexCorruption { message: "Found a term in the TermIndex without its corresponding type in the TypeIndex".to_string(), context: Some("term from uid".to_string()) },
+                match e.current_context() {
+                    ImplicaError::TypeNotFound { .. } => ImplicaError::IndexCorruption { message: "Found a term in the TermIndex without its corresponding type in the TypeIndex".to_string(), context: Some("term from uid".to_string()) }.into(),
                     _ => e
                 }
             })?;
@@ -484,13 +528,14 @@ impl Graph {
             Err(ImplicaError::TermNotFound {
                 uid: *uid,
                 context: Some("term from uid".to_string()),
-            })
+            }
+            .into())
         }
     }
 }
 
 impl Graph {
-    pub(crate) fn type_to_string(&self, r#type: &Uid) -> Result<String, ImplicaError> {
+    pub(crate) fn type_to_string(&self, r#type: &Uid) -> ImplicaResult<String> {
         if let Some(entry) = self.type_index.get(r#type) {
             let type_rep = entry.value();
 
@@ -498,19 +543,22 @@ impl Graph {
                 TypeRep::Variable(var) => Ok(var.clone()),
                 TypeRep::Arrow(left, right) => Ok(format!(
                     "({} -> {})",
-                    self.type_to_string(left)?,
-                    self.type_to_string(right)?
+                    self.type_to_string(left)
+                        .attach(ctx!("graph - type to string"))?,
+                    self.type_to_string(right)
+                        .attach(ctx!("graph - type to string"))?
                 )),
             }
         } else {
             Err(ImplicaError::TypeNotFound {
                 uid: *r#type,
                 context: Some("type to string".to_string()),
-            })
+            }
+            .into())
         }
     }
 
-    pub(crate) fn term_to_string(&self, term: &Uid) -> Result<String, ImplicaError> {
+    pub(crate) fn term_to_string(&self, term: &Uid) -> ImplicaResult<String> {
         if let Some(entry) = self.term_index.get(term) {
             let term_rep = entry.value();
 
@@ -518,25 +566,29 @@ impl Graph {
                 TermRep::Base(var) => Ok(var.clone()),
                 TermRep::Application(func, arg) => Ok(format!(
                     "({} {})",
-                    self.term_to_string(func)?,
-                    self.term_to_string(arg)?
+                    self.term_to_string(func)
+                        .attach(ctx!("graph - term to string"))?,
+                    self.term_to_string(arg)
+                        .attach(ctx!("graph - term to string"))?
                 )),
             }
         } else {
             Err(ImplicaError::TermNotFound {
                 uid: *term,
                 context: Some("term to string".to_string()),
-            })
+            }
+            .into())
         }
     }
 
-    pub(crate) fn node_to_string(&self, node: &Uid) -> Result<String, ImplicaError> {
+    pub(crate) fn node_to_string(&self, node: &Uid) -> ImplicaResult<String> {
         if let Some(entry) = self.nodes.get(node) {
             let props = entry.value();
 
             Ok(format!(
                 "Node({}:{}:{})",
-                self.type_to_string(node)?,
+                self.type_to_string(node)
+                    .attach(ctx!("graph - node to string"))?,
                 self.term_to_string(node).unwrap_or_else(|_| "".to_string()),
                 props
             ))
@@ -544,23 +596,26 @@ impl Graph {
             Err(ImplicaError::NodeNotFound {
                 uid: *node,
                 context: Some("edge to string".to_string()),
-            })
+            }
+            .into())
         }
     }
 
-    pub(crate) fn edge_to_string(&self, edge: &(Uid, Uid)) -> Result<String, ImplicaError> {
+    pub(crate) fn edge_to_string(&self, edge: &(Uid, Uid)) -> ImplicaResult<String> {
         if let Some(entry) = self.edges.get(edge) {
             let props = entry.value();
 
             let edge_type = match self.edge_to_type_index.get(edge) {
                 Some(t) => *t.value(),
-                None => return Err(ImplicaError::IndexCorruption { message: "missing entry of edge that appears in the EdgeIndex but not in the EdgeToTypeIndex".to_string(), context: Some("edge to string".to_string()) })
+                None => return Err(ImplicaError::IndexCorruption { message: "missing entry of edge that appears in the EdgeIndex but not in the EdgeToTypeIndex".to_string(), context: Some("edge to string".to_string()) }.into())
             };
 
             Ok(format!(
                 "Edge({}:{}:{})",
-                self.type_to_string(&edge_type)?,
-                self.term_to_string(&edge_type)?,
+                self.type_to_string(&edge_type)
+                    .attach(ctx!("graph - edge to string"))?,
+                self.term_to_string(&edge_type)
+                    .attach(ctx!("graph - edge to string"))?,
                 props
             )
             .to_string())
@@ -568,31 +623,34 @@ impl Graph {
             Err(ImplicaError::EdgeNotFound {
                 uid: *edge,
                 context: Some("edge to string".to_string()),
-            })
+            }
+            .into())
         }
     }
 }
 
 impl Graph {
-    pub(crate) fn node_properties(&self, node: &Uid) -> Result<PropertyMap, ImplicaError> {
+    pub(crate) fn node_properties(&self, node: &Uid) -> ImplicaResult<PropertyMap> {
         if let Some(entry) = self.nodes.get(node) {
             Ok(entry.value().clone())
         } else {
             Err(ImplicaError::NodeNotFound {
                 uid: *node,
                 context: Some("node properties".to_string()),
-            })
+            }
+            .into())
         }
     }
 
-    pub(crate) fn edge_properties(&self, edge: &(Uid, Uid)) -> Result<PropertyMap, ImplicaError> {
+    pub(crate) fn edge_properties(&self, edge: &(Uid, Uid)) -> ImplicaResult<PropertyMap> {
         if let Some(entry) = self.edges.get(edge) {
             Ok(entry.value().clone())
         } else {
             Err(ImplicaError::EdgeNotFound {
                 uid: *edge,
                 context: Some("edge properties".to_string()),
-            })
+            }
+            .into())
         }
     }
 }
@@ -632,5 +690,21 @@ impl PyGraph {
 
     pub fn query(&self) -> Query {
         Query::new(self.graph.clone())
+    }
+
+    pub fn nodes(&self) -> Vec<NodeRef> {
+        self.graph
+            .nodes
+            .par_iter()
+            .map(|entry| NodeRef::new(self.graph.clone(), *entry.key()))
+            .collect()
+    }
+
+    pub fn edges(&self) -> Vec<EdgeRef> {
+        self.graph
+            .edges
+            .par_iter()
+            .map(|entry| EdgeRef::new(self.graph.clone(), *entry.key()))
+            .collect()
     }
 }

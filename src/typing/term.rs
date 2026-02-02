@@ -1,6 +1,13 @@
 use std::{fmt::Display, sync::Arc};
 
-use crate::{errors::ImplicaError, typing::Type, utils::validate_variable_name};
+use error_stack::ResultExt;
+
+use crate::{
+    ctx,
+    errors::{ImplicaError, ImplicaResult},
+    typing::Type,
+    utils::validate_variable_name,
+};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Term {
@@ -30,11 +37,10 @@ impl Term {
         }
     }
 
-    pub fn apply(&self, other: &Term) -> Result<Term, ImplicaError> {
-        Ok(Term::Application(Application::new(
-            self.clone(),
-            other.clone(),
-        )?))
+    pub fn apply(&self, other: &Term) -> ImplicaResult<Term> {
+        Ok(Term::Application(
+            Application::new(self.clone(), other.clone()).attach(ctx!("term - apply"))?,
+        ))
     }
 }
 
@@ -54,8 +60,8 @@ pub struct BasicTerm {
 }
 
 impl BasicTerm {
-    pub fn new(name: String, r#type: Arc<Type>) -> Result<Self, ImplicaError> {
-        validate_variable_name(&name)?;
+    pub fn new(name: String, r#type: Arc<Type>) -> ImplicaResult<Self> {
+        validate_variable_name(&name).attach(ctx!("basic term - new"))?;
         Ok(BasicTerm { name, r#type })
     }
 }
@@ -96,20 +102,22 @@ impl PartialEq for Application {
 impl Eq for Application {}
 
 impl Application {
-    pub fn new(function: Term, argument: Term) -> Result<Self, ImplicaError> {
+    pub fn new(function: Term, argument: Term) -> ImplicaResult<Self> {
         match function.r#type().as_ref() {
             Type::Variable(_) => Err(ImplicaError::TypeMismatch {
                 expected: "Application Type".to_string(),
                 got: "Variable Type".to_string(),
                 context: Some("application creation".to_string()),
-            }),
+            }
+            .into()),
             Type::Arrow(arr) => {
                 if arr.left != argument.r#type() {
                     Err(ImplicaError::TypeMismatch {
                         expected: arr.left.to_string(),
                         got: argument.r#type().to_string(),
                         context: Some("application creation".to_string()),
-                    })
+                    }
+                    .into())
                 } else {
                     Ok(Application {
                         function: Arc::new(function),

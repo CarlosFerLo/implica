@@ -1,7 +1,10 @@
 use std::fmt;
 use std::sync::Arc;
 
-use crate::errors::ImplicaError;
+use error_stack::ResultExt;
+
+use crate::ctx;
+use crate::errors::ImplicaResult;
 use crate::utils::validate_variable_name;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -41,8 +44,8 @@ pub struct Variable {
 }
 
 impl Variable {
-    pub fn new(name: String) -> Result<Self, ImplicaError> {
-        validate_variable_name(&name)?;
+    pub fn new(name: String) -> ImplicaResult<Self> {
+        validate_variable_name(&name).attach(ctx!("variable - new"))?;
         Ok(Variable { name })
     }
 }

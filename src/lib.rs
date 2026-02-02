@@ -2,6 +2,7 @@ use pyo3::prelude::*;
 
 mod errors;
 mod graph;
+mod macros;
 mod matches;
 mod patterns;
 mod properties;

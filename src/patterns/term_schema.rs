@@ -1,6 +1,9 @@
 use std::fmt::Display;
 
-use crate::errors::ImplicaError;
+use error_stack::ResultExt;
+
+use crate::ctx;
+use crate::errors::{ImplicaError, ImplicaResult};
 use crate::utils::validate_variable_name;
 
 #[derive(Clone, Debug, PartialEq)]
@@ -30,13 +33,13 @@ impl Display for TermSchema {
 }
 
 impl TermSchema {
-    pub fn new(pattern: String) -> Result<Self, ImplicaError> {
-        let compiled = Self::parse_pattern(&pattern)?;
+    pub fn new(pattern: String) -> ImplicaResult<Self> {
+        let compiled = Self::parse_pattern(&pattern).attach(ctx!("term schema - new"))?;
 
         Ok(TermSchema { pattern, compiled })
     }
 
-    fn parse_pattern(input: &str) -> Result<TermPattern, ImplicaError> {
+    fn parse_pattern(input: &str) -> ImplicaResult<TermPattern> {
         let trimmed = input.trim();
 
         // Check for wildcard
@@ -56,19 +59,25 @@ impl TermSchema {
                 return Err(ImplicaError::InvalidPattern {
                     pattern: input.to_string(),
                     reason: "Invalid application pattern: empty left or right side".to_string(),
-                });
+                }
+                .into());
             }
 
             // Recursively parse left and right
-            let function = Box::new(Self::parse_pattern(left_str)?);
-            let argument = Box::new(Self::parse_pattern(right_str)?);
+            let function = Box::new(
+                Self::parse_pattern(left_str).attach(ctx!("term schema - parse pattern"))?,
+            );
+            let argument = Box::new(
+                Self::parse_pattern(right_str).attach(ctx!("term schema - parse pattern"))?,
+            );
 
             return Ok(TermPattern::Application { function, argument });
         }
 
         // Check for constant pattern: @ConstantName(Arg1, Arg2, ...)
         if trimmed.starts_with('@') {
-            return Self::parse_constant_pattern(trimmed);
+            return Self::parse_constant_pattern(trimmed)
+                .attach(ctx!("term schema - parse pattern"));
         }
 
         // Otherwise, it's a variable
@@ -76,10 +85,11 @@ impl TermSchema {
             return Err(ImplicaError::InvalidPattern {
                 pattern: input.to_string(),
                 reason: "Invalid pattern: empty string".to_string(),
-            });
+            }
+            .into());
         }
 
-        validate_variable_name(trimmed)?;
+        validate_variable_name(trimmed).attach(ctx!("term schema - parse pattern"))?;
         Ok(TermPattern::Variable(trimmed.to_string()))
     }
 
@@ -99,13 +109,14 @@ impl TermSchema {
         last_space_pos
     }
 
-    fn parse_constant_pattern(input: &str) -> Result<TermPattern, ImplicaError> {
+    fn parse_constant_pattern(input: &str) -> ImplicaResult<TermPattern> {
         // Input should be like: @K(A, B) or @S(A, A->B, C)
         if !input.starts_with('@') {
             return Err(ImplicaError::InvalidPattern {
                 pattern: input.to_string(),
                 reason: "Constant pattern must start with '@'".to_string(),
-            });
+            }
+            .into());
         }
 
         // Find the opening parenthesis
@@ -123,11 +134,13 @@ impl TermSchema {
             return Err(ImplicaError::InvalidPattern {
                 pattern: input.to_string(),
                 reason: "Constant name cannot be empty".to_string(),
-            });
+            }
+            .into());
         }
 
         // Find the matching closing parenthesis
-        let paren_end = Self::find_matching_closing_paren(input, paren_start)?;
+        let paren_end = Self::find_matching_closing_paren(input, paren_start)
+            .attach(ctx!("term pattern - parse constant pattern"))?;
 
         // Verify that the constant pattern ends at the closing parenthesis (no trailing content)
         if paren_end != input.len() - 1 {
@@ -137,7 +150,7 @@ impl TermSchema {
                     "Constant pattern has unexpected content after closing parenthesis at position {}",
                     paren_end
                 ),
-            });
+            }.into());
         }
 
         // Extract the arguments string (everything between '(' and ')')
@@ -147,13 +160,14 @@ impl TermSchema {
         let args = if args_str.is_empty() {
             Vec::new()
         } else {
-            Self::split_type_arguments(args_str)?
+            Self::split_type_arguments(args_str)
+                .attach(ctx!("term pattern - parse constant pattern"))?
         };
 
         Ok(TermPattern::Constant { name, args })
     }
 
-    fn find_matching_closing_paren(input: &str, open_pos: usize) -> Result<usize, ImplicaError> {
+    fn find_matching_closing_paren(input: &str, open_pos: usize) -> ImplicaResult<usize> {
         let mut depth = 0;
 
         for (i, ch) in input[open_pos..].char_indices() {
@@ -172,10 +186,11 @@ impl TermSchema {
         Err(ImplicaError::InvalidPattern {
             pattern: input.to_string(),
             reason: "Constant pattern has unmatched opening parenthesis".to_string(),
-        })
+        }
+        .into())
     }
 
-    fn split_type_arguments(args_str: &str) -> Result<Vec<String>, ImplicaError> {
+    fn split_type_arguments(args_str: &str) -> ImplicaResult<Vec<String>> {
         let mut args = Vec::new();
         let mut current_arg = String::new();
         let mut paren_depth = 0;
@@ -214,7 +229,8 @@ impl TermSchema {
             return Err(ImplicaError::InvalidPattern {
                 pattern: args_str.to_string(),
                 reason: "Mismatched parentheses in constant type arguments".to_string(),
-            });
+            }
+            .into());
         }
 
         Ok(args)

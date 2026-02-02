@@ -1,3 +1,4 @@
+use error_stack::ResultExt;
 use std::iter::zip;
 use std::ops::ControlFlow;
 use std::sync::Arc;
@@ -5,7 +6,8 @@ use std::sync::Arc;
 use dashmap::DashMap;
 use rayon::prelude::*;
 
-use crate::errors::ImplicaError;
+use crate::ctx;
+use crate::errors::{ImplicaError, ImplicaResult};
 use crate::graph::base::Graph;
 use crate::matches::{next_match_id, MatchSet};
 use crate::patterns::PathPattern;
@@ -15,10 +17,12 @@ impl Graph {
         &self,
         pattern: &PathPattern,
         matches: MatchSet,
-    ) -> Result<MatchSet, ImplicaError> {
+    ) -> ImplicaResult<MatchSet> {
         let out_map: MatchSet = Arc::new(DashMap::new());
 
-        pattern.validate()?;
+        pattern
+            .validate()
+            .attach(ctx!("graph - match path pattern"))?;
 
         let result = matches.par_iter().try_for_each(|row| {
             let (_prev_uid, r#match) = row.value().clone();
@@ -32,7 +36,7 @@ impl Graph {
 
             matches = match self.match_node_pattern(prev_node_pattern, matches) {
                 Ok(m) => m,
-                Err(e) => return ControlFlow::Break(e),
+                Err(e) => return ControlFlow::Break(e.attach(ctx!("graph - match path pattern"))),
             };
 
             for (node_pattern, edge_pattern) in zip(pattern.nodes[1..].iter(), pattern.edges.iter())
@@ -44,12 +48,12 @@ impl Graph {
                     matches,
                 ) {
                     Ok(m) => m,
-                    Err(e) => return ControlFlow::Break(e),
+                    Err(e) => return ControlFlow::Break(e.attach(ctx!("graph - match path pattern"))),
                 };
 
                 matches = match self.match_node_pattern(node_pattern, matches) {
                     Ok(m) => m,
-                    Err(e) => return ControlFlow::Break(e),
+                    Err(e) => return ControlFlow::Break(e.attach(ctx!("graph - match path pattern"))),
                 };
 
                 prev_node_pattern = node_pattern;
@@ -60,7 +64,7 @@ impl Graph {
                 .try_for_each(|m| {
                     match out_map.insert(next_match_id(), m.value().clone()) {
                         None => ControlFlow::Continue(()),
-                        Some(_) => ControlFlow::Break(ImplicaError::RuntimeError { message: "Unique identifier generator next_match_id created a previously existing id (should not happen)".to_string(), context: Some("match path pattern".to_string()) })
+                        Some(_) => ControlFlow::Break(ImplicaError::RuntimeError { message: "Unique identifier generator next_match_id created a previously existing id (should not happen)".to_string(), context: Some("match path pattern".to_string()) }.into())
                     }
                 })
         });

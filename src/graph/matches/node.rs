@@ -4,7 +4,8 @@ use std::sync::Arc;
 use dashmap::DashMap;
 use rayon::prelude::*;
 
-use crate::errors::ImplicaError;
+use crate::ctx;
+use crate::errors::{ImplicaError, ImplicaResult};
 use crate::graph::base::Graph;
 use crate::matches::{next_match_id, MatchElement, MatchSet};
 use crate::patterns::NodePattern;
@@ -14,7 +15,7 @@ impl Graph {
         &self,
         pattern: &NodePattern,
         matches: MatchSet,
-    ) -> Result<MatchSet, ImplicaError> {
+    ) -> ImplicaResult<MatchSet> {
         let out_map: MatchSet = Arc::new(DashMap::new());
 
         let result = matches.par_iter().try_for_each(|row| {
@@ -25,7 +26,9 @@ impl Graph {
                     let old = match old_element.as_node(var, Some("match node pattern".to_string()))
                     {
                         Ok(uid) => uid,
-                        Err(e) => return ControlFlow::Break(e),
+                        Err(e) => {
+                            return ControlFlow::Break(e.attach(ctx!("graph - match node pattern")))
+                        }
                     };
 
                     let mut new_match = r#match.clone();
@@ -37,7 +40,11 @@ impl Graph {
                                 Some(m) => new_match = m.clone(),
                                 None => return ControlFlow::Continue(()),
                             },
-                            Err(e) => return ControlFlow::Break(e),
+                            Err(e) => {
+                                return ControlFlow::Break(
+                                    e.attach(ctx!("graph - match node pattern")),
+                                )
+                            }
                         }
                     }
                     if let Some(ref term_schema) = pattern.term_schema {
@@ -48,7 +55,11 @@ impl Graph {
                                 Some(m) => new_match = m.clone(),
                                 None => return ControlFlow::Continue(()),
                             },
-                            Err(e) => return ControlFlow::Break(e),
+                            Err(e) => {
+                                return ControlFlow::Break(
+                                    e.attach(ctx!("graph - match node pattern")),
+                                )
+                            }
                         }
                     }
 
@@ -58,7 +69,11 @@ impl Graph {
                         match res {
                             Ok(true) => (),
                             Ok(false) => return ControlFlow::Continue(()),
-                            Err(e) => return ControlFlow::Break(e),
+                            Err(e) => {
+                                return ControlFlow::Break(
+                                    e.attach(ctx!("graph - match node pattern")),
+                                )
+                            }
                         }
                     }
 
@@ -73,7 +88,9 @@ impl Graph {
             if let Some(ref type_schema) = pattern.type_schema {
                 match_set = match self.match_type_schema(type_schema, match_set) {
                     Ok(m) => m,
-                    Err(e) => return ControlFlow::Break(e),
+                    Err(e) => {
+                        return ControlFlow::Break(e.attach(ctx!("graph - match node pattern")))
+                    }
                 };
 
                 match_set.par_iter().try_for_each(|entry| {
@@ -89,14 +106,22 @@ impl Graph {
                                         {
                                             Ok(true) => (),
                                             Ok(false) => return ControlFlow::Continue(()),
-                                            Err(e) => return ControlFlow::Break(e),
+                                            Err(e) => {
+                                                return ControlFlow::Break(
+                                                    e.attach(ctx!("graph - match node pattern")),
+                                                )
+                                            }
                                         }
                                     }
 
                                     if let Some(ref var) = pattern.variable {
                                         match m.insert(var, MatchElement::Node(prev_uid)) {
                                             Ok(_) => (),
-                                            Err(e) => return ControlFlow::Break(e),
+                                            Err(e) => {
+                                                return ControlFlow::Break(
+                                                    e.attach(ctx!("graph - match node pattern")),
+                                                )
+                                            }
                                         }
                                     }
 
@@ -106,9 +131,11 @@ impl Graph {
                                 }
                                 None => ControlFlow::Continue(()),
                             },
-                            Err(e) => match e {
+                            Err(e) => match e.current_context() {
                                 ImplicaError::TermNotFound { .. } => ControlFlow::Continue(()),
-                                _ => ControlFlow::Break(e),
+                                _ => {
+                                    ControlFlow::Break(e.attach(ctx!("graph - match node pattern")))
+                                }
                             },
                         }
                     } else {
@@ -116,14 +143,22 @@ impl Graph {
                             match self.check_node_matches_properties(&prev_uid, properties) {
                                 Ok(true) => (),
                                 Ok(false) => return ControlFlow::Continue(()),
-                                Err(e) => return ControlFlow::Break(e),
+                                Err(e) => {
+                                    return ControlFlow::Break(
+                                        e.attach(ctx!("graph - match node pattern")),
+                                    )
+                                }
                             }
                         }
 
                         if let Some(ref var) = pattern.variable {
                             match m.insert(var, MatchElement::Node(prev_uid)) {
                                 Ok(_) => (),
-                                Err(e) => return ControlFlow::Break(e),
+                                Err(e) => {
+                                    return ControlFlow::Break(
+                                        e.attach(ctx!("graph - match node pattern")),
+                                    )
+                                }
                             }
                         }
 
@@ -135,7 +170,9 @@ impl Graph {
             } else if let Some(ref term_schema) = pattern.term_schema {
                 match_set = match self.match_term_schema(term_schema, match_set) {
                     Ok(m) => m,
-                    Err(e) => return ControlFlow::Break(e),
+                    Err(e) => {
+                        return ControlFlow::Break(e.attach(ctx!("graph - match node pattern")))
+                    }
                 };
 
                 match_set.par_iter().try_for_each(|entry| {
@@ -145,14 +182,22 @@ impl Graph {
                         match self.check_node_matches_properties(&prev_uid, properties) {
                             Ok(true) => (),
                             Ok(false) => return ControlFlow::Continue(()),
-                            Err(e) => return ControlFlow::Break(e),
+                            Err(e) => {
+                                return ControlFlow::Break(
+                                    e.attach(ctx!("graph - match node pattern")),
+                                )
+                            }
                         }
                     }
 
                     if let Some(ref var) = pattern.variable {
                         match m.insert(var, MatchElement::Node(prev_uid)) {
                             Ok(_) => (),
-                            Err(e) => return ControlFlow::Break(e),
+                            Err(e) => {
+                                return ControlFlow::Break(
+                                    e.attach(ctx!("graph - match node pattern")),
+                                )
+                            }
                         }
                     }
 
@@ -168,7 +213,11 @@ impl Graph {
                         match self.check_node_matches_properties(&new_uid, properties) {
                             Ok(true) => (),
                             Ok(false) => return ControlFlow::Continue(()),
-                            Err(e) => return ControlFlow::Break(e),
+                            Err(e) => {
+                                return ControlFlow::Break(
+                                    e.attach(ctx!("graph - match node pattern")),
+                                )
+                            }
                         }
                     }
 
@@ -177,7 +226,11 @@ impl Graph {
                     if let Some(ref var) = pattern.variable {
                         match new_matches.insert(var, MatchElement::Node(new_uid)) {
                             Ok(_) => (),
-                            Err(e) => return ControlFlow::Break(e),
+                            Err(e) => {
+                                return ControlFlow::Break(
+                                    e.attach(ctx!("graph - match node pattern")),
+                                )
+                            }
                         }
                     }
 

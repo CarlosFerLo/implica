@@ -1,10 +1,12 @@
+use error_stack::ResultExt;
 use std::ops::ControlFlow;
 use std::sync::Arc;
 
 use dashmap::DashMap;
 use rayon::prelude::*;
 
-use crate::errors::ImplicaError;
+use crate::ctx;
+use crate::errors::{ImplicaError, ImplicaResult};
 use crate::graph::base::Graph;
 use crate::graph::Uid;
 use crate::matches::{next_match_id, Match, MatchElement, MatchSet};
@@ -72,10 +74,10 @@ impl Graph {
         &self,
         pattern: &PathPattern,
         matches: MatchSet,
-    ) -> Result<MatchSet, ImplicaError> {
+    ) -> ImplicaResult<MatchSet> {
         let out_map = Arc::new(DashMap::new());
 
-        pattern.validate()?;
+        pattern.validate().attach(ctx!("graph - create path"))?;
 
         let result = matches.par_iter().try_for_each(|row| {
             let (_prev_uid, r#match) = row.value().clone();
@@ -112,7 +114,7 @@ impl Graph {
                                 index: item.index,
                                 max_len: nodes_data.len(),
                                 context: Some("create path - node data inference".to_string()),
-                            })
+                            }.into())
                         }
                     };
 
@@ -130,19 +132,19 @@ impl Graph {
                                 ),
                             ) {
                                 Ok(n) => n,
-                                Err(e) => return ControlFlow::Break(e),
+                                Err(e) => return ControlFlow::Break(e.attach(ctx!("graph - create path"))),
                             };
 
                             type_update = match self.type_from_uid(&node) {
                                 Ok(t) => Some(t),
-                                Err(e) => return ControlFlow::Break(e),
+                                Err(e) => return ControlFlow::Break(e.attach(ctx!("graph - create path"))),
                             };
 
                             term_update = match self.term_from_uid(&node) {
                                 Ok(t) => Some(t),
-                                Err(e) => match e {
+                                Err(e) => match e.current_context() {
                                     ImplicaError::TermNotFound { .. } => None,
-                                    _ => return ControlFlow::Break(e),
+                                    _ => return ControlFlow::Break(e.attach(ctx!("graph - create path"))),
                                 },
                             };
                         }
@@ -164,7 +166,7 @@ impl Graph {
                                         "create path - node data inference - match pattern"
                                             .to_string(),
                                     ),
-                                })
+                                }.into())
                             }
                         };
 
@@ -197,7 +199,7 @@ impl Graph {
                                                 }
                                                 None => type_matched = Some(false),
                                             },
-                                            Err(e) => return ControlFlow::Break(e),
+                                            Err(e) => return ControlFlow::Break(e.attach(ctx!("graph - create path"))),
                                         }
                                     }
                                     None => {
@@ -205,7 +207,7 @@ impl Graph {
                                             .type_schema_to_type(type_schema, new_match.clone())
                                         {
                                             Ok(t) => Some(t),
-                                            Err(e) => return ControlFlow::Break(e),
+                                            Err(e) => return ControlFlow::Break(e.attach(ctx!("graph - create path"))),
                                         };
                                         type_matched = Some(true);
                                     }
@@ -244,7 +246,7 @@ impl Graph {
                                                 }
                                                 None => term_matched = Some(false),
                                             },
-                                            Err(e) => return ControlFlow::Break(e),
+                                            Err(e) => return ControlFlow::Break(e.attach(ctx!("graph - create path"))),
                                         }
                                     }
                                     None => {
@@ -255,9 +257,9 @@ impl Graph {
                                                 term_matched = Some(true);
                                                 Some(t)
                                             },
-                                            Err(e) => match e {
+                                            Err(e) => match e.current_context() {
                                                 ImplicaError::VariableNotFound { .. } => None,
-                                                _ => return ControlFlow::Break(e)
+                                                _ => return ControlFlow::Break(e.attach(ctx!("graph - create path")))
                                             }
                                         };
                                     }
@@ -279,7 +281,7 @@ impl Graph {
                                     context: Some(
                                         "create path - node data inference - left edge".to_string(),
                                     ),
-                                })
+                                }.into())
                             }
                         };
 
@@ -290,7 +292,7 @@ impl Graph {
                                     None => {
                                         return ControlFlow::Break(ImplicaError::InvalidType {
                                             reason: "edge must have an arrow type".to_string(),
-                                        })
+                                        }.into())
                                     }
                                 };
 
@@ -316,7 +318,7 @@ impl Graph {
                                                 "create path - node data inference - left node"
                                                     .to_string(),
                                             ),
-                                        })
+                                        }.into())
                                     }
                                 };
 
@@ -325,7 +327,7 @@ impl Graph {
                                         CompiledDirection::Forward => {
                                             term_update = match edge_term.apply(left_node_term) {
                                                 Ok(t) => Some(t),
-                                                Err(e) => return ControlFlow::Break(e),
+                                                Err(e) => return ControlFlow::Break(e.attach(ctx!("graph - create path"))),
                                             }
                                         }
                                         CompiledDirection::Backward => {
@@ -356,7 +358,7 @@ impl Graph {
                                         "create path - node data inference - right edge"
                                             .to_string(),
                                     ),
-                                })
+                                }.into())
                             }
                         };
 
@@ -367,7 +369,7 @@ impl Graph {
                                     None => {
                                         return ControlFlow::Break(ImplicaError::InvalidType {
                                             reason: "edge must have an arrow type".to_string(),
-                                        })
+                                        }.into())
                                     }
                                 };
 
@@ -393,7 +395,7 @@ impl Graph {
                                                 "create path - node data inference - right node"
                                                     .to_string(),
                                             ),
-                                        })
+                                        }.into())
                                     }
                                 };
 
@@ -409,7 +411,7 @@ impl Graph {
                                         CompiledDirection::Backward => {
                                             term_update = match edge_term.apply(right_node_term) {
                                                 Ok(t) => Some(t),
-                                                Err(e) => return ControlFlow::Break(e),
+                                                Err(e) => return ControlFlow::Break(e.attach(ctx!("graph - create path"))),
                                             }
                                         }
                                         CompiledDirection::Any => {
@@ -465,7 +467,7 @@ impl Graph {
                                 "create path - node data inference - mutating node data"
                                     .to_string(),
                             ),
-                        });
+                        }.into());
                     }
                 } else {
                     // is edge
@@ -476,7 +478,7 @@ impl Graph {
                                 index: item.index,
                                 max_len: edges_data.len(),
                                 context: Some("create path - edge data inference".to_string()),
-                            })
+                            }.into())
                         }
                     };
 
@@ -494,22 +496,22 @@ impl Graph {
                                 ),
                             ) {
                                 Ok(e) => e,
-                                Err(e) => return ControlFlow::Break(e),
+                                Err(e) => return ControlFlow::Break(e.attach(ctx!("graph - create path"))),
                             };
 
                             let edge_type_uid = match self.edge_to_type_index.get(&edge) {
                                 Some(t) => *t.value(),
-                                None => return ControlFlow::Break(ImplicaError::IndexCorruption { message: "Edge exists in EdgeIndex without corresponding entry at EdgeToTypeIndex.".to_string(), context: Some("create path - edge data inference - edge already matched".to_string()) })
+                                None => return ControlFlow::Break(ImplicaError::IndexCorruption { message: "Edge exists in EdgeIndex without corresponding entry at EdgeToTypeIndex.".to_string(), context: Some("create path - edge data inference - edge already matched".to_string()) }.into())
                             };
 
                             type_update = match self.type_from_uid(&edge_type_uid) {
                                 Ok(t) => Some(t),
-                                Err(e) => return ControlFlow::Break(e)
+                                Err(e) => return ControlFlow::Break(e.attach(ctx!("graph - create path")))
                             };
 
                             term_update = match self.term_from_uid(&edge_type_uid) {
                                 Ok(t) => Some(t),
-                                Err(e) => return ControlFlow::Break(e)
+                                Err(e) => return ControlFlow::Break(e.attach(ctx!("graph - create path")))
                             };
                         }
                     }
@@ -524,7 +526,7 @@ impl Graph {
                         let edge_pattern = match pattern.edges.get(item.index) {
                             Some(p) => p,
                             None => {
-                                return ControlFlow::Break(ImplicaError::IndexOutOfRange { index: item.index, max_len: pattern.edges.len(), context: Some("create path - edge data inference - match pattern".to_string()) });
+                                return ControlFlow::Break(ImplicaError::IndexOutOfRange { index: item.index, max_len: pattern.edges.len(), context: Some("create path - edge data inference - match pattern".to_string()) }.into());
                             }
                         };
 
@@ -553,13 +555,13 @@ impl Graph {
                                                 }
                                                 None => type_matched = Some(false),
                                             }
-                                            Err(e) => return ControlFlow::Break(e)
+                                            Err(e) => return ControlFlow::Break(e.attach(ctx!("graph - create path")))
                                         }
                                     }
                                     None => {
                                         type_update = match self.type_schema_to_type(type_schema, new_match.clone()) {
                                             Ok(t) => Some(t),
-                                            Err(e) => return ControlFlow::Break(e)
+                                            Err(e) => return ControlFlow::Break(e.attach(ctx!("graph - create path")))
                                         };
                                         type_matched = Some(true);
                                     }
@@ -593,7 +595,7 @@ impl Graph {
                                                 }
                                                 None => term_matched = Some(false)
                                             }
-                                            Err(e) => return  ControlFlow::Break(e)
+                                            Err(e) => return  ControlFlow::Break(e.attach(ctx!("graph - create path")))
                                         }
                                     }
                                     None => {
@@ -602,9 +604,9 @@ impl Graph {
                                                 term_matched = Some(true);
                                                 Some(t)
                                             },
-                                            Err(e) => match e {
+                                            Err(e) => match e.current_context() {
                                                 ImplicaError::VariableNotFound { .. } => None,
-                                                _ => return ControlFlow::Break(e)
+                                                _ => return ControlFlow::Break(e.attach(ctx!("graph - create path")))
                                             }
                                         };
 
@@ -620,12 +622,12 @@ impl Graph {
 
                     let left_node_data = match nodes_data.get(item.index) {
                         Some(d) => d,
-                        None => return ControlFlow::Break(ImplicaError::IndexOutOfRange { index: item.index, max_len: nodes_data.len(), context: Some("create path - edge data inference - left node".to_string()) })
+                        None => return ControlFlow::Break(ImplicaError::IndexOutOfRange { index: item.index, max_len: nodes_data.len(), context: Some("create path - edge data inference - left node".to_string()) }.into())
                     };
 
                     let right_node_data = match nodes_data.get(item.index + 1) {
                         Some(d) => d,
-                        None => return ControlFlow::Break(ImplicaError::IndexOutOfRange { index: item.index + 1, max_len: nodes_data.len(), context: Some("create path - edge data inference - right node".to_string()) })
+                        None => return ControlFlow::Break(ImplicaError::IndexOutOfRange { index: item.index + 1, max_len: nodes_data.len(), context: Some("create path - edge data inference - right node".to_string()) }.into())
                     };
 
                     if edge_data.r#type.is_none() && type_update.is_none() {
@@ -692,7 +694,7 @@ impl Graph {
                         }
 
                     } else {
-                        return ControlFlow::Break(ImplicaError::IndexOutOfRange { index: item.index, max_len: edges_data.len(), context: Some("create path - edge data inference - mutating edge data".to_string()) });
+                        return ControlFlow::Break(ImplicaError::IndexOutOfRange { index: item.index, max_len: edges_data.len(), context: Some("create path - edge data inference - mutating edge data".to_string()) }.into());
                     }
 
                 }
@@ -702,29 +704,29 @@ impl Graph {
 
             for nd in nodes_data.iter() {
                 if nd.r#type.is_none() {
-                    return ControlFlow::Break(ImplicaError::InvalidPattern { pattern: pattern.to_string(), reason: "Unable to infer the type of a node contained in the pattern".to_string() })
+                    return ControlFlow::Break(ImplicaError::InvalidPattern { pattern: pattern.to_string(), reason: "Unable to infer the type of a node contained in the pattern".to_string() }.into())
                 }
 
                 if !nd.type_matched {
-                    return ControlFlow::Break(ImplicaError::InvalidPattern { pattern: pattern.to_string(), reason: "Inferred type for node does not match the provided schema".to_string() });
+                    return ControlFlow::Break(ImplicaError::InvalidPattern { pattern: pattern.to_string(), reason: "Inferred type for node does not match the provided schema".to_string() }.into());
                 }
 
                 if nd.term.is_some() && !nd.term_matched {
-                    return ControlFlow::Break(ImplicaError::InvalidPattern { pattern: pattern.to_string(), reason: "Inferred term for node does not match the provided schema".to_string() });
+                    return ControlFlow::Break(ImplicaError::InvalidPattern { pattern: pattern.to_string(), reason: "Inferred term for node does not match the provided schema".to_string() }.into());
                 }
             }
 
             for ed in edges_data.iter() {
                 if ed.term.is_none() {
-                    return ControlFlow::Break(ImplicaError::InvalidPattern { pattern: pattern.to_string(), reason: "Unable to infer the term of an edge contained in the pattern".to_string() });
+                    return ControlFlow::Break(ImplicaError::InvalidPattern { pattern: pattern.to_string(), reason: "Unable to infer the term of an edge contained in the pattern".to_string() }.into());
                 }
 
                 if !ed.term_matched {
-                    return ControlFlow::Break(ImplicaError::InvalidPattern { pattern: pattern.to_string(), reason: "Inferred term for edge does not match the provided schema".to_string() });
+                    return ControlFlow::Break(ImplicaError::InvalidPattern { pattern: pattern.to_string(), reason: "Inferred term for edge does not match the provided schema".to_string() }.into());
                 }
 
                 if !ed.type_matched {
-                   return ControlFlow::Break(ImplicaError::InvalidPattern { pattern: pattern.to_string(), reason: "Inferred type for edge does not match the provided schema".to_string() });
+                   return ControlFlow::Break(ImplicaError::InvalidPattern { pattern: pattern.to_string(), reason: "Inferred type for edge does not match the provided schema".to_string() }.into());
                 }
             }
 
@@ -736,21 +738,15 @@ impl Graph {
                 if let Some(node_var) = &nd.variable {
                     if !new_match.contains_key(node_var) {
 
-                    prev_uid = match self.add_node(nd.r#type.unwrap(), nd.term, nd.properties) {
-                        Ok(n) => n,
-                        Err(e) => return ControlFlow::Break(e)
-                    };
+                    prev_uid = self.add_node(nd.r#type.unwrap(), nd.term, nd.properties);
 
                     match new_match.insert(node_var, MatchElement::Node(prev_uid)) {
                         Ok(()) => (),
-                        Err(e) => return ControlFlow::Break(e)
+                        Err(e) => return ControlFlow::Break(e.attach(ctx!("graph - create path")))
                     }
                 }
                 } else {
-                    match self.add_node(nd.r#type.unwrap(), nd.term, nd.properties) {
-                        Ok(..) => (),
-                        Err(e) => return ControlFlow::Break(e)
-                    }
+                    self.add_node(nd.r#type.unwrap(), nd.term, nd.properties) ;
                 }
             }
 
@@ -759,18 +755,18 @@ impl Graph {
                     if !new_match.contains_key(edge_var) {
                     let edge = match self.add_edge(ed.term.unwrap(), ed.properties) {
                         Ok(e) => e,
-                        Err(e) => return ControlFlow::Break(e)
+                        Err(e) => return ControlFlow::Break(e.attach(ctx!("graph - create path")))
                     };
 
                     match new_match.insert(edge_var, MatchElement::Edge(edge)) {
                         Ok(()) => (),
-                        Err(e) => return ControlFlow::Break(e)
+                        Err(e) => return ControlFlow::Break(e.attach(ctx!("graph - create path")))
                     }
                 }
                 } else {
                     match self.add_edge(ed.term.unwrap(), ed.properties) {
                         Ok(..) => (),
-                        Err(e) => return ControlFlow::Break(e)
+                        Err(e) => return ControlFlow::Break(e.attach(ctx!("graph - create path")))
                     }
                 }
 

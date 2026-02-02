@@ -1,8 +1,13 @@
+use error_stack::ResultExt;
 use hex;
 use pyo3::prelude::*;
 use std::sync::Arc;
 
-use crate::graph::{Graph, Uid};
+use crate::{
+    ctx,
+    errors::IntoPyResult,
+    graph::{Graph, Uid},
+};
 
 #[pyclass(name = "Type")]
 #[derive(Debug, Clone)]
@@ -25,6 +30,9 @@ impl TypeRef {
     }
 
     pub fn __str__(&self) -> PyResult<String> {
-        self.graph.type_to_string(&self.uid).map_err(|e| e.into())
+        self.graph
+            .type_to_string(&self.uid)
+            .attach(ctx!("type reference - to string"))
+            .into_py_result()
     }
 }

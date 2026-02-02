@@ -1,10 +1,12 @@
+use error_stack::ResultExt;
 use std::ops::ControlFlow;
 use std::sync::Arc;
 
 use dashmap::DashMap;
 use rayon::prelude::*;
 
-use crate::errors::ImplicaError;
+use crate::ctx;
+use crate::errors::{ImplicaError, ImplicaResult};
 use crate::graph::base::{Graph, TermRep, Uid};
 use crate::matches::{next_match_id, Match, MatchElement, MatchSet};
 use crate::patterns::{TermPattern, TermSchema};
@@ -14,15 +16,16 @@ impl Graph {
         &self,
         term_schema: &TermSchema,
         matches: MatchSet,
-    ) -> Result<MatchSet, ImplicaError> {
+    ) -> ImplicaResult<MatchSet> {
         self.match_term_pattern(&term_schema.compiled, matches)
+            .attach(ctx!("graph - match term schema"))
     }
 
     fn match_term_pattern(
         &self,
         pattern: &TermPattern,
         matches: MatchSet,
-    ) -> Result<MatchSet, ImplicaError> {
+    ) -> ImplicaResult<MatchSet> {
         let out_map: MatchSet = Arc::new(DashMap::new());
 
         let result = matches.par_iter().try_for_each(|row| {
@@ -37,14 +40,14 @@ impl Graph {
                         }
                         ControlFlow::Continue(())
                     }
-                    Err(e) => ControlFlow::Break(e),
+                    Err(e) => ControlFlow::Break(e.attach(ctx!("graph - match term pattern"))),
                 }
             })
         });
 
         match result {
             ControlFlow::Continue(()) => Ok(out_map),
-            ControlFlow::Break(e) => Err(e),
+            ControlFlow::Break(e) => Err(e.attach(ctx!("graph - match term pattern"))),
         }
     }
 
@@ -53,14 +56,15 @@ impl Graph {
         term_uid: &Uid,
         pattern: &TermPattern,
         r#match: Arc<Match>,
-    ) -> Result<Option<Arc<Match>>, ImplicaError> {
+    ) -> ImplicaResult<Option<Arc<Match>>> {
         if let Some(term_row) = self.term_index.get(term_uid) {
             match pattern {
                 TermPattern::Wildcard => Ok(Some(r#match.clone())),
                 TermPattern::Variable(var) => {
                     if let Some(ref old_element) = r#match.get(var) {
-                        let old_uid =
-                            old_element.as_term(var, Some("check term matches".to_string()))?;
+                        let old_uid = old_element
+                            .as_term(var, Some("check term matches".to_string()))
+                            .attach(ctx!("graph - check term matches"))?;
 
                         if &old_uid == term_uid {
                             Ok(Some(r#match.clone()))
@@ -69,17 +73,21 @@ impl Graph {
                         }
                     } else {
                         let new_match = Match::new(Some(r#match.clone()));
-                        new_match.insert(var, MatchElement::Term(*term_uid))?;
+                        new_match
+                            .insert(var, MatchElement::Term(*term_uid))
+                            .attach(ctx!("graph - match term pattern"))?;
 
                         Ok(Some(Arc::new(new_match)))
                     }
                 }
                 TermPattern::Application { function, argument } => match term_row.value() {
                     TermRep::Application(function_uid, argument_uid) => {
-                        if let Some(function_match) =
-                            self.check_term_matches(function_uid, function, r#match.clone())?
+                        if let Some(function_match) = self
+                            .check_term_matches(function_uid, function, r#match.clone())
+                            .attach(ctx!("graph - match term pattern"))?
                         {
                             self.check_term_matches(argument_uid, argument, function_match)
+                                .attach(ctx!("graph - match term pattern"))
                         } else {
                             Ok(None)
                         }
@@ -92,7 +100,8 @@ impl Graph {
             Err(ImplicaError::TermNotFound {
                 uid: *term_uid,
                 context: Some("check term matches".to_string()),
-            })
+            }
+            .into())
         }
     }
 }

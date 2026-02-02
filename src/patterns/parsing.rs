@@ -1,7 +1,9 @@
+use error_stack::ResultExt;
 use rhai::Dynamic;
 
-use crate::errors::ImplicaError;
+use crate::errors::{ImplicaError, ImplicaResult};
 
+use crate::ctx;
 use crate::patterns::term_schema::TermSchema;
 use crate::patterns::type_schema::TypeSchema;
 use crate::patterns::{edge::EdgePattern, node::NodePattern};
@@ -19,7 +21,7 @@ pub(in crate::patterns) struct Token {
     pub(in crate::patterns) text: String,
 }
 
-pub(in crate::patterns) fn tokenize_pattern(pattern: &str) -> Result<Vec<Token>, ImplicaError> {
+pub(in crate::patterns) fn tokenize_pattern(pattern: &str) -> ImplicaResult<Vec<Token>> {
     let mut tokens = Vec::new();
     let mut node_buffer = String::new();
     let mut edge_buffer = String::new();
@@ -71,7 +73,8 @@ pub(in crate::patterns) fn tokenize_pattern(pattern: &str) -> Result<Vec<Token>,
                                 "Unexpected character '{}' outside of node or edge pattern",
                                 c
                             ),
-                        });
+                        }
+                        .into());
                     }
                 }
             }
@@ -126,7 +129,8 @@ pub(in crate::patterns) fn tokenize_pattern(pattern: &str) -> Result<Vec<Token>,
                         return Err(ImplicaError::InvalidPattern {
                             pattern: pattern.to_string(),
                             reason: format!("Unexpected character '{}' in edge pattern", c),
-                        });
+                        }
+                        .into());
                     }
                 }
 
@@ -161,13 +165,15 @@ pub(in crate::patterns) fn tokenize_pattern(pattern: &str) -> Result<Vec<Token>,
         return Err(ImplicaError::InvalidPattern {
             pattern: pattern.to_string(),
             reason: "Unmatched parentheses in pattern".to_string(),
-        });
+        }
+        .into());
     }
     if edge_bracket_depth != 0 {
         return Err(ImplicaError::InvalidPattern {
             pattern: pattern.to_string(),
             reason: "Unmatched brackets in pattern".to_string(),
-        });
+        }
+        .into());
     }
 
     // Check final state
@@ -175,13 +181,14 @@ pub(in crate::patterns) fn tokenize_pattern(pattern: &str) -> Result<Vec<Token>,
         return Err(ImplicaError::InvalidPattern {
             pattern: pattern.to_string(),
             reason: "Pattern cannot end with an edge".to_string(),
-        });
+        }
+        .into());
     }
 
     Ok(tokens)
 }
 
-pub(in crate::patterns) fn parse_properties(props_str: &str) -> Result<PropertyMap, ImplicaError> {
+pub(in crate::patterns) fn parse_properties(props_str: &str) -> ImplicaResult<PropertyMap> {
     let props_str = props_str.trim();
 
     // Check for proper braces
@@ -189,7 +196,8 @@ pub(in crate::patterns) fn parse_properties(props_str: &str) -> Result<PropertyM
         return Err(ImplicaError::InvalidPattern {
             pattern: props_str.to_string(),
             reason: "Properties must be enclosed in braces {}".to_string(),
-        });
+        }
+        .into());
     }
 
     let inner = props_str[1..props_str.len() - 1].trim();
@@ -225,7 +233,8 @@ pub(in crate::patterns) fn parse_properties(props_str: &str) -> Result<PropertyM
                     return Err(ImplicaError::InvalidPattern {
                         pattern: props_str.to_string(),
                         reason: "Unexpected colon in property value".to_string(),
-                    });
+                    }
+                    .into());
                 }
                 after_colon = true;
                 current_key = current_key.trim().to_string();
@@ -233,7 +242,8 @@ pub(in crate::patterns) fn parse_properties(props_str: &str) -> Result<PropertyM
                     return Err(ImplicaError::InvalidPattern {
                         pattern: props_str.to_string(),
                         reason: "Empty property key".to_string(),
-                    });
+                    }
+                    .into());
                 }
             }
             ',' if !in_string && depth == 0 => {
@@ -241,11 +251,13 @@ pub(in crate::patterns) fn parse_properties(props_str: &str) -> Result<PropertyM
                     return Err(ImplicaError::InvalidPattern {
                         pattern: props_str.to_string(),
                         reason: "Missing colon in property definition".to_string(),
-                    });
+                    }
+                    .into());
                 }
 
                 // Parse the value and add to properties
-                let value = parse_property_value(current_value.trim())?;
+                let value =
+                    parse_property_value(current_value.trim()).attach(ctx!("parse properties"))?;
                 properties.insert(current_key.clone(), value)?;
 
                 // Reset for next property
@@ -277,16 +289,19 @@ pub(in crate::patterns) fn parse_properties(props_str: &str) -> Result<PropertyM
             return Err(ImplicaError::InvalidPattern {
                 pattern: props_str.to_string(),
                 reason: "Missing colon in property definition".to_string(),
-            });
+            }
+            .into());
         }
-        let value = parse_property_value(current_value.trim())?;
-        properties.insert(current_key.trim().to_string(), value)?;
+        let value = parse_property_value(current_value.trim()).attach(ctx!("parse properties"))?;
+        properties
+            .insert(current_key.trim().to_string(), value)
+            .attach(ctx!("parse properties"))?;
     }
 
     Ok(properties)
 }
 
-fn parse_property_value(value_str: &str) -> Result<Dynamic, ImplicaError> {
+fn parse_property_value(value_str: &str) -> ImplicaResult<Dynamic> {
     let value_str = value_str.trim();
 
     // Check for empty value
@@ -294,7 +309,8 @@ fn parse_property_value(value_str: &str) -> Result<Dynamic, ImplicaError> {
         return Err(ImplicaError::InvalidPattern {
             pattern: value_str.to_string(),
             reason: "Empty property value".to_string(),
-        });
+        }
+        .into());
     }
 
     // Try to parse as quoted string (with escape handling)
@@ -306,13 +322,14 @@ fn parse_property_value(value_str: &str) -> Result<Dynamic, ImplicaError> {
             return Err(ImplicaError::InvalidPattern {
                 pattern: value_str.to_string(),
                 reason: format!("Unclosed string literal (expected closing {})", quote_char),
-            });
+            }
+            .into());
         }
 
         let string_content = &value_str[1..value_str.len() - 1];
 
         // Handle escape sequences
-        let unescaped = unescape_string(string_content)?;
+        let unescaped = unescape_string(string_content).attach(ctx!("parse property value"))?;
 
         return Ok(Dynamic::from(unescaped));
     }
@@ -347,7 +364,8 @@ fn parse_property_value(value_str: &str) -> Result<Dynamic, ImplicaError> {
             return Err(ImplicaError::InvalidPattern {
                 pattern: value_str.to_string(),
                 reason: "Invalid numeric value (NaN or Infinity not supported)".to_string(),
-            });
+            }
+            .into());
         }
         return Ok(Dynamic::from(float_val));
     }
@@ -357,10 +375,11 @@ fn parse_property_value(value_str: &str) -> Result<Dynamic, ImplicaError> {
         pattern: value_str.to_string(),
         reason: "Invalid property value. Strings must be quoted, e.g., \"value\" or 'value'"
             .to_string(),
-    })
+    }
+    .into())
 }
 
-fn unescape_string(s: &str) -> Result<String, ImplicaError> {
+fn unescape_string(s: &str) -> ImplicaResult<String> {
     let mut result = String::new();
     let mut chars = s.chars();
 
@@ -383,7 +402,8 @@ fn unescape_string(s: &str) -> Result<String, ImplicaError> {
                     return Err(ImplicaError::InvalidPattern {
                         pattern: s.to_string(),
                         reason: "String ends with incomplete escape sequence".to_string(),
-                    })
+                    }
+                    .into())
                 }
             }
         } else {
@@ -415,7 +435,7 @@ fn find_properties_start(s: &str) -> Option<usize> {
     None
 }
 
-fn smart_split_colons(s: &str) -> Result<Vec<String>, ImplicaError> {
+fn smart_split_colons(s: &str) -> ImplicaResult<Vec<String>> {
     // Split by colons, but ignore colons inside parentheses, brackets, and braces
     let mut parts = Vec::new();
     let mut current = String::new();
@@ -435,7 +455,8 @@ fn smart_split_colons(s: &str) -> Result<Vec<String>, ImplicaError> {
                     return Err(ImplicaError::InvalidPattern {
                         pattern: s.to_string(),
                         reason: "Unbalanced parentheses in pattern".to_string(),
-                    });
+                    }
+                    .into());
                 }
                 current.push(c);
             }
@@ -449,7 +470,8 @@ fn smart_split_colons(s: &str) -> Result<Vec<String>, ImplicaError> {
                     return Err(ImplicaError::InvalidPattern {
                         pattern: s.to_string(),
                         reason: "Unbalanced brackets in pattern".to_string(),
-                    });
+                    }
+                    .into());
                 }
                 current.push(c);
             }
@@ -463,7 +485,8 @@ fn smart_split_colons(s: &str) -> Result<Vec<String>, ImplicaError> {
                     return Err(ImplicaError::InvalidPattern {
                         pattern: s.to_string(),
                         reason: "Unbalanced braces in pattern".to_string(),
-                    });
+                    }
+                    .into());
                 }
                 current.push(c);
             }
@@ -485,32 +508,36 @@ fn smart_split_colons(s: &str) -> Result<Vec<String>, ImplicaError> {
         return Err(ImplicaError::InvalidPattern {
             pattern: s.to_string(),
             reason: "Unbalanced parentheses in pattern".to_string(),
-        });
+        }
+        .into());
     }
 
     if bracket_depth != 0 {
         return Err(ImplicaError::InvalidPattern {
             pattern: s.to_string(),
             reason: "Unbalanced brackets in pattern".to_string(),
-        });
+        }
+        .into());
     }
 
     if brace_depth != 0 {
         return Err(ImplicaError::InvalidPattern {
             pattern: s.to_string(),
             reason: "Unbalanced braces in pattern".to_string(),
-        });
+        }
+        .into());
     }
 
     Ok(parts)
 }
-pub(in crate::patterns) fn parse_node_pattern(s: &str) -> Result<NodePattern, ImplicaError> {
+pub(in crate::patterns) fn parse_node_pattern(s: &str) -> ImplicaResult<NodePattern> {
     let s = s.trim();
     if !s.starts_with('(') || !s.ends_with(')') {
         return Err(ImplicaError::InvalidPattern {
             pattern: s.to_string(),
             reason: "Node pattern must be enclosed in parentheses".to_string(),
-        });
+        }
+        .into());
     }
 
     let inner = &s[1..s.len() - 1].trim();
@@ -530,7 +557,7 @@ pub(in crate::patterns) fn parse_node_pattern(s: &str) -> Result<NodePattern, Im
     let content = if let Some(brace_idx) = find_properties_start(inner) {
         // Has properties - extract and parse them
         let props_str = &inner[brace_idx..];
-        properties = Some(parse_properties(props_str)?);
+        properties = Some(parse_properties(props_str).attach(ctx!("parse node pattern"))?);
         inner[..brace_idx].trim()
     } else {
         inner
@@ -538,7 +565,7 @@ pub(in crate::patterns) fn parse_node_pattern(s: &str) -> Result<NodePattern, Im
 
     // Smart split by : to parse variable:type_schema:term_schema
     // Need to handle nested parentheses and arrows in type schemas
-    let parts = smart_split_colons(content)?;
+    let parts = smart_split_colons(content).attach(ctx!("parse node pattern"))?;
 
     match parts.len() {
         1 => {
@@ -547,7 +574,8 @@ pub(in crate::patterns) fn parse_node_pattern(s: &str) -> Result<NodePattern, Im
             if !part.is_empty() {
                 // Check if it looks like a TypeSchema (contains ->, *, or starts with ()
                 if part.contains("->") || part.contains('*') || part.starts_with('(') {
-                    type_schema = Some(TypeSchema::new(part.to_string())?);
+                    type_schema =
+                        Some(TypeSchema::new(part.to_string()).attach(ctx!("parse node pattern"))?);
                 } else {
                     variable = Some(part.to_string());
                 }
@@ -563,7 +591,9 @@ pub(in crate::patterns) fn parse_node_pattern(s: &str) -> Result<NodePattern, Im
             }
 
             if !type_part.is_empty() {
-                type_schema = Some(TypeSchema::new(type_part.to_string())?);
+                type_schema = Some(
+                    TypeSchema::new(type_part.to_string()).attach(ctx!("parse node pattern"))?,
+                );
             }
         }
         3 => {
@@ -577,11 +607,15 @@ pub(in crate::patterns) fn parse_node_pattern(s: &str) -> Result<NodePattern, Im
             }
 
             if !type_part.is_empty() {
-                type_schema = Some(TypeSchema::new(type_part.to_string())?);
+                type_schema = Some(
+                    TypeSchema::new(type_part.to_string()).attach(ctx!("parse node pattern"))?,
+                );
             }
 
             if !term_part.is_empty() {
-                term_schema = Some(TermSchema::new(term_part.to_string())?);
+                term_schema = Some(
+                    TermSchema::new(term_part.to_string()).attach(ctx!("parse node pattern"))?,
+                );
             }
         }
         _ => {
@@ -589,14 +623,14 @@ pub(in crate::patterns) fn parse_node_pattern(s: &str) -> Result<NodePattern, Im
             return Err(ImplicaError::InvalidPattern{
                 pattern: s.to_string(),
                 reason: "Node pattern has too many ':' separators. Expected format: (var:TypeSchema:TermSchema)".to_string(),
-            });
+            }.into());
         }
     }
 
     NodePattern::new(variable, type_schema, term_schema, properties)
 }
 
-pub(in crate::patterns) fn parse_edge_pattern(s: &str) -> Result<EdgePattern, ImplicaError> {
+pub(in crate::patterns) fn parse_edge_pattern(s: &str) -> ImplicaResult<EdgePattern> {
     let s = s.trim();
 
     // Extract the part inside brackets first
@@ -613,7 +647,8 @@ pub(in crate::patterns) fn parse_edge_pattern(s: &str) -> Result<EdgePattern, Im
         return Err(ImplicaError::InvalidPattern {
             pattern: s.to_string(),
             reason: "Brackets are mismatched".to_string(),
-        });
+        }
+        .into());
     }
 
     // Determine direction based on arrows OUTSIDE the brackets
@@ -625,7 +660,8 @@ pub(in crate::patterns) fn parse_edge_pattern(s: &str) -> Result<EdgePattern, Im
         return Err(ImplicaError::InvalidPattern {
             pattern: s.to_string(),
             reason: "Cannot have both <- and -> in same edge".to_string(),
-        });
+        }
+        .into());
     } else if before_bracket.contains("<-") || before_bracket.contains('<') {
         "backward"
     } else if after_bracket.contains("->") || after_bracket.contains('>') {
@@ -646,7 +682,7 @@ pub(in crate::patterns) fn parse_edge_pattern(s: &str) -> Result<EdgePattern, Im
         let content = if let Some(brace_idx) = find_properties_start(inner) {
             // Has properties - extract and parse them
             let props_str = &inner[brace_idx..];
-            properties = Some(parse_properties(props_str)?);
+            properties = Some(parse_properties(props_str).attach(ctx!("parse edge pattern"))?);
             inner[..brace_idx].trim()
         } else {
             inner
@@ -654,7 +690,7 @@ pub(in crate::patterns) fn parse_edge_pattern(s: &str) -> Result<EdgePattern, Im
 
         // Parse: [var:type:term] or [var:type] or [var] or [:type:term] or [:type]
         // Use smart_split_colons to handle colons inside TypeSchemas
-        let parts = smart_split_colons(content)?;
+        let parts = smart_split_colons(content).attach(ctx!("parse edge pattern"))?;
 
         match parts.len() {
             1 => {
@@ -674,7 +710,10 @@ pub(in crate::patterns) fn parse_edge_pattern(s: &str) -> Result<EdgePattern, Im
                 }
 
                 if !type_part.is_empty() {
-                    type_schema = Some(TypeSchema::new(type_part.to_string())?);
+                    type_schema = Some(
+                        TypeSchema::new(type_part.to_string())
+                            .attach(ctx!("parse edge pattern"))?,
+                    );
                 }
             }
             3 => {
@@ -688,11 +727,17 @@ pub(in crate::patterns) fn parse_edge_pattern(s: &str) -> Result<EdgePattern, Im
                 }
 
                 if !type_part.is_empty() {
-                    type_schema = Some(TypeSchema::new(type_part.to_string())?);
+                    type_schema = Some(
+                        TypeSchema::new(type_part.to_string())
+                            .attach(ctx!("parse edge pattern"))?,
+                    );
                 }
 
                 if !term_part.is_empty() {
-                    term_schema = Some(TermSchema::new(term_part.to_string())?);
+                    term_schema = Some(
+                        TermSchema::new(term_part.to_string())
+                            .attach(ctx!("parse edge pattern"))?,
+                    );
                 }
             }
             _ => {
@@ -700,7 +745,7 @@ pub(in crate::patterns) fn parse_edge_pattern(s: &str) -> Result<EdgePattern, Im
                 return Err(ImplicaError::InvalidPattern{
                     pattern: s.to_string(),
                     reason: "Edge pattern has too many ':' separators. Expected format: [var:TypeSchema:TermSchema]".to_string(),
-                });
+                }.into());
             }
         }
     }

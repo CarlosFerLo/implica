@@ -3,6 +3,8 @@ use std::sync::Arc;
 
 use dashmap::DashMap;
 
+use crate::ctx;
+use crate::errors::ImplicaResult;
 use crate::{errors::ImplicaError, graph::Uid};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -14,7 +16,7 @@ pub enum MatchElement {
 }
 
 impl MatchElement {
-    pub fn as_type(&self, var: &str, context: Option<String>) -> Result<Uid, ImplicaError> {
+    pub fn as_type(&self, var: &str, context: Option<String>) -> ImplicaResult<Uid> {
         match self {
             MatchElement::Type(t) => Ok(*t),
             MatchElement::Term(_) => Err(ImplicaError::ContextConflict {
@@ -22,22 +24,25 @@ impl MatchElement {
                 original: "term".to_string(),
                 new: "type".to_string(),
                 context,
-            }),
+            }
+            .into()),
             MatchElement::Node(_) => Err(ImplicaError::ContextConflict {
                 name: var.to_string(),
                 original: "node".to_string(),
                 new: "type".to_string(),
                 context,
-            }),
+            }
+            .into()),
             MatchElement::Edge(_) => Err(ImplicaError::ContextConflict {
                 name: var.to_string(),
                 original: "edge".to_string(),
                 new: "type".to_string(),
                 context,
-            }),
+            }
+            .into()),
         }
     }
-    pub fn as_term(&self, var: &str, context: Option<String>) -> Result<Uid, ImplicaError> {
+    pub fn as_term(&self, var: &str, context: Option<String>) -> ImplicaResult<Uid> {
         match self {
             MatchElement::Term(t) => Ok(*t),
             MatchElement::Type(_) => Err(ImplicaError::ContextConflict {
@@ -45,22 +50,25 @@ impl MatchElement {
                 original: "type".to_string(),
                 new: "term".to_string(),
                 context,
-            }),
+            }
+            .into()),
             MatchElement::Node(_) => Err(ImplicaError::ContextConflict {
                 name: var.to_string(),
                 original: "node".to_string(),
                 new: "term".to_string(),
                 context,
-            }),
+            }
+            .into()),
             MatchElement::Edge(_) => Err(ImplicaError::ContextConflict {
                 name: var.to_string(),
                 original: "edge".to_string(),
                 new: "term".to_string(),
                 context,
-            }),
+            }
+            .into()),
         }
     }
-    pub fn as_node(&self, var: &str, context: Option<String>) -> Result<Uid, ImplicaError> {
+    pub fn as_node(&self, var: &str, context: Option<String>) -> ImplicaResult<Uid> {
         match self {
             MatchElement::Node(t) => Ok(*t),
             MatchElement::Type(_) => Err(ImplicaError::ContextConflict {
@@ -68,22 +76,25 @@ impl MatchElement {
                 original: "type".to_string(),
                 new: "node".to_string(),
                 context,
-            }),
+            }
+            .into()),
             MatchElement::Term(_) => Err(ImplicaError::ContextConflict {
                 name: var.to_string(),
                 original: "term".to_string(),
                 new: "node".to_string(),
                 context,
-            }),
+            }
+            .into()),
             MatchElement::Edge(_) => Err(ImplicaError::ContextConflict {
                 name: var.to_string(),
                 original: "edge".to_string(),
                 new: "node".to_string(),
                 context,
-            }),
+            }
+            .into()),
         }
     }
-    pub fn as_edge(&self, var: &str, context: Option<String>) -> Result<(Uid, Uid), ImplicaError> {
+    pub fn as_edge(&self, var: &str, context: Option<String>) -> ImplicaResult<(Uid, Uid)> {
         match self {
             MatchElement::Edge(t) => Ok(*t),
             MatchElement::Type(_) => Err(ImplicaError::ContextConflict {
@@ -91,19 +102,22 @@ impl MatchElement {
                 original: "type".to_string(),
                 new: "edge".to_string(),
                 context,
-            }),
+            }
+            .into()),
             MatchElement::Term(_) => Err(ImplicaError::ContextConflict {
                 name: var.to_string(),
                 original: "term".to_string(),
                 new: "edge".to_string(),
                 context,
-            }),
+            }
+            .into()),
             MatchElement::Node(_) => Err(ImplicaError::ContextConflict {
                 name: var.to_string(),
                 original: "node".to_string(),
                 new: "edge".to_string(),
                 context,
-            }),
+            }
+            .into()),
         }
     }
 }
@@ -142,12 +156,13 @@ impl Match {
         self.elements.get(key).map(|e| e.value().clone())
     }
 
-    pub fn insert(&self, key: &str, element: MatchElement) -> Result<(), ImplicaError> {
+    pub fn insert(&self, key: &str, element: MatchElement) -> ImplicaResult<()> {
         if self.contains_key(key) {
             return Err(ImplicaError::VariableAlreadyExists {
                 name: key.to_string(),
-                context: Some("match insert".to_string()),
-            });
+                context: Some((ctx!("match insert")).to_string()),
+            }
+            .into());
         }
 
         self.elements.insert(key.to_string(), element);
@@ -166,6 +181,12 @@ impl Match {
 }
 
 pub type MatchSet = Arc<DashMap<u64, (Uid, Arc<Match>)>>;
+
+pub(crate) fn default_match_set() -> MatchSet {
+    let mset = Arc::new(DashMap::new());
+    mset.insert(next_match_id(), ([0; 32], Arc::new(Match::new(None))));
+    mset
+}
 
 pub static MATCH_ID_COUNTER: AtomicU64 = AtomicU64::new(0);
 

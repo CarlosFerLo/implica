@@ -1,15 +1,16 @@
-use crate::errors::ImplicaError;
+use crate::errors::{ImplicaError, ImplicaResult};
 
 const MAX_NAME_LENGTH: usize = 255;
 const RESERVED_NAMES: &[&str] = &["None", "True", "False"];
 
-pub(crate) fn validate_variable_name(name: &str) -> Result<(), ImplicaError> {
+pub(crate) fn validate_variable_name(name: &str) -> ImplicaResult<()> {
     // Longitud
     if name.is_empty() || name.len() > MAX_NAME_LENGTH {
         return Err(ImplicaError::InvalidIdentifier {
             name: name.to_string(),
             reason: format!("Name must be between 1 and {} characters", MAX_NAME_LENGTH),
-        });
+        }
+        .into());
     }
 
     // Whitespace
@@ -17,7 +18,8 @@ pub(crate) fn validate_variable_name(name: &str) -> Result<(), ImplicaError> {
         return Err(ImplicaError::InvalidIdentifier {
             name: name.to_string(),
             reason: "Name cannot contain whitespace".to_string(),
-        });
+        }
+        .into());
     }
 
     // Caracteres válidos
@@ -25,7 +27,8 @@ pub(crate) fn validate_variable_name(name: &str) -> Result<(), ImplicaError> {
         return Err(ImplicaError::InvalidIdentifier {
             name: name.to_string(),
             reason: "Name can only contain alphanumeric characters and underscores".to_string(),
-        });
+        }
+        .into());
     }
 
     // Debe empezar con letra o underscore
@@ -33,7 +36,8 @@ pub(crate) fn validate_variable_name(name: &str) -> Result<(), ImplicaError> {
         return Err(ImplicaError::InvalidIdentifier {
             name: name.to_string(),
             reason: "Name must start with a letter or underscore".to_string(),
-        });
+        }
+        .into());
     }
 
     // Nombres reservados
@@ -41,7 +45,8 @@ pub(crate) fn validate_variable_name(name: &str) -> Result<(), ImplicaError> {
         return Err(ImplicaError::InvalidIdentifier {
             name: name.to_string(),
             reason: format!("'{}' is a reserved name", name),
-        });
+        }
+        .into());
     }
 
     Ok(())

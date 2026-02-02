@@ -1,85 +1,81 @@
 use pyo3::pyclass::PyClassGuardError;
-use pyo3::{exceptions, PyErr};
+use pyo3::{exceptions, PyErr, PyResult};
 use std::convert::Infallible;
-use std::fmt::{Display, Formatter, Result};
+
+use error_stack::Report;
+use thiserror::Error;
 
 use crate::graph::Uid;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Error)]
 pub enum ImplicaError {
+    #[error("Type Mismatch: expected {expected}, got {got}{}", context.as_ref().map(|c| format!(" ({})", c)).unwrap_or_default())]
     TypeMismatch {
         expected: String,
         got: String,
         context: Option<String>,
     },
 
-    InvalidPattern {
-        pattern: String,
-        reason: String,
-    },
+    #[error("Invalid Pattern; '{pattern}': {reason}")]
+    InvalidPattern { pattern: String, reason: String },
 
-    SchemaValidation {
-        schema: String,
-        reason: String,
-    },
+    #[error("Schema Validation Failed for '{schema}': {reason}")]
+    SchemaValidation { schema: String, reason: String },
 
-    InvalidIdentifier {
-        name: String,
-        reason: String,
-    },
+    #[error("Invalid Identifier '{name}': {reason}")]
+    InvalidIdentifier { name: String, reason: String },
 
+    #[error("Python Error: '{message}'{}", context.as_ref().map(|c| format!(" ({})", c)).unwrap_or_default())]
     PythonError {
         message: String,
         context: Option<String>,
     },
 
-    EvaluationError {
-        message: String,
-    },
-    InvalidType {
-        reason: String,
-    },
-    InvalidTerm {
-        reason: String,
-    },
+    //#[error("Evaluation Error: '{message}'")]
+    //EvaluationError { message: String },
+    #[error("Invalid Type: '{reason}'")]
+    InvalidType { reason: String },
+
+    #[error("Invalid Term: '{reason}'")]
+    InvalidTerm { reason: String },
+
+    #[error("Failed to acquire {rw} lock: '{message}'{}", context.as_ref().map(|c| format!(" ({})", c)).unwrap_or_default())]
     LockError {
         rw: String,
         message: String,
         context: Option<String>,
     },
+
+    #[error("Something went wrong: '{message}'{}", context.as_ref().map(|c| format!(" ({})", c)).unwrap_or_default())]
     RuntimeError {
         message: String,
         context: Option<String>,
     },
 
-    TypeNotFound {
-        uid: Uid,
-        context: Option<String>,
-    },
+    #[error("Type with Uid: '{}' not found{}", hex::encode(.uid), context.as_ref().map(|c| format!(" ({})", c)).unwrap_or_default())]
+    TypeNotFound { uid: Uid, context: Option<String> },
 
-    TermNotFound {
-        uid: Uid,
-        context: Option<String>,
-    },
+    #[error("Term with Uid: '{}' not found{}", hex::encode(.uid), context.as_ref().map(|c| format!(" ({})", c)).unwrap_or_default())]
+    TermNotFound { uid: Uid, context: Option<String> },
 
-    NodeNotFound {
-        uid: Uid,
-        context: Option<String>,
-    },
+    #[error("Node with Uid: '{}' not found{}", hex::encode(.uid), context.as_ref().map(|c| format!(" ({})", c)).unwrap_or_default())]
+    NodeNotFound { uid: Uid, context: Option<String> },
+    #[error("Edge with Uid: '({}, {})' not found{}", hex::encode(.uid.0), hex::encode(.uid.1), context.as_ref().map(|c| format!(" ({})", c)).unwrap_or_default())]
     EdgeNotFound {
         uid: (Uid, Uid),
         context: Option<String>,
     },
-
+    #[error("Variable already exists: '{name}'{}", context.as_ref().map(|c| format!(" ({})", c)).unwrap_or_default())]
     VariableAlreadyExists {
         name: String,
         context: Option<String>,
     },
+    #[error("Variable not found: '{name}'{}", context.as_ref().map(|c| format!(" ({})", c)).unwrap_or_default())]
     VariableNotFound {
         name: String,
         context: Option<String>,
     },
-
+    #[error("Context Conflict: tried to assign variable '{name}' currently holding a '{original}' to a '{new}'{}", context.as_ref().map(|c| format!(" ({})", c)).unwrap_or_default())]
     ContextConflict {
         name: String,
         original: String,
@@ -87,17 +83,22 @@ pub enum ImplicaError {
         context: Option<String>,
     },
 
+    #[error("Index Corruption: '{message}'{}", context.as_ref().map(|c| format!(" ({})", c)).unwrap_or_default())]
     IndexCorruption {
         message: String,
         context: Option<String>,
     },
+    #[error("Index Out of Range: tried to access index {index} from an iterable of length {max_len}{}", context.as_ref().map(|c| format!(" ({})", c)).unwrap_or_default())]
     IndexOutOfRange {
         index: usize,
         max_len: usize,
         context: Option<String>,
     },
+
+    #[error("FATAL: An infallible error was returned, please contact the developers of the Implica Library as this should not occur.")]
     Infallible {},
 
+    #[error("Invalid Query:\n{query}\n\nReason: {reason}{}", context.as_ref().map(|c| format!("\n({})", c)).unwrap_or_default())]
     InvalidQuery {
         query: String,
         reason: String,
@@ -105,206 +106,65 @@ pub enum ImplicaError {
     },
 }
 
-impl Display for ImplicaError {
-    fn fmt(&self, f: &mut Formatter<'_>) -> Result {
-        match self {
-            ImplicaError::TypeMismatch {
-                expected,
-                got,
-                context,
-            } => {
-                write!(f, "Type mismatch: expected {}, got {}", expected, got)?;
-                if let Some(ctx) = context {
-                    write!(f, " (in {})", ctx)?;
-                }
-                Ok(())
-            }
-            ImplicaError::InvalidPattern { pattern, reason } => {
-                write!(f, "Invalid pattern '{}': {}", pattern, reason)
-            }
-            ImplicaError::SchemaValidation { schema, reason } => {
-                write!(f, "Schema validation failed for '{}': {}", schema, reason)
-            }
-            ImplicaError::InvalidIdentifier { name, reason } => {
-                write!(f, "Invalid identifier '{}': {}", name, reason)
-            }
-            ImplicaError::PythonError { message, context } => {
-                write!(f, "Python error: '{}'", message)?;
-                if let Some(ctx) = context {
-                    write!(f, "({})", ctx)?;
-                }
-                Ok(())
-            }
-            ImplicaError::EvaluationError { message } => {
-                write!(f, "Evaluation Error: '{}'", message)
-            }
-            ImplicaError::InvalidType { reason } => {
-                write!(f, "Invalid Type: '{}'", reason)
-            }
-            ImplicaError::InvalidTerm { reason } => {
-                write!(f, "Invalid Term: '{}'", reason)
-            }
-            ImplicaError::LockError {
-                rw,
-                message,
-                context,
-            } => {
-                write!(f, "Failed to acquire {} lock: '{}'", rw, message)?;
-                if let Some(context) = context {
-                    write!(f, " ({})", context)?;
-                }
-                Ok(())
-            }
-            ImplicaError::RuntimeError { message, context } => {
-                write!(f, "Something went wrong: '{message}'")?;
-                if let Some(context) = context {
-                    write!(f, " ({})", context)?;
-                }
-                Ok(())
-            }
-            ImplicaError::TypeNotFound { uid, context } => {
-                write!(f, "Type with Uid '{}' not found", hex::encode(uid))?;
-                if let Some(context) = context {
-                    write!(f, " ({})", context)?;
-                }
-                Ok(())
-            }
+pub type ImplicaResult<T> = Result<T, Report<ImplicaError>>;
 
-            ImplicaError::TermNotFound { uid, context } => {
-                write!(f, "Term with Uid '{}' not found", hex::encode(uid))?;
-                if let Some(context) = context {
-                    write!(f, " ({})", context)?;
-                }
-                Ok(())
-            }
+pub trait IntoPyResult<T> {
+    fn into_py_result(self) -> PyResult<T>;
+}
 
-            ImplicaError::NodeNotFound { uid, context } => {
-                write!(f, "Node with Uid '{}' not found", hex::encode(uid))?;
-                if let Some(context) = context {
-                    write!(f, " ({})", context)?;
-                }
-                Ok(())
-            }
+impl<T> IntoPyResult<T> for ImplicaResult<T> {
+    fn into_py_result(self) -> PyResult<T> {
+        self.map_err(|report| {
+            let current_error = report.current_context();
+            let full_message = format_report(&report);
 
-            ImplicaError::EdgeNotFound { uid, context } => {
-                write!(f, "Edge with Uid '({}, {})' not found", hex::encode(uid.0), hex::encode(uid.1))?;
-                if let Some(context) = context {
-                    write!(f, " ({})", context)?;
-                }
-                Ok(())
-            }
-
-            ImplicaError::VariableAlreadyExists { name, context } => {
-                write!(f, "Variable already exists: '{}'", name)?;
-                if let Some(context) = context {
-                    write!(f, " ({})", context)?;
-                }
-                Ok(())
-            }
-
-            ImplicaError::VariableNotFound { name, context } => {
-                write!(f, "Variable not found: '{}'", name)?;
-                if let Some(context) = context {
-                    write!(f, " ({})", context)?;
-                }
-                Ok(())
-            }
-            ImplicaError::ContextConflict {
-                name,
-                original,
-                new,
-                context,
-            } => {
-                write!(f, "Context Conflict: tried to assign variable '{}' with current value of type '{}' to a new value of type '{}'", name, original, new)?;
-                if let Some(context) = context {
-                    write!(f, " ({})", context)?;
-                }
-                Ok(())
-            }
-            ImplicaError::IndexCorruption { message, context } => {
-                write!(f, "Index Corruption: '{}'", message)?;
-                if let Some(context) = context {
-                    write!(f, " ({})", context)?;
-                }
-                Ok(())
-            }
-            ImplicaError::IndexOutOfRange {
-                index,
-                max_len,
-                context,
-            } => {
-                write!(
-                    f,
-                    "Index Out of Range: tried to access index {} from an iterable of length {}",
-                    index, max_len
-                )?;
-                if let Some(context) = context {
-                    write!(f, " ({})", context)?;
-                }
-                Ok(())
-            }
-            ImplicaError::Infallible {  } => write!(f, "FATAL: An infallible error was returned, please contact the developers of the Implica Library as this should not occur."),
-            ImplicaError::InvalidQuery { query, reason, context } => {
-                write!(f, "Invalid Query:\n{}\n\nReason: {}", query, reason)?;
-
-                if let Some(context) = context {
-                    write!(f, "\n({})", context)?;
+            match current_error {
+                ImplicaError::TypeMismatch { .. } | ImplicaError::InvalidType { .. } => {
+                    exceptions::PyTypeError::new_err(full_message)
                 }
 
-                Ok(())
+                ImplicaError::InvalidQuery { .. }
+                | ImplicaError::InvalidPattern { .. }
+                | ImplicaError::InvalidIdentifier { .. }
+                | ImplicaError::InvalidTerm { .. }
+                | ImplicaError::SchemaValidation { .. }
+                | ImplicaError::ContextConflict { .. } => {
+                    exceptions::PyValueError::new_err(full_message)
+                }
+                ImplicaError::VariableAlreadyExists { .. }
+                | ImplicaError::VariableNotFound { .. }
+                | ImplicaError::NodeNotFound { .. }
+                | ImplicaError::EdgeNotFound { .. }
+                | ImplicaError::TypeNotFound { .. }
+                | ImplicaError::TermNotFound { .. } => {
+                    exceptions::PyKeyError::new_err(full_message)
+                }
+                ImplicaError::PythonError { .. }
+                | ImplicaError::RuntimeError { .. }
+                //| ImplicaError::EvaluationError { .. }
+                | ImplicaError::LockError { .. } => {
+                    exceptions::PyRuntimeError::new_err(full_message)
+                }
+                ImplicaError::IndexCorruption { .. } => {
+                    exceptions::PyIndexError::new_err(full_message)
+                }
+                ImplicaError::IndexOutOfRange { .. } => {
+                    exceptions::PyKeyError::new_err(full_message)
+                }
+                ImplicaError::Infallible {} => exceptions::PySystemError::new_err(full_message),
             }
-        }
+        })
     }
 }
 
-impl std::error::Error for ImplicaError {}
-
-/// Convert ImplicaError to PyErr with appropriate Python exception types.
-///
-/// This implementation ensures that each error type maps to the most appropriate
-/// Python built-in exception:
-///
-/// - `TypeMismatch` → `TypeError`
-/// - `NodeNotFound`, `EdgeNotFound` → `KeyError`
-/// - `InvalidPattern`, `InvalidQuery`, `InvalidIdentifier`, `SchemaValidation` → `ValueError`
-/// - `PropertyError` → `AttributeError`
-/// - `VariableNotFound` → `NameError`
-impl From<ImplicaError> for PyErr {
-    fn from(err: ImplicaError) -> PyErr {
-        match err {
-            ImplicaError::TypeMismatch { .. } | ImplicaError::InvalidType { .. } => {
-                exceptions::PyTypeError::new_err(err.to_string())
-            }
-
-            ImplicaError::InvalidQuery { .. }
-            | ImplicaError::InvalidPattern { .. }
-            | ImplicaError::InvalidIdentifier { .. }
-            | ImplicaError::InvalidTerm { .. }
-            | ImplicaError::SchemaValidation { .. }
-            | ImplicaError::ContextConflict { .. } => {
-                exceptions::PyValueError::new_err(err.to_string())
-            }
-            ImplicaError::VariableAlreadyExists { .. }
-            | ImplicaError::VariableNotFound { .. }
-            | ImplicaError::NodeNotFound { .. }
-            | ImplicaError::EdgeNotFound { .. }
-            | ImplicaError::TypeNotFound { .. }
-            | ImplicaError::TermNotFound { .. } => exceptions::PyKeyError::new_err(err.to_string()),
-            ImplicaError::PythonError { .. }
-            | ImplicaError::RuntimeError { .. }
-            | ImplicaError::EvaluationError { .. }
-            | ImplicaError::LockError { .. } => {
-                exceptions::PyRuntimeError::new_err(err.to_string())
-            }
-            ImplicaError::IndexCorruption { .. } => {
-                exceptions::PyIndexError::new_err(err.to_string())
-            }
-            ImplicaError::IndexOutOfRange { .. } => {
-                exceptions::PyKeyError::new_err(err.to_string())
-            }
-            ImplicaError::Infallible {} => exceptions::PySystemError::new_err(err.to_string()),
+fn format_report(report: &Report<ImplicaError>) -> String {
+    let mut message = report.current_context().to_string();
+    for frame in report.frames() {
+        if let Some(printable) = frame.downcast_ref::<String>() {
+            message.push_str(&format!("\n → {}", printable));
         }
     }
+    message
 }
 
 impl From<PyErr> for ImplicaError {

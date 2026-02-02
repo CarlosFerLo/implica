@@ -2,9 +2,11 @@ use std::ops::ControlFlow;
 use std::sync::Arc;
 
 use dashmap::DashMap;
+use error_stack::Report;
 use rayon::prelude::*;
 
-use crate::errors::ImplicaError;
+use crate::ctx;
+use crate::errors::{ImplicaError, ImplicaResult};
 use crate::graph::base::Graph;
 use crate::graph::Uid;
 use crate::matches::{next_match_id, Match, MatchElement, MatchSet};
@@ -17,7 +19,7 @@ impl Graph {
         start: Option<String>,
         end: Option<String>,
         matches: MatchSet,
-    ) -> Result<MatchSet, ImplicaError> {
+    ) -> ImplicaResult<MatchSet> {
         let out_map: MatchSet = Arc::new(DashMap::new());
 
         let (start, end) = match pattern.compiled_direction {
@@ -28,7 +30,7 @@ impl Graph {
 
         let result = matches
             .par_iter()
-            .try_for_each(|entry| -> ControlFlow<ImplicaError> {
+            .try_for_each(|entry| -> ControlFlow<Report<ImplicaError>> {
                 let (_prev_uid, r#match) = entry.value().clone();
 
                 // Check if match already holds the desired edge
@@ -37,7 +39,7 @@ impl Graph {
                         let old_edge =
                             match old.as_edge(var, Some("match edge pattern".to_string())) {
                                 Ok(e) => e,
-                                Err(e) => return ControlFlow::Break(e),
+                                Err(e) => return ControlFlow::Break(e.attach(ctx!("graph - match edge pattern"))),
                             };
 
                         let old_edge_type = match self.edge_to_type_index.get(&old_edge) {
@@ -47,7 +49,7 @@ impl Graph {
                                     message: "missing type for edge in edge_to_type_index"
                                         .to_string(),
                                     context: Some("match edge pattern".to_string()),
-                                })
+                                }.into())
                             }
                         };
 
@@ -57,7 +59,7 @@ impl Graph {
                         if let Some(cf) =
                             Self::match_endpoints(start.clone(), end.clone(), old_edge, new_match.clone())
                         {
-                            return cf;
+                            return cf.map_break(|e| e.attach(ctx!("graph - match edge pattern")));
                         }
 
                         // Check if its type satisfies the type schema
@@ -71,7 +73,7 @@ impl Graph {
                                     Some(m) => m,
                                     None => return ControlFlow::Continue(()),
                                 },
-                                Err(e) => return ControlFlow::Break(e),
+                                Err(e) => return ControlFlow::Break(e.attach(ctx!("graph - match edge pattern"))),
                             }
                         }
 
@@ -86,7 +88,7 @@ impl Graph {
                                     Some(m) => m,
                                     None => return ControlFlow::Continue(()),
                                 },
-                                Err(e) => return ControlFlow::Break(e),
+                                Err(e) => return ControlFlow::Break(e.attach(ctx!("graph - match edge pattern"))),
                             }
                         }
 
@@ -97,7 +99,7 @@ impl Graph {
                             {
                                 Ok(true) => (),
                                 Ok(false) => return ControlFlow::Continue(()),
-                                Err(e) => return ControlFlow::Break(e),
+                                Err(e) => return ControlFlow::Break(e.attach(ctx!("graph - match edge pattern"))),
                             }
                         }
 
@@ -118,7 +120,7 @@ impl Graph {
                     let possible_types = match self.match_type_schema(type_schema, matches.clone())
                     {
                         Ok(m) => m,
-                        Err(e) => return ControlFlow::Break(e),
+                        Err(e) => return ControlFlow::Break(e.attach(ctx!("graph - match edge pattern"))),
                     };
 
                     return possible_types.par_iter().try_for_each(|entry| {
@@ -139,7 +141,7 @@ impl Graph {
                             edge,
                             new_match.clone(),
                         ) {
-                            return cf;
+                            return cf.map_break(|e| e.attach(ctx!("graph - match edge pattern")));
                         }
 
                         // Check if its term satisfies the term schema
@@ -153,7 +155,7 @@ impl Graph {
                                     Some(m) => m,
                                     None => return ControlFlow::Continue(()),
                                 },
-                                Err(e) => return ControlFlow::Break(e),
+                                Err(e) => return ControlFlow::Break(e.attach(ctx!("graph - match edge pattern"))),
                             }
                         }
 
@@ -164,14 +166,14 @@ impl Graph {
                             {
                                 Ok(true) => (),
                                 Ok(false) => return ControlFlow::Continue(()),
-                                Err(e) => return ControlFlow::Break(e),
+                                Err(e) => return ControlFlow::Break(e.attach(ctx!("graph - match edge pattern"))),
                             }
                         }
 
                         // Insert edge to the match if var is specified
                         if let Some(ref var) = pattern.variable {
                             if let Err(e) = new_match.insert(var, MatchElement::Edge(edge)) {
-                                return ControlFlow::Break(e);
+                                return ControlFlow::Break(e.attach(ctx!("graph - match edge pattern")));
                             }
                         }
 
@@ -190,7 +192,7 @@ impl Graph {
 
                     let possible_terms = match self.match_term_schema(term_schema, matches) {
                         Ok(m) => m,
-                        Err(e) => return ControlFlow::Break(e),
+                        Err(e) => return ControlFlow::Break(e.attach(ctx!("graph - match edge pattern"))),
                     };
 
                     return possible_terms.par_iter().try_for_each(|entry| {
@@ -221,14 +223,14 @@ impl Graph {
                             {
                                 Ok(true) => (),
                                 Ok(false) => return ControlFlow::Continue(()),
-                                Err(e) => return ControlFlow::Break(e),
+                                Err(e) => return ControlFlow::Break(e.attach(ctx!("graph - match edge pattern"))),
                             }
                         }
 
                         // Insert edge to the match if var is specified
                         if let Some(ref var) = pattern.variable {
                             if let Err(e) = new_match.insert(var, MatchElement::Edge(edge)) {
-                                return  ControlFlow::Break(e);
+                                return  ControlFlow::Break(e.attach(ctx!("graph - match edge pattern")));
                             }
                         }
 
@@ -242,7 +244,7 @@ impl Graph {
                 let start_node = if let Some(ref start) = start {
                     match self.get_node_uid(start, r#match.clone()) {
                         Ok(n) => n,
-                        Err(e) => return ControlFlow::Break(e),
+                        Err(e) => return ControlFlow::Break(e.attach(ctx!("graph - match edge pattern"))),
                     }
                 } else {
                     None
@@ -251,7 +253,7 @@ impl Graph {
                 let end_node = if let Some(ref start) = start {
                     match self.get_node_uid(start, r#match.clone()) {
                         Ok(n) => n,
-                        Err(e) => return ControlFlow::Break(e),
+                        Err(e) => return ControlFlow::Break(e.attach(ctx!("graph - match edge pattern"))),
                     }
                 } else {
                     None
@@ -272,13 +274,13 @@ impl Graph {
                                         {
                                             Ok(true) => (),
                                             Ok(false) => return ControlFlow::Continue(()),
-                                            Err(e) => return ControlFlow::Break(e),
+                                            Err(e) => return ControlFlow::Break(e.attach(ctx!("graph - match edge pattern"))),
                                         }
                                     }
 
                         if let Some(ref var) = pattern.variable {
                             if let Err(e) = new_match.insert(var, MatchElement::Edge((start_node, end_node))) {
-                                return ControlFlow::Break(e);
+                                return ControlFlow::Break(e.attach(ctx!("graph - match edge pattern")));
                             }
                         }
 
@@ -301,7 +303,7 @@ impl Graph {
                                 {
                                     Ok(true) => (),
                                     Ok(false) => return ControlFlow::Continue(()),
-                                    Err(e) => return ControlFlow::Break(e),
+                                    Err(e) => return ControlFlow::Break(e.attach(ctx!("graph - match edge pattern"))),
                                 }
                             }
 
@@ -309,20 +311,20 @@ impl Graph {
 
                             if let Some(ref end) = end {
                                 if let Err(e) = new_match.insert(end, MatchElement::Node(edge.1)) {
-                                    return  ControlFlow::Break(e);
+                                    return  ControlFlow::Break(e.attach(ctx!("graph - match edge pattern")));
                                 }
                             }
 
                             if let Some(ref var) = pattern.variable {
                                 if let Err(e) = new_match.insert(var, MatchElement::Edge(edge)) {
-                                    return ControlFlow::Break(e);
+                                    return ControlFlow::Break(e.attach(ctx!("graph - match edge pattern")));
                                 }
                             }
 
                             let edge_type =
                                 match self.edge_to_type_index.get(&edge) {
                                     Some(res) => *res.value(),
-                                    None => return ControlFlow::Break(ImplicaError::IndexCorruption { message: "edge belongs to some key in start_to_edge_index but does not appear in edge_to_type_index".to_string(), context: Some("match edge pattern".to_string()) }),
+                                    None => return ControlFlow::Break(ImplicaError::IndexCorruption { message: "edge belongs to some key in start_to_edge_index but does not appear in edge_to_type_index".to_string(), context: Some("match edge pattern".to_string()) }.into()),
                                 };
 
                             out_map.insert(next_match_id(), (edge_type, new_match));
@@ -346,7 +348,7 @@ impl Graph {
                                 {
                                     Ok(true) => (),
                                     Ok(false) => return ControlFlow::Continue(()),
-                                    Err(e) => return ControlFlow::Break(e),
+                                    Err(e) => return ControlFlow::Break(e.attach(ctx!("graph - match edge pattern"))),
                                 }
                             }
 
@@ -354,20 +356,20 @@ impl Graph {
 
                             if let Some(ref start) = start {
                                 if let Err(e) = new_match.insert(start, MatchElement::Node(edge.0)) {
-                                    return ControlFlow::Break(e);
+                                    return ControlFlow::Break(e.attach(ctx!("graph - match edge pattern")));
                                 }
                             }
 
                             if let Some(ref var) = pattern.variable {
                                 if let Err(e) = new_match.insert(var, MatchElement::Edge(edge)) {
-                                    return ControlFlow::Break(e);
+                                    return ControlFlow::Break(e.attach(ctx!("graph - match edge pattern")));
                                 }
                             }
 
                             let edge_type =
                                 match self.edge_to_type_index.get(&edge) {
                                     Some(res) => *res.value(),
-                                    None => return ControlFlow::Break(ImplicaError::IndexCorruption { message: "edge belongs to some key in end_to_edge_index but does not appear in edge_to_type_index".to_string(), context: Some("match edge pattern".to_string()) }),
+                                    None => return ControlFlow::Break(ImplicaError::IndexCorruption { message: "edge belongs to some key in end_to_edge_index but does not appear in edge_to_type_index".to_string(), context: Some("match edge pattern".to_string()) }.into()),
                                 };
 
                             out_map.insert(next_match_id(), (edge_type, new_match));
@@ -385,7 +387,7 @@ impl Graph {
                                 {
                                     Ok(true) => (),
                                     Ok(false) => return ControlFlow::Continue(()),
-                                    Err(e) => return ControlFlow::Break(e),
+                                    Err(e) => return ControlFlow::Break(e.attach(ctx!("graph - match edge pattern"))),
                                 }
                             }
 
@@ -393,24 +395,24 @@ impl Graph {
 
                             if let Some(ref start) = start {
                                 if let Err(e) = new_match.insert(start, MatchElement::Node(edge.0)) {
-                                    return ControlFlow::Break(e);
+                                    return ControlFlow::Break(e.attach(ctx!("graph - match edge pattern")));
                                 }
                             }
                             if let Some(ref end) = end {
                                 if let Err(e) = new_match.insert(end, MatchElement::Node(edge.1)) {
-                                    return ControlFlow::Break(e);
+                                    return ControlFlow::Break(e.attach(ctx!("graph - match edge pattern")));
                                 }
                             }
                             if let Some(ref var) = pattern.variable {
                                 if let Err(e) = new_match.insert(var, MatchElement::Edge(edge)) {
-                                    return ControlFlow::Break(e);
+                                    return ControlFlow::Break(e.attach(ctx!("graph - match edge pattern")));
                                 }
                             }
 
                             let edge_type =
                                 match self.edge_to_type_index.get(&edge) {
                                     Some(res) => *res.value(),
-                                    None => return ControlFlow::Break(ImplicaError::IndexCorruption { message: "edge belongs to some key in end_to_edge_index but does not appear in edge_to_type_index".to_string(), context: Some("match edge pattern".to_string()) }),
+                                    None => return ControlFlow::Break(ImplicaError::IndexCorruption { message: "edge belongs to some key in end_to_edge_index but does not appear in edge_to_type_index".to_string(), context: Some("match edge pattern".to_string()) }.into()),
                                 };
 
                             out_map.insert(next_match_id(), (edge_type, new_match));
@@ -431,13 +433,17 @@ impl Graph {
         end: Option<String>,
         edge: (Uid, Uid),
         r#match: Arc<Match>,
-    ) -> Option<ControlFlow<ImplicaError>> {
+    ) -> Option<ControlFlow<Report<ImplicaError>>> {
         if let Some(ref start) = start {
             if let Some(start_element) = r#match.get(start) {
                 let start_node =
                     match start_element.as_node(start, Some("match edge pattern".to_string())) {
                         Ok(n) => n,
-                        Err(e) => return Some(ControlFlow::Break(e)),
+                        Err(e) => {
+                            return Some(ControlFlow::Break(
+                                e.attach(ctx!("graph - match endpoints")),
+                            ))
+                        }
                     };
 
                 if start_node != edge.0 {
@@ -446,7 +452,11 @@ impl Graph {
             } else {
                 match r#match.insert(start, MatchElement::Node(edge.0)) {
                     Ok(()) => (),
-                    Err(e) => return Some(ControlFlow::Break(e)),
+                    Err(e) => {
+                        return Some(ControlFlow::Break(
+                            e.attach(ctx!("graph - match endpoints")),
+                        ))
+                    }
                 }
             }
         }
@@ -456,7 +466,11 @@ impl Graph {
                 let end_node =
                     match end_element.as_node(end, Some("match edge pattern".to_string())) {
                         Ok(n) => n,
-                        Err(e) => return Some(ControlFlow::Break(e)),
+                        Err(e) => {
+                            return Some(ControlFlow::Break(
+                                e.attach(ctx!("graph - match endpoints")),
+                            ))
+                        }
                     };
 
                 if end_node != edge.1 {
@@ -465,7 +479,11 @@ impl Graph {
             } else {
                 match r#match.insert(end, MatchElement::Node(edge.1)) {
                     Ok(()) => (),
-                    Err(e) => return Some(ControlFlow::Break(e)),
+                    Err(e) => {
+                        return Some(ControlFlow::Break(
+                            e.attach(ctx!("graph - match endpoints")),
+                        ))
+                    }
                 }
             }
         }
@@ -473,11 +491,11 @@ impl Graph {
         None
     }
 
-    fn get_node_uid(&self, var: &str, r#match: Arc<Match>) -> Result<Option<Uid>, ImplicaError> {
+    fn get_node_uid(&self, var: &str, r#match: Arc<Match>) -> ImplicaResult<Option<Uid>> {
         match r#match.get(var) {
             Some(n) => match n.as_node(var, Some("match edge".to_string())) {
                 Ok(n) => Ok(Some(n)),
-                Err(e) => Err(e),
+                Err(e) => Err(e.attach(ctx!("graph - get node uid"))),
             },
             None => Ok(None),
         }

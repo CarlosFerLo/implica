@@ -1,6 +1,9 @@
 use std::fmt::Display;
 
-use crate::errors::ImplicaError;
+use error_stack::ResultExt;
+
+use crate::ctx;
+use crate::errors::{ImplicaError, ImplicaResult};
 use crate::patterns::term_schema::TermSchema;
 use crate::patterns::type_schema::TypeSchema;
 use crate::properties::PropertyMap;
@@ -14,7 +17,7 @@ pub enum CompiledDirection {
 }
 
 impl CompiledDirection {
-    fn from_string(s: &str) -> Result<Self, ImplicaError> {
+    fn from_string(s: &str) -> ImplicaResult<Self> {
         match s {
             "forward" => Ok(CompiledDirection::Forward),
             "backward" => Ok(CompiledDirection::Backward),
@@ -22,7 +25,8 @@ impl CompiledDirection {
             _ => Err(ImplicaError::SchemaValidation {
                 schema: s.to_string(),
                 reason: "Direction must be 'forward', 'backward', or 'any'".to_string(),
-            }),
+            }
+            .into()),
         }
     }
 
@@ -87,12 +91,13 @@ impl EdgePattern {
         term_schema: Option<TermSchema>,
         direction: String,
         properties: Option<PropertyMap>,
-    ) -> Result<Self, ImplicaError> {
+    ) -> ImplicaResult<Self> {
         if let Some(ref var) = variable {
-            validate_variable_name(var)?;
+            validate_variable_name(var).attach(ctx!("edge pattern - new"))?;
         }
 
-        let compiled_direction = CompiledDirection::from_string(&direction)?;
+        let compiled_direction =
+            CompiledDirection::from_string(&direction).attach(ctx!("edge pattern - new"))?;
 
         Ok(EdgePattern {
             variable,

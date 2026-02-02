@@ -1,6 +1,9 @@
 use std::fmt::Display;
 
-use crate::errors::ImplicaError;
+use error_stack::ResultExt;
+
+use crate::ctx;
+use crate::errors::ImplicaResult;
 use crate::patterns::term_schema::TermSchema;
 use crate::patterns::type_schema::TypeSchema;
 use crate::properties::PropertyMap;
@@ -51,9 +54,9 @@ impl NodePattern {
         type_schema: Option<TypeSchema>,
         term_schema: Option<TermSchema>,
         properties: Option<PropertyMap>,
-    ) -> Result<Self, ImplicaError> {
+    ) -> ImplicaResult<Self> {
         if let Some(ref var) = variable {
-            validate_variable_name(var)?;
+            validate_variable_name(var).attach(ctx!("node pattern - new"))?;
         }
 
         Ok(NodePattern {

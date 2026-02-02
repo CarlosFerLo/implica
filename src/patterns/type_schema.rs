@@ -1,6 +1,9 @@
 use std::fmt::Display;
 
-use crate::errors::ImplicaError;
+use error_stack::ResultExt;
+
+use crate::ctx;
+use crate::errors::{ImplicaError, ImplicaResult};
 use crate::utils::validate_variable_name;
 
 #[derive(Clone, Debug, PartialEq)]
@@ -31,21 +34,21 @@ impl Display for TypeSchema {
 }
 
 impl TypeSchema {
-    pub fn new(pattern: String) -> Result<Self, ImplicaError> {
-        let compiled = Self::parse_pattern(&pattern)?;
+    pub fn new(pattern: String) -> ImplicaResult<Self> {
+        let compiled = Self::parse_pattern(&pattern).attach(ctx!("type schema - new"))?;
 
         Ok(TypeSchema { pattern, compiled })
     }
 
-    fn parse_pattern(input: &str) -> Result<TypePattern, ImplicaError> {
+    fn parse_pattern(input: &str) -> ImplicaResult<TypePattern> {
         let trimmed = input.trim();
 
-        Self::validate_balanced_parentheses(trimmed)?;
+        Self::validate_balanced_parentheses(trimmed).attach(ctx!("type schema - parse pattern"))?;
 
-        Self::parse_pattern_recursive(trimmed)
+        Self::parse_pattern_recursive(trimmed).attach(ctx!("type schema - parse pattern"))
     }
 
-    fn validate_balanced_parentheses(input: &str) -> Result<(), ImplicaError> {
+    fn validate_balanced_parentheses(input: &str) -> ImplicaResult<()> {
         let mut depth = 0;
 
         for ch in input.chars() {
@@ -58,7 +61,8 @@ impl TypeSchema {
                             schema: input.to_string(),
                             reason: "Unbalanced parentheses: too many closing parentheses"
                                 .to_string(),
-                        });
+                        }
+                        .into());
                     }
                 }
                 _ => {}
@@ -69,13 +73,14 @@ impl TypeSchema {
             return Err(ImplicaError::SchemaValidation {
                 schema: input.to_string(),
                 reason: "Unbalanced parentheses: too many opening parentheses".to_string(),
-            });
+            }
+            .into());
         }
 
         Ok(())
     }
 
-    fn parse_pattern_recursive(input: &str) -> Result<TypePattern, ImplicaError> {
+    fn parse_pattern_recursive(input: &str) -> ImplicaResult<TypePattern> {
         let input = input.trim();
 
         // Empty pattern is invalid
@@ -83,7 +88,8 @@ impl TypeSchema {
             return Err(ImplicaError::SchemaValidation {
                 schema: input.to_string(),
                 reason: "Empty pattern".to_string(),
-            });
+            }
+            .into());
         }
 
         // Wildcard
@@ -97,8 +103,10 @@ impl TypeSchema {
             let left_str = input[..arrow_pos].trim();
             let right_str = input[arrow_pos + 2..].trim();
 
-            let left_pattern = Self::parse_pattern_recursive(left_str)?;
-            let right_pattern = Self::parse_pattern_recursive(right_str)?;
+            let left_pattern = Self::parse_pattern_recursive(left_str)
+                .attach(ctx!("type schema - parse pattern recursive"))?;
+            let right_pattern = Self::parse_pattern_recursive(right_str)
+                .attach(ctx!("type schema - parse pattern recursive"))?;
 
             return Ok(TypePattern::Arrow {
                 left: Box::new(left_pattern),
@@ -117,7 +125,8 @@ impl TypeSchema {
                 let pattern_part = inner[colon_pos + 1..].trim();
 
                 // Parse the inner pattern
-                let inner_pattern = Self::parse_pattern_recursive(pattern_part)?;
+                let inner_pattern = Self::parse_pattern_recursive(pattern_part)
+                    .attach(ctx!("type schema - parse pattern recursive"))?;
 
                 // If name is empty, it's a structural constraint without capture
                 if name_part.is_empty() {
@@ -126,7 +135,8 @@ impl TypeSchema {
 
                 // Otherwise it's a named capture
 
-                validate_variable_name(name_part)?;
+                validate_variable_name(name_part)
+                    .attach(ctx!("type schema - parse pattern recursive"))?;
 
                 return Ok(TypePattern::Capture {
                     name: name_part.to_string(),
@@ -136,7 +146,8 @@ impl TypeSchema {
 
             // No colon found - might be a simple parenthesized expression
             // Remove the parentheses and parse again
-            return Self::parse_pattern_recursive(inner);
+            return Self::parse_pattern_recursive(inner)
+                .attach(ctx!("type schema - parse pattern recursive"));
         }
 
         // If no special syntax, treat as variable name
@@ -145,10 +156,11 @@ impl TypeSchema {
             return Err(ImplicaError::SchemaValidation {
                 schema: input.to_string(),
                 reason: "Empty variable name".to_string(),
-            });
+            }
+            .into());
         }
 
-        validate_variable_name(input)?;
+        validate_variable_name(input).attach(ctx!("type schema - parse pattern recursive"))?;
         Ok(TypePattern::Variable(input.to_string()))
     }
 }

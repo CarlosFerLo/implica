@@ -3,12 +3,14 @@ use std::fmt::Display;
 use std::ops::ControlFlow;
 use std::sync::Arc;
 
-use dashmap::DashMap;
+use error_stack::{Report, ResultExt};
 use pyo3::prelude::*;
 use pyo3::types::PyList;
 use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 
-use crate::matches::MatchElement;
+use crate::ctx;
+use crate::errors::{ImplicaResult, IntoPyResult};
+use crate::matches::{default_match_set, MatchElement};
 use crate::properties::PropertyMap;
 use crate::query::references::*;
 use crate::{errors::ImplicaError, graph::Graph, matches::MatchSet, patterns::PathPattern};
@@ -72,22 +74,30 @@ impl Query {
         }
     }
 
-    fn execute_operations(&self) -> Result<MatchSet, ImplicaError> {
-        let mut mset: MatchSet = Arc::new(DashMap::new());
+    fn execute_operations(&self) -> ImplicaResult<MatchSet> {
+        let mut mset: MatchSet = default_match_set();
 
         for op in self.operations.iter() {
             match op {
                 QueryOperation::Create(pattern) => {
-                    mset = self.execute_create(pattern, mset)?;
+                    mset = self
+                        .execute_create(pattern, mset)
+                        .attach(ctx!("query - execute operation"))?;
                 }
                 QueryOperation::Match(pattern) => {
-                    mset = self.execute_match(pattern, mset)?;
+                    mset = self
+                        .execute_match(pattern, mset)
+                        .attach(ctx!("query - execute operation"))?;
                 }
                 QueryOperation::Remove(variables) => {
-                    mset = self.execute_remove(variables, mset)?;
+                    mset = self
+                        .execute_remove(variables, mset)
+                        .attach(ctx!("query - execute operation"))?;
                 }
                 QueryOperation::Set(variable, properties) => {
-                    mset = self.execute_set(variable, properties, mset)?;
+                    mset = self
+                        .execute_set(variable, properties, mset)
+                        .attach(ctx!("query - execute operation"))?;
                 }
             }
         }
@@ -95,27 +105,19 @@ impl Query {
         Ok(mset)
     }
 
-    fn execute_create(
-        &self,
-        pattern: &PathPattern,
-        matches: MatchSet,
-    ) -> Result<MatchSet, ImplicaError> {
-        self.graph.create_path(pattern, matches)
+    fn execute_create(&self, pattern: &PathPattern, matches: MatchSet) -> ImplicaResult<MatchSet> {
+        self.graph
+            .create_path(pattern, matches)
+            .attach(ctx!("query - execute create"))
     }
 
-    fn execute_match(
-        &self,
-        pattern: &PathPattern,
-        matches: MatchSet,
-    ) -> Result<MatchSet, ImplicaError> {
-        self.graph.match_path_pattern(pattern, matches)
+    fn execute_match(&self, pattern: &PathPattern, matches: MatchSet) -> ImplicaResult<MatchSet> {
+        self.graph
+            .match_path_pattern(pattern, matches)
+            .attach(ctx!("query - execute match"))
     }
 
-    fn execute_remove(
-        &self,
-        variables: &[String],
-        matches: MatchSet,
-    ) -> Result<MatchSet, ImplicaError> {
+    fn execute_remove(&self, variables: &[String], matches: MatchSet) -> ImplicaResult<MatchSet> {
         for var in variables.iter() {
             let result = matches.par_iter().try_for_each(|entry| {
                 let (_, r#match) = entry.value().clone();
@@ -130,28 +132,37 @@ impl Query {
                             Ok(_) => ControlFlow::Continue(()),
                             Err(e) => ControlFlow::Break(e),
                         },
-                        MatchElement::Term(_) => ControlFlow::Break(ImplicaError::InvalidQuery {
-                            query: self.to_string(),
-                            reason: "You cannot remove terms from the graph".to_string(),
-                            context: Some("execute remove".to_string()),
-                        }),
-                        MatchElement::Type(_) => ControlFlow::Break(ImplicaError::InvalidQuery {
-                            query: self.to_string(),
-                            reason: "You cannot remove types from the graph".to_string(),
-                            context: Some("execute remove".to_string()),
-                        }),
+                        MatchElement::Term(_) => ControlFlow::Break(
+                            ImplicaError::InvalidQuery {
+                                query: self.to_string(),
+                                reason: "You cannot remove terms from the graph".to_string(),
+                                context: Some("execute remove".to_string()),
+                            }
+                            .into(),
+                        ),
+                        MatchElement::Type(_) => ControlFlow::Break(
+                            ImplicaError::InvalidQuery {
+                                query: self.to_string(),
+                                reason: "You cannot remove types from the graph".to_string(),
+                                context: Some("execute remove".to_string()),
+                            }
+                            .into(),
+                        ),
                     }
                 } else {
-                    ControlFlow::Break(ImplicaError::VariableNotFound {
-                        name: var.clone(),
-                        context: Some("execute remove".to_string()),
-                    })
+                    ControlFlow::Break(
+                        ImplicaError::VariableNotFound {
+                            name: var.clone(),
+                            context: Some("execute remove".to_string()),
+                        }
+                        .into(),
+                    )
                 }
             });
 
             match result {
                 ControlFlow::Continue(()) => (),
-                ControlFlow::Break(e) => return Err(e),
+                ControlFlow::Break(e) => return Err(e.attach(ctx!("query - execute remove"))),
             }
         }
 
@@ -163,8 +174,8 @@ impl Query {
         variable: &str,
         properties: &PropertyMap,
         matches: MatchSet,
-    ) -> Result<MatchSet, ImplicaError> {
-        let result = matches.par_iter().try_for_each(|entry| {
+    ) -> ImplicaResult<MatchSet> {
+        let result: ControlFlow<Report<ImplicaError>> = matches.par_iter().try_for_each(|entry| {
             let (_, r#match) = entry.value().clone();
 
             if let Some(element) = r#match.get(variable) {
@@ -183,26 +194,29 @@ impl Query {
                             "You cannot set the properties of a type, types do not have properties"
                                 .to_string(),
                         context: Some("execute set".to_string()),
-                    }),
+                    }.into()),
                     MatchElement::Term(_) => ControlFlow::Break(ImplicaError::InvalidQuery {
                         query: self.to_string(),
                         reason:
                             "You cannot set the properties of a type, types do not have properties"
                                 .to_string(),
                         context: Some("execute set".to_string()),
-                    }),
+                    }.into()),
                 }
             } else {
-                ControlFlow::Break(ImplicaError::VariableNotFound {
-                    name: variable.to_string(),
-                    context: Some("execute set".to_string()),
-                })
+                ControlFlow::Break(
+                    ImplicaError::VariableNotFound {
+                        name: variable.to_string(),
+                        context: Some("execute set".to_string()),
+                    }
+                    .into(),
+                )
             }
         });
 
         match result {
             ControlFlow::Continue(()) => Ok(matches),
-            ControlFlow::Break(e) => Err(e),
+            ControlFlow::Break(e) => Err(e.attach(ctx!("query - execute set"))),
         }
     }
 }
@@ -210,7 +224,9 @@ impl Query {
 #[pymethods]
 impl Query {
     pub fn create(&mut self, pattern: String) -> PyResult<Query> {
-        let path_pattern = PathPattern::new(pattern)?;
+        let path_pattern = PathPattern::new(pattern)
+            .attach(ctx!("query - create"))
+            .into_py_result()?;
 
         self.operations.push(QueryOperation::Create(path_pattern));
 
@@ -218,7 +234,9 @@ impl Query {
     }
 
     pub fn r#match(&mut self, pattern: String) -> PyResult<Query> {
-        let path_pattern = PathPattern::new(pattern)?;
+        let path_pattern = PathPattern::new(pattern)
+            .attach(ctx!("query - match"))
+            .into_py_result()?;
         self.operations.push(QueryOperation::Match(path_pattern));
         Ok(self.clone())
     }
@@ -230,14 +248,18 @@ impl Query {
     }
 
     pub fn set(&mut self, variable: String, properties: &Bound<PyAny>) -> PyResult<Query> {
-        let map = PropertyMap::new(properties)?;
+        let map = PropertyMap::new(properties)
+            .attach(ctx!("query - set"))
+            .into_py_result()?;
 
         self.operations.push(QueryOperation::Set(variable, map));
         Ok(self.clone())
     }
 
     pub fn execute(&mut self) -> PyResult<()> {
-        self.execute_operations()?;
+        self.execute_operations()
+            .attach(ctx!("query - execute"))
+            .into_py_result()?;
         Ok(())
     }
 
@@ -247,7 +269,10 @@ impl Query {
         py: Python<'py>,
         variables: Vec<String>,
     ) -> PyResult<Bound<'py, PyList>> {
-        let mset = self.execute_operations()?;
+        let mset = self
+            .execute_operations()
+            .attach(ctx!("query - return"))
+            .into_py_result()?;
 
         let results: Vec<HashMap<String, Reference>> = mset
             .par_iter()
@@ -277,21 +302,27 @@ impl Query {
                     } else {
                         return Err(ImplicaError::VariableNotFound {
                             name: v.clone(),
-                            context: Some("query return - data collection".to_string()),
-                        });
+                            context: Some(ctx!("query return - data collection").to_string()),
+                        }
+                        .into());
                     }
                 }
 
                 Ok(map)
             })
-            .collect::<Result<Vec<_>, ImplicaError>>()?;
+            .collect::<ImplicaResult<Vec<_>>>()
+            .into_py_result()?;
 
         let py_results = PyList::empty(py);
 
         for map in results {
-            py_results.append(map.into_pyobject(py)?)?;
+            py_results.append(map.into_pyobject(py)?)?; // TODO: attach something here
         }
 
         Ok(py_results)
+    }
+
+    pub fn __str__(&self) -> String {
+        self.to_string()
     }
 }
