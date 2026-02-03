@@ -14,6 +14,14 @@ pub struct NodeRef {
     uid: Uid,
 }
 
+impl PartialEq for NodeRef {
+    fn eq(&self, other: &Self) -> bool {
+        self.uid == other.uid
+    }
+}
+
+impl Eq for NodeRef {}
+
 impl NodeRef {
     pub fn new(graph: Arc<Graph>, uid: Uid) -> Self {
         NodeRef { graph, uid }
@@ -41,5 +49,9 @@ impl NodeRef {
             .node_to_string(&self.uid)
             .attach("node reference - to string")
             .into_py_result()
+    }
+
+    pub fn __eq__(&self, other: &Self) -> bool {
+        self == other
     }
 }

@@ -161,7 +161,8 @@ fn format_report(report: &Report<ImplicaError>) -> String {
     let mut message = report.current_context().to_string();
     for frame in report.frames() {
         if let Some(printable) = frame.downcast_ref::<String>() {
-            message.push_str(&format!("\n → {}", printable));
+            message.push_str("\n → ");
+            message.push_str(printable);
         }
     }
     message

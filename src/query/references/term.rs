@@ -15,6 +15,14 @@ pub struct TermRef {
     uid: Uid,
 }
 
+impl PartialEq for TermRef {
+    fn eq(&self, other: &Self) -> bool {
+        self.uid == other.uid
+    }
+}
+
+impl Eq for TermRef {}
+
 impl TermRef {
     pub fn new(graph: Arc<Graph>, uid: Uid) -> Self {
         TermRef { graph, uid }
@@ -32,5 +40,9 @@ impl TermRef {
             .term_to_string(&self.uid)
             .attach(ctx!("term reference - to string"))
             .into_py_result()
+    }
+
+    pub fn __eq__(&self, other: &Self) -> bool {
+        self == other
     }
 }

@@ -2,7 +2,7 @@ use crate::query::references::{EdgeRef, NodeRef, TermRef, TypeRef};
 use pyo3::prelude::*;
 use pyo3::IntoPyObject;
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum Reference {
     Edge(EdgeRef),
     Node(NodeRef),

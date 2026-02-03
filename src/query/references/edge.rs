@@ -15,6 +15,13 @@ pub struct EdgeRef {
     uid: (Uid, Uid),
 }
 
+impl PartialEq for EdgeRef {
+    fn eq(&self, other: &Self) -> bool {
+        self.uid == other.uid
+    }
+}
+impl Eq for EdgeRef {}
+
 impl EdgeRef {
     pub fn new(graph: Arc<Graph>, uid: (Uid, Uid)) -> Self {
         EdgeRef { graph, uid }
@@ -41,5 +48,9 @@ impl EdgeRef {
             .edge_to_string(&self.uid)
             .attach(ctx!("edge reference - to string"))
             .into_py_result()
+    }
+
+    pub fn __eq__(&self, other: &Self) -> bool {
+        self == other
     }
 }

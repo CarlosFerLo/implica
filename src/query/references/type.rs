@@ -17,6 +17,14 @@ pub struct TypeRef {
     uid: Uid,
 }
 
+impl PartialEq for TypeRef {
+    fn eq(&self, other: &Self) -> bool {
+        self.uid == other.uid
+    }
+}
+
+impl Eq for TypeRef {}
+
 impl TypeRef {
     pub fn new(graph: Arc<Graph>, uid: Uid) -> Self {
         TypeRef { graph, uid }
@@ -34,5 +42,9 @@ impl TypeRef {
             .type_to_string(&self.uid)
             .attach(ctx!("type reference - to string"))
             .into_py_result()
+    }
+
+    pub fn __eq__(&self, other: &Self) -> bool {
+        self == other
     }
 }
