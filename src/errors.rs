@@ -104,6 +104,19 @@ pub enum ImplicaError {
         reason: String,
         context: Option<String>,
     },
+
+    #[error("Invalid Number of Arguments: expected {expected}, got {got}{}", context.as_ref().map(|c| format!(" ({})", c)).unwrap_or_default())]
+    InvalidNumberOfArguments {
+        expected: usize,
+        got: usize,
+        context: Option<String>,
+    },
+
+    #[error("Constant Not Found: '{name}'{}",context.as_ref().map(|c| format!(" ({})", c)).unwrap_or_default())]
+    ConstantNotFound {
+        name: String,
+        context: Option<String>,
+    },
 }
 
 pub type ImplicaResult<T> = Result<T, Report<ImplicaError>>;
@@ -128,7 +141,8 @@ impl<T> IntoPyResult<T> for ImplicaResult<T> {
                 | ImplicaError::InvalidIdentifier { .. }
                 | ImplicaError::InvalidTerm { .. }
                 | ImplicaError::SchemaValidation { .. }
-                | ImplicaError::ContextConflict { .. } => {
+                | ImplicaError::ContextConflict { .. }
+                | ImplicaError::InvalidNumberOfArguments { .. } => {
                     exceptions::PyValueError::new_err(full_message)
                 }
                 ImplicaError::VariableAlreadyExists { .. }
@@ -136,7 +150,8 @@ impl<T> IntoPyResult<T> for ImplicaResult<T> {
                 | ImplicaError::NodeNotFound { .. }
                 | ImplicaError::EdgeNotFound { .. }
                 | ImplicaError::TypeNotFound { .. }
-                | ImplicaError::TermNotFound { .. } => {
+                | ImplicaError::TermNotFound { .. }
+                | ImplicaError::ConstantNotFound { .. } => {
                     exceptions::PyKeyError::new_err(full_message)
                 }
                 ImplicaError::PythonError { .. }

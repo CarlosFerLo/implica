@@ -2,14 +2,16 @@ use error_stack::ResultExt;
 use pyo3::prelude::*;
 use rayon::iter::IntoParallelRefIterator;
 use sha2::{Digest, Sha256};
+use std::iter::zip;
 use std::sync::Arc;
 
 use dashmap::{DashMap, DashSet};
 use rayon::prelude::*;
 
+use crate::constants::Constant;
 use crate::ctx;
 use crate::errors::{ImplicaError, ImplicaResult};
-use crate::matches::Match;
+use crate::matches::{Match, MatchElement};
 use crate::patterns::{TermPattern, TermSchema, TypePattern, TypeSchema};
 use crate::properties::PropertyMap;
 use crate::query::Query;
@@ -81,16 +83,18 @@ pub struct Graph {
 
     start_to_edge_index: Arc<DashMap<Uid, EdgeSet>>,
     end_to_edge_index: Arc<DashMap<Uid, EdgeSet>>,
+
+    constants: Arc<DashMap<String, Constant>>,
 }
 
 impl Default for Graph {
     fn default() -> Self {
-        Self::new()
+        Self::new(Vec::new())
     }
 }
 
 impl Graph {
-    pub(crate) fn new() -> Self {
+    pub(crate) fn new(constants: Vec<Constant>) -> Self {
         Graph {
             nodes: Arc::new(DashMap::new()),
             edges: Arc::new(DashMap::new()),
@@ -100,6 +104,12 @@ impl Graph {
             edge_to_type_index: Arc::new(DashMap::new()),
             start_to_edge_index: Arc::new(DashMap::new()),
             end_to_edge_index: Arc::new(DashMap::new()),
+            constants: Arc::new(
+                constants
+                    .iter()
+                    .map(|c| (c.name.clone(), c.clone()))
+                    .collect(),
+            ),
         }
     }
 
@@ -494,8 +504,26 @@ impl Graph {
                     .into())
                 }
             }
-            TermPattern::Constant { name: _, args: _ } => {
-                todo!("Constants are not implemented yet!")
+            TermPattern::Constant { name, args } => {
+                let constant = match self.constants.get(name) {
+                    Some(c) => c.value().clone(),
+                    None => {
+                        return Err(ImplicaError::ConstantNotFound {
+                            name: name.clone(),
+                            context: Some(ctx!("pattern to term recursive")),
+                        }
+                        .into())
+                    }
+                };
+
+                let constant_type = self
+                    .get_constant_type(&constant, args, r#match)
+                    .attach(ctx!("pattern to term recursive"))?;
+
+                Ok(Term::Basic(BasicTerm {
+                    name: constant.name.clone(),
+                    r#type: Arc::new(constant_type),
+                }))
             }
         }
     }
@@ -531,6 +559,40 @@ impl Graph {
             }
             .into())
         }
+    }
+
+    fn get_constant_type(
+        &self,
+        constant: &Constant,
+        args: &[TypeSchema],
+        r#match: Arc<Match>,
+    ) -> ImplicaResult<Type> {
+        if args.len() != constant.free_variables.len() {
+            return Err(ImplicaError::InvalidNumberOfArguments {
+                expected: constant.free_variables.len(),
+                got: args.len(),
+                context: Some(ctx!("get constant type")),
+            }
+            .into());
+        }
+
+        let args_uid = args
+            .par_iter()
+            .map(|t| {
+                let arg_type = self.type_schema_to_type(t, r#match.clone())?;
+                Ok(self.insert_type(&arg_type))
+            })
+            .collect::<ImplicaResult<Vec<_>>>()
+            .attach(ctx!("get constant type"))?;
+
+        let m = Match::new(None);
+        for (var, uid) in zip(constant.free_variables.iter(), args_uid) {
+            m.insert(var, MatchElement::Type(uid))
+                .attach(ctx!("get constant type"))?;
+        }
+
+        self.type_schema_to_type(&constant.type_schema, Arc::new(m))
+            .attach(ctx!("get constant type"))
     }
 }
 
@@ -673,15 +735,18 @@ pub struct PyGraph {
 
 impl Default for PyGraph {
     fn default() -> Self {
-        Self::new()
+        Self::new(None)
     }
 }
 
 #[pymethods]
 impl PyGraph {
     #[new]
-    pub fn new() -> Self {
-        let graph = Graph::new();
+    #[pyo3(signature=(constants=None))]
+    pub fn new(constants: Option<Vec<Constant>>) -> Self {
+        let constants = constants.unwrap_or_default();
+
+        let graph = Graph::new(constants);
 
         PyGraph {
             graph: Arc::new(graph),

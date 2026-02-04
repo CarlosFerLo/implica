@@ -4,9 +4,10 @@ use error_stack::ResultExt;
 
 use crate::ctx;
 use crate::errors::{ImplicaError, ImplicaResult};
+use crate::patterns::TypeSchema;
 use crate::utils::validate_variable_name;
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug)]
 pub enum TermPattern {
     Wildcard,
     Variable(String),
@@ -16,7 +17,7 @@ pub enum TermPattern {
     },
     Constant {
         name: String,
-        args: Vec<String>,
+        args: Vec<TypeSchema>,
     },
 }
 
@@ -161,6 +162,10 @@ impl TermSchema {
             Vec::new()
         } else {
             Self::split_type_arguments(args_str)
+                .attach(ctx!("term pattern - parse constant pattern"))?
+                .iter()
+                .map(|p| TypeSchema::new(p.clone()))
+                .collect::<ImplicaResult<Vec<_>>>()
                 .attach(ctx!("term pattern - parse constant pattern"))?
         };
 

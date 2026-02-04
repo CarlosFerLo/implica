@@ -1,5 +1,6 @@
 use pyo3::prelude::*;
 
+mod constants;
 mod errors;
 mod graph;
 mod macros;
@@ -10,6 +11,7 @@ mod query;
 mod typing;
 mod utils;
 
+pub use constants::Constant;
 pub use graph::PyGraph;
 pub use query::references::*;
 pub use query::Query;
@@ -24,6 +26,8 @@ fn implica(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<NodeRef>()?;
     m.add_class::<TermRef>()?;
     m.add_class::<TypeRef>()?;
+
+    m.add_class::<Constant>()?;
 
     Ok(())
 }

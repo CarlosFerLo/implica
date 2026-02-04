@@ -15,6 +15,7 @@ use crate::properties::PropertyMap;
 use crate::typing::{Arrow, Term, Type};
 use crate::utils::{DataQueue, QueueItem};
 
+#[derive(Debug)]
 struct NodeData {
     variable: Option<String>,
     r#type: Option<Type>,
@@ -39,6 +40,7 @@ impl NodeData {
     }
 }
 
+#[derive(Debug)]
 struct EdgeData {
     variable: Option<String>,
     direction: CompiledDirection,

@@ -1,4 +1,5 @@
 use error_stack::ResultExt;
+use std::iter::zip;
 use std::ops::ControlFlow;
 use std::sync::Arc;
 
@@ -94,7 +95,58 @@ impl Graph {
                     }
                     _ => Ok(None),
                 },
-                TermPattern::Constant { .. } => todo!("constants not supported yet"),
+                TermPattern::Constant { name, args } => {
+                    let constant = match self.constants.get(name) {
+                        Some(c) => c.value().clone(),
+                        None => {
+                            return Err(ImplicaError::ConstantNotFound {
+                                name: name.clone(),
+                                context: Some(ctx!("check term matches")),
+                            }
+                            .into())
+                        }
+                    };
+
+                    match term_row.value() {
+                        TermRep::Base(var) => {
+                            if var != name {
+                                return Ok(None);
+                            }
+
+                            let const_match = match self
+                                .check_type_matches(
+                                    term_uid,
+                                    &constant.type_schema.compiled,
+                                    Arc::new(Match::new(None)),
+                                )
+                                .attach(ctx!("check term matches"))?
+                            {
+                                Some(m) => m,
+                                None => return Ok(None),
+                            };
+
+                            let mut new_match = Arc::new(Match::new(Some(r#match)));
+
+                            for (v, arg) in zip(constant.free_variables.iter(), args) {
+                                if let Some(element) = const_match.get(v) {
+                                    let matched_type =
+                                        element.as_type(v, Some(ctx!("check term matches")))?;
+
+                                    new_match = match self
+                                        .check_type_matches(&matched_type, &arg.compiled, new_match)
+                                        .attach(ctx!("check term matches"))?
+                                    {
+                                        Some(m) => m,
+                                        None => return Ok(None),
+                                    };
+                                }
+                            }
+
+                            Ok(Some(new_match))
+                        }
+                        TermRep::Application(..) => Ok(None),
+                    }
+                }
             }
         } else {
             Err(ImplicaError::TermNotFound {
