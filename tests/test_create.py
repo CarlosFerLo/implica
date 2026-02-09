@@ -244,3 +244,38 @@ class TestCreateEdgeQuery:
         edges = graph.edges()
         assert len(edges) == 1
         assert str(edges[0]) == "Edge((A -> B):f {})"
+
+    def test_create_query_with_more_than_one_edge(self):
+        graph = implica.Graph(
+            constants=[implica.Constant("f", "A -> B"), implica.Constant("g", "B -> C")]
+        )
+
+        graph.query().create("()-[::@f()]->()-[::@g()]->()").execute()
+
+        nodes = graph.nodes()
+        assert len(nodes) == 3
+        assert {str(n) for n in nodes} == {"Node(A: {})", "Node(B: {})", "Node(C: {})"}
+
+        edges = graph.edges()
+        assert len(edges) == 2
+        assert {str(e) for e in edges} == {"Edge((A -> B):f {})", "Edge((B -> C):g {})"}
+
+
+class TestCreateInference:
+    def test_create_infers_term_for_node_if_constant_of_that_type_exists(self):
+        graph = implica.Graph(constants=[implica.Constant("f", "A")])
+
+        graph.query().create("(:A)").execute()
+
+        nodes = graph.nodes()
+        assert len(nodes) == 1
+        assert str(nodes[0]) == "Node(A:f {})"
+
+    def test_create_infers_term_for_edge_if_constant_of_that_type_exists(self):
+        graph = implica.Graph(constants=[implica.Constant("f", "A -> B")])
+
+        graph.query().create("(:A)-[]->(:B)").execute()
+
+        edges = graph.edges()
+        assert len(edges) == 1
+        assert str(edges[0]) == "Edge((A -> B):f {})"

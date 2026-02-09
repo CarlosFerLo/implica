@@ -743,6 +743,33 @@ impl Graph {
     }
 }
 
+impl Graph {
+    fn infer_term(&self, r#type: Uid) -> ImplicaResult<Option<Term>> {
+        for entry in self.constants.iter() {
+            let constant = entry.value();
+
+            if self
+                .check_type_matches(
+                    &r#type,
+                    &constant.type_schema.compiled,
+                    Arc::new(Match::new(None)),
+                )
+                .attach(ctx!("graph - infer term"))?
+                .is_some()
+            {
+                let term_type = self
+                    .type_from_uid(&r#type)
+                    .attach(ctx!("graph - infer term"))?;
+                return Ok(Some(Term::Basic(
+                    BasicTerm::new(constant.name.clone(), Arc::new(term_type))
+                        .attach(ctx!("graph - infer term"))?,
+                )));
+            }
+        }
+        Ok(None)
+    }
+}
+
 #[pyclass(name = "Graph")]
 #[derive(Debug, Clone)]
 pub struct PyGraph {

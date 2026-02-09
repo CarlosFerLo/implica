@@ -272,6 +272,22 @@ impl Graph {
                         }
                     }
 
+                    // Update based on Constant Matching
+
+                    if node_data.term.is_none() && term_update.is_none() {
+
+                        if let Some(r#type) = node_data.r#type.as_ref().or(type_update.as_ref()) {
+
+                            let type_uid = self.insert_type(r#type);                                
+
+                            term_update = match self
+                            .infer_term(type_uid){
+                                Ok(t) => t,
+                                Err(e) => return ControlFlow::Break(e.attach(ctx!("graph - create path")))
+                            };
+                        }
+                    }
+
                     // Update based on left edge
                     if item.index > 0 {
                         let left_edge_data = match edges_data.get(item.index - 1) {
@@ -673,6 +689,22 @@ impl Graph {
                                     }
                                 }
                             }
+                        }
+                    }
+
+                    // Update by Constant Matching
+
+                    if edge_data.term.is_none() && term_update.is_none() {
+                        if let Some(r#type) = edge_data.r#type.as_ref().or(type_update.as_ref()) {
+
+                            let type_uid = self.insert_type(r#type);
+
+                            term_update = match self
+                            .infer_term(type_uid) {
+                                Ok(t) => t,
+                                Err(e) => return ControlFlow::Break(e.attach(ctx!("graph - create node")))
+                            };
+
                         }
                     }
 
