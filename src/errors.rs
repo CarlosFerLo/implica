@@ -65,16 +65,18 @@ pub enum ImplicaError {
         uid: (Uid, Uid),
         context: Option<String>,
     },
-    #[error("Variable already exists: '{name}'{}", context.as_ref().map(|c| format!(" ({})", c)).unwrap_or_default())]
-    VariableAlreadyExists {
-        name: String,
-        context: Option<String>,
-    },
     #[error("Variable not found: '{name}'{}", context.as_ref().map(|c| format!(" ({})", c)).unwrap_or_default())]
     VariableNotFound {
         name: String,
         context: Option<String>,
     },
+    #[error("Variable already exists: '{name}'{}", context.as_ref().map(|c| format!(" ({})", c)).unwrap_or_default())]
+    VariableAlreadyExists {
+        name: String,
+        context: Option<String>,
+    },
+    #[error("Node Already Exists: '{}'{}", hex::encode(.uid), context.as_ref().map(|c| format!(" ({})", c)).unwrap_or_default())]
+    NodeAlreadyExists { uid: Uid, context: Option<String> },
     #[error("Context Conflict: tried to assign variable '{name}' currently holding a '{original}' to a '{new}'{}", context.as_ref().map(|c| format!(" ({})", c)).unwrap_or_default())]
     ContextConflict {
         name: String,
@@ -146,6 +148,7 @@ impl<T> IntoPyResult<T> for ImplicaResult<T> {
                     exceptions::PyValueError::new_err(full_message)
                 }
                 ImplicaError::VariableAlreadyExists { .. }
+                | ImplicaError::NodeAlreadyExists { .. }
                 | ImplicaError::VariableNotFound { .. }
                 | ImplicaError::NodeNotFound { .. }
                 | ImplicaError::EdgeNotFound { .. }

@@ -118,11 +118,27 @@ impl Graph {
         r#type: Type,
         term: Option<Term>,
         properties: PropertyMap,
-    ) -> Uid {
+    ) -> ImplicaResult<Uid> {
         let type_uid = self.insert_type(&r#type);
 
         if let Some(term) = term {
-            self.insert_term(&term);
+            let term_uid = self.insert_term(&term);
+
+            if type_uid != term_uid {
+                return Err(ImplicaError::InvalidTerm {
+                    reason: "term provided is of a different type than the type provided"
+                        .to_string(),
+                }
+                .into());
+            }
+        }
+
+        if self.nodes.contains_key(&type_uid) {
+            return Err(ImplicaError::NodeAlreadyExists {
+                uid: type_uid,
+                context: Some(ctx!("graph - add node")),
+            }
+            .into());
         }
 
         self.nodes.insert(type_uid, properties);
@@ -131,7 +147,7 @@ impl Graph {
         self.end_to_edge_index
             .insert(type_uid, Arc::new(DashSet::new()));
 
-        type_uid
+        Ok(type_uid)
     }
 
     pub(in crate::graph) fn add_edge(
@@ -648,7 +664,7 @@ impl Graph {
             let props = entry.value();
 
             Ok(format!(
-                "Node({}:{}:{})",
+                "Node({}:{} {})",
                 self.type_to_string(node)
                     .attach(ctx!("graph - node to string"))?,
                 self.term_to_string(node).unwrap_or_else(|_| "".to_string()),
@@ -657,7 +673,7 @@ impl Graph {
         } else {
             Err(ImplicaError::NodeNotFound {
                 uid: *node,
-                context: Some("edge to string".to_string()),
+                context: Some("node to string".to_string()),
             }
             .into())
         }
@@ -673,7 +689,7 @@ impl Graph {
             };
 
             Ok(format!(
-                "Edge({}:{}:{})",
+                "Edge({}:{} {})",
                 self.type_to_string(&edge_type)
                     .attach(ctx!("graph - edge to string"))?,
                 self.term_to_string(&edge_type)

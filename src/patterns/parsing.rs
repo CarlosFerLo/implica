@@ -350,6 +350,16 @@ fn parse_property_value(value_str: &str) -> ImplicaResult<Dynamic> {
         return Ok(Dynamic::UNIT);
     }
 
+    // Try to parse as list/array: [value1, value2, ...]
+    if value_str.starts_with('[') && value_str.ends_with(']') {
+        return parse_list_value(value_str);
+    }
+
+    // Try to parse as dict/object: {key1: value1, key2: value2, ...}
+    if value_str.starts_with('{') && value_str.ends_with('}') {
+        return parse_dict_value(value_str);
+    }
+
     // Try to parse as integer first (to avoid losing precision)
     // This will handle negative numbers too
     if let Ok(int_val) = value_str.parse::<i64>() {
@@ -377,6 +387,168 @@ fn parse_property_value(value_str: &str) -> ImplicaResult<Dynamic> {
             .to_string(),
     }
     .into())
+}
+
+fn parse_list_value(value_str: &str) -> ImplicaResult<Dynamic> {
+    let inner = value_str[1..value_str.len() - 1].trim();
+
+    // Empty list
+    if inner.is_empty() {
+        return Ok(Dynamic::from(rhai::Array::new()));
+    }
+
+    let mut items: rhai::Array = rhai::Array::new();
+    let mut current_item = String::new();
+    let mut in_string = false;
+    let mut string_char = ' ';
+    let mut depth = 0; // Track nested brackets, braces, and parens
+
+    for c in inner.chars() {
+        match c {
+            '"' | '\'' if depth == 0 => {
+                if !in_string {
+                    in_string = true;
+                    string_char = c;
+                } else if c == string_char {
+                    in_string = false;
+                }
+                current_item.push(c);
+            }
+            '[' | '{' | '(' if !in_string => {
+                depth += 1;
+                current_item.push(c);
+            }
+            ']' | '}' | ')' if !in_string => {
+                depth -= 1;
+                current_item.push(c);
+            }
+            ',' if !in_string && depth == 0 => {
+                // End of current item
+                let trimmed = current_item.trim();
+                if !trimmed.is_empty() {
+                    let value = parse_property_value(trimmed).attach(ctx!("parse list value"))?;
+                    items.push(value);
+                }
+                current_item.clear();
+            }
+            _ => {
+                current_item.push(c);
+            }
+        }
+    }
+
+    // Handle the last item
+    let trimmed = current_item.trim();
+    if !trimmed.is_empty() {
+        let value = parse_property_value(trimmed).attach(ctx!("parse list value"))?;
+        items.push(value);
+    }
+
+    Ok(Dynamic::from(items))
+}
+
+fn parse_dict_value(value_str: &str) -> ImplicaResult<Dynamic> {
+    let inner = value_str[1..value_str.len() - 1].trim();
+
+    // Empty dict
+    if inner.is_empty() {
+        return Ok(Dynamic::from(rhai::Map::new()));
+    }
+
+    let mut map: rhai::Map = rhai::Map::new();
+    let mut current_key = String::new();
+    let mut current_value = String::new();
+    let mut in_string = false;
+    let mut string_char = ' ';
+    let mut after_colon = false;
+    let mut depth = 0; // Track nested brackets, braces, and parens
+
+    for c in inner.chars() {
+        match c {
+            '"' | '\'' => {
+                if !in_string {
+                    in_string = true;
+                    string_char = c;
+                } else if c == string_char {
+                    in_string = false;
+                }
+                if after_colon {
+                    current_value.push(c);
+                } else {
+                    current_key.push(c);
+                }
+            }
+            '[' | '{' | '(' if !in_string => {
+                depth += 1;
+                if after_colon {
+                    current_value.push(c);
+                } else {
+                    current_key.push(c);
+                }
+            }
+            ']' | '}' | ')' if !in_string => {
+                depth -= 1;
+                if after_colon {
+                    current_value.push(c);
+                } else {
+                    current_key.push(c);
+                }
+            }
+            ':' if !in_string && depth == 0 && !after_colon => {
+                after_colon = true;
+            }
+            ',' if !in_string && depth == 0 => {
+                // End of current key-value pair
+                let key = extract_dict_key(current_key.trim())?;
+                let value =
+                    parse_property_value(current_value.trim()).attach(ctx!("parse dict value"))?;
+                map.insert(key.into(), value);
+                current_key.clear();
+                current_value.clear();
+                after_colon = false;
+            }
+            _ => {
+                if after_colon {
+                    current_value.push(c);
+                } else {
+                    current_key.push(c);
+                }
+            }
+        }
+    }
+
+    // Handle the last key-value pair
+    let key_trimmed = current_key.trim();
+    if !key_trimmed.is_empty() {
+        let key = extract_dict_key(key_trimmed)?;
+        let value = parse_property_value(current_value.trim()).attach(ctx!("parse dict value"))?;
+        map.insert(key.into(), value);
+    }
+
+    Ok(Dynamic::from(map))
+}
+
+fn extract_dict_key(key_str: &str) -> ImplicaResult<String> {
+    let key_str = key_str.trim();
+
+    // Key can be a quoted string or an unquoted identifier
+    if (key_str.starts_with('"') && key_str.ends_with('"'))
+        || (key_str.starts_with('\'') && key_str.ends_with('\''))
+    {
+        // Quoted key - extract the string content
+        let string_content = &key_str[1..key_str.len() - 1];
+        unescape_string(string_content).attach(ctx!("extract dict key"))
+    } else {
+        // Unquoted key - use as-is (common in JSON-like syntax)
+        if key_str.is_empty() {
+            return Err(ImplicaError::InvalidPattern {
+                pattern: key_str.to_string(),
+                reason: "Empty dictionary key".to_string(),
+            }
+            .into());
+        }
+        Ok(key_str.to_string())
+    }
 }
 
 fn unescape_string(s: &str) -> ImplicaResult<String> {

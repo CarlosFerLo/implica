@@ -299,8 +299,8 @@ impl Graph {
                                 };
 
                                 type_update = match left_edge_data.direction {
-                                    CompiledDirection::Forward => Some((*arrow.left).clone()),
-                                    CompiledDirection::Backward => Some((*arrow.right).clone()),
+                                    CompiledDirection::Forward => Some((*arrow.right).clone()),
+                                    CompiledDirection::Backward => Some((*arrow.left).clone()),
                                     CompiledDirection::Any => {
                                         todo!("the 'any' direction is not supported yet")
                                     }
@@ -377,7 +377,7 @@ impl Graph {
 
                                 type_update = match right_edge_data.direction {
                                     CompiledDirection::Forward => Some((*arrow.left).clone()),
-                                    CompiledDirection::Backward => Some((*arrow.left).clone()),
+                                    CompiledDirection::Backward => Some((*arrow.right).clone()),
                                     CompiledDirection::Any => {
                                         todo!("the 'any' direction is not supported yet.")
                                     }
@@ -430,11 +430,11 @@ impl Graph {
                     if let Some(mut_node_data) = nodes_data.get_mut(item.index) {
                         let mut changed = false;
 
-                        if mut_node_data.r#type.is_none() {
+                        if mut_node_data.r#type.is_none() && type_update.is_some() {
                             mut_node_data.r#type = type_update;
                             changed = true;
                         }
-                        if mut_node_data.term.is_none() {
+                        if mut_node_data.term.is_none() && term_update.is_some() {
                             mut_node_data.term = term_update;
                             changed = true;
                         }
@@ -456,9 +456,11 @@ impl Graph {
                         if changed {
                             if item.index > 0 {
                                 queue.push(QueueItem::new(item.index - 1, false));
+                                queue.push(QueueItem::new(item.index - 1, true));
                             }
                             if item.index < nodes_data.len() - 1 {
                                 queue.push(QueueItem::new(item.index, false));
+                                queue.push(QueueItem::new(item.index + 1, true));
                             }
                         }
                     } else {
@@ -632,9 +634,21 @@ impl Graph {
                         None => return ControlFlow::Break(ImplicaError::IndexOutOfRange { index: item.index + 1, max_len: nodes_data.len(), context: Some("create path - edge data inference - right node".to_string()) }.into())
                     };
 
-                    if edge_data.r#type.is_none() && type_update.is_none() {
-                        if let Some(left_type) = &left_node_data.r#type {
-                            if let Some(right_type) = &right_node_data.r#type {
+                    if let Some(left_type) = &left_node_data.r#type {
+                        if let Some(right_type) = &right_node_data.r#type {
+                            if let Some(edge_type) = edge_data.r#type.as_ref().or(type_update.as_ref()) {
+
+                                    let expected_type = match edge_data.direction {
+                                        CompiledDirection::Forward => Type::Arrow(Arrow::new(Arc::new(left_type.clone()), Arc::new(right_type.clone()))),
+                                        CompiledDirection::Backward => Type::Arrow(Arrow::new(Arc::new(right_type.clone()), Arc::new(left_type.clone()))),
+                                        CompiledDirection::Any => todo!("the 'any' direction is not supported yet.")
+                                    };
+
+                                    if &expected_type != edge_type {
+                                        return ControlFlow::Break(ImplicaError::InvalidType { reason: "inferred type of an edge does not match the actual type of the edge".to_string() }.into());
+                                    }
+
+                            } else {
                                 type_update = match edge_data.direction {
                                     CompiledDirection::Forward => Some(Type::Arrow(Arrow::new(Arc::new(left_type.clone()), Arc::new(right_type.clone())))),
                                     CompiledDirection::Backward => Some(Type::Arrow(Arrow::new(Arc::new(right_type.clone()), Arc::new(left_type.clone())))),
@@ -719,7 +733,16 @@ impl Graph {
             }
 
             for ed in edges_data.iter() {
-                if ed.term.is_none() {
+                if let Some(ref term) = ed.term {
+                    if let Some(ref r#type) = ed.r#type {
+                        let expected_type = term.r#type();
+                        if expected_type.as_ref() != r#type {
+                            return ControlFlow::Break(ImplicaError::InvalidPattern { pattern: pattern.to_string(), reason: "Inferred type for edge does not match the type of the term of the edge".to_string() }.into());
+                        }
+                    } else {
+                        return ControlFlow::Break(ImplicaError::Infallible {  }.into());
+                    }
+                } else {
                     return ControlFlow::Break(ImplicaError::InvalidPattern { pattern: pattern.to_string(), reason: "Unable to infer the term of an edge contained in the pattern".to_string() }.into());
                 }
 
@@ -740,15 +763,29 @@ impl Graph {
                 if let Some(node_var) = &nd.variable {
                     if !new_match.contains_key(node_var) {
 
-                    prev_uid = self.add_node(nd.r#type.unwrap(), nd.term, nd.properties);
+                        prev_uid = match self.add_node(nd.r#type.unwrap(), nd.term, nd.properties) {
+                            Ok(uid) => uid,
+                            Err(e) => {match e.current_context() {
+                                ImplicaError::NodeAlreadyExists { uid, context: _ } => *uid,
+                                _ => return ControlFlow::Break(e.attach(ctx!("graph - create path")))
+                            }}
+                        };
 
-                    match new_match.insert(node_var, MatchElement::Node(prev_uid)) {
-                        Ok(()) => (),
-                        Err(e) => return ControlFlow::Break(e.attach(ctx!("graph - create path")))
+                        match new_match.insert(node_var, MatchElement::Node(prev_uid)) {
+                            Ok(()) => (),
+                            Err(e) => return ControlFlow::Break(e.attach(ctx!("graph - create path")))
+                        }
                     }
-                }
                 } else {
-                    self.add_node(nd.r#type.unwrap(), nd.term, nd.properties) ;
+                    match self.add_node(nd.r#type.unwrap(), nd.term, nd.properties) {
+                        Ok(_) => (),
+                        Err(e) => {
+                            match e.current_context() {
+                                ImplicaError::NodeAlreadyExists { .. } => (),
+                                _ => return ControlFlow::Break(e.attach(ctx!("graph - create path")))
+                            }
+                        }
+                    }
                 }
             }
 
