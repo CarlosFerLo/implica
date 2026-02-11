@@ -279,3 +279,24 @@ class TestCreateInference:
         edges = graph.edges()
         assert len(edges) == 1
         assert str(edges[0]) == "Edge((A -> B):f {})"
+
+    def test_create_infers_term_for_right_endpoint_of_a_new_edge(self):
+        graph = implica.Graph(
+            constants=[implica.Constant("f", "A"), implica.Constant("g", "A -> B")]
+        )
+
+        graph.query().create("(:A:@f())").create("(:B)").execute()
+
+        nodes = graph.nodes()
+        assert len(nodes) == 2
+        assert {str(n) for n in nodes} == {"Node(A:f {})", "Node(B: {})"}
+
+        graph.query().create("()-[::@g()]->()").execute()
+
+        nodes = graph.nodes()
+        assert len(nodes) == 2
+        assert {str(n) for n in nodes} == {"Node(A:f {})", "Node(B:(g f) {})"}
+
+        edges = graph.edges()
+        assert len(edges) == 1
+        assert str(edges[0]) == "Edge((A -> B):g {})"

@@ -207,6 +207,12 @@ impl Graph {
 
         self.edges.insert(edge_uid, properties);
 
+        if self.term_index.contains_key(&edge_uid.0) && !self.term_index.contains_key(&edge_uid.1) {
+            let start_term = self.term_from_uid(&edge_uid.0)?;
+
+            self.insert_term(&term.apply(&start_term)?);
+        }
+
         Ok(edge_uid)
     }
 
@@ -667,7 +673,7 @@ impl Graph {
                 "Node({}:{} {})",
                 self.type_to_string(node)
                     .attach(ctx!("graph - node to string"))?,
-                self.term_to_string(node).unwrap_or_else(|_| "".to_string()),
+                self.term_to_string(node).unwrap_or_default(),
                 props
             ))
         } else {

@@ -7,7 +7,7 @@ use rayon::prelude::*;
 use crate::ctx;
 use crate::errors::{ImplicaError, ImplicaResult};
 use crate::graph::base::Graph;
-use crate::matches::{next_match_id, MatchElement, MatchSet};
+use crate::matches::{next_match_id, Match, MatchElement, MatchSet};
 use crate::patterns::NodePattern;
 
 impl Graph {
@@ -93,8 +93,12 @@ impl Graph {
                     }
                 };
 
+                dbg!(&match_set);
+
                 match_set.par_iter().try_for_each(|entry| {
-                    let (prev_uid, m) = entry.value().clone();
+                    let (prev_uid, original_match) = entry.value().clone();
+
+                    let m = Arc::new(Match::new(Some(original_match)));
 
                     if let Some(ref term_schema) = pattern.term_schema {
                         match self.check_term_matches(&prev_uid, &term_schema.compiled, m.clone()) {
@@ -113,6 +117,8 @@ impl Graph {
                                             }
                                         }
                                     }
+
+                                    dbg!(&m);
 
                                     if let Some(ref var) = pattern.variable {
                                         match m.insert(var, MatchElement::Node(prev_uid)) {
@@ -150,6 +156,8 @@ impl Graph {
                                 }
                             }
                         }
+
+                        dbg!(); // TODO: acabar d solucionar este error ns donde esta jajajaja
 
                         if let Some(ref var) = pattern.variable {
                             match m.insert(var, MatchElement::Node(prev_uid)) {
@@ -221,7 +229,7 @@ impl Graph {
                         }
                     }
 
-                    let new_matches = r#match.clone();
+                    let new_matches = Arc::new(Match::new(Some(r#match.clone())));
 
                     if let Some(ref var) = pattern.variable {
                         match new_matches.insert(var, MatchElement::Node(new_uid)) {
