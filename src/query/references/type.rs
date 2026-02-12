@@ -44,6 +44,10 @@ impl TypeRef {
             .into_py_result()
     }
 
+    pub fn __repr__(&self) -> PyResult<String> {
+        self.__str__()
+    }
+
     pub fn __eq__(&self, other: &Self) -> bool {
         self == other
     }
