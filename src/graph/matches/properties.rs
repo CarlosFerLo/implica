@@ -22,7 +22,7 @@ impl Graph {
                 {
                     Ok(compare_values(value, &other))
                 } else {
-                    Ok(true)
+                    Ok(false)
                 }
             })
         } else {
