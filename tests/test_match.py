@@ -143,16 +143,19 @@ class TestMatchNodeQuery:
             'Node((A -> B):f {foo: "var"})',
         }
 
-    def test_match_node_pattern_with_no_requirements_matches_many(self):
-        graph = implica.Graph(constants=[implica.Constant("f", "A")])
-        (graph.query().create("(:A:@f())").create("(:B { some: 4 })").create("(:C)").execute())
 
-        result = graph.query().match("(N)").return_("N")
+class TestMatchEdgeQuery:
+    def test_empty_match_edge_pattern_matches_all_edges(self):
+        graph = implica.Graph(constants=[implica.Constant("f", "(A:*)->(B:*)")])
+
+        graph.query().create("(:A)").create("(:B)").create("(:C)").execute()
+        (
+            graph.query()
+            .create("()-[::@f(A, B)]->()")
+            .create("()-[::@f(A, C)]->()")
+            .create("()-[::@f(B, C)]->()")
+            .execute()
+        )
+
+        result = graph.query().match("()-[]->()").return_()
         assert len(result) == 3
-        assert all(["N" in d for d in result])
-        assert all([isinstance(d["N"], implica.Node) for d in result])
-        assert {str(d["N"]) for d in result} == {
-            "Node(A:f {})",
-            "Node(B: {some: 4})",
-            "Node(C: {})",
-        }

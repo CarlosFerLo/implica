@@ -6,7 +6,7 @@ use rayon::prelude::*;
 
 use crate::ctx;
 use crate::errors::{ImplicaError, ImplicaResult};
-use crate::graph::base::Graph;
+use crate::graph::base::{Graph, Uid};
 use crate::matches::{next_match_id, Match, MatchElement, MatchSet};
 use crate::patterns::NodePattern;
 
@@ -118,8 +118,6 @@ impl Graph {
                                         }
                                     }
 
-                                    dbg!(&m);
-
                                     if let Some(ref var) = pattern.variable {
                                         match m.insert(var, MatchElement::Node(prev_uid)) {
                                             Ok(_) => (),
@@ -156,8 +154,6 @@ impl Graph {
                                 }
                             }
                         }
-
-                        dbg!(); // TODO: acabar d solucionar este error ns donde esta jajajaja
 
                         if let Some(ref var) = pattern.variable {
                             match m.insert(var, MatchElement::Node(prev_uid)) {
@@ -253,5 +249,47 @@ impl Graph {
             ControlFlow::Continue(()) => Ok(out_map),
             ControlFlow::Break(e) => Err(e),
         }
+    }
+
+    pub(super) fn check_node_matches(
+        &self,
+        node: &Uid,
+        pattern: &NodePattern,
+        r#match: Arc<Match>,
+    ) -> ImplicaResult<Option<Arc<Match>>> {
+        let mut new_match = Arc::new(Match::new(Some(r#match)));
+
+        // Check node matches type schema
+        if let Some(ref type_schema) = pattern.type_schema {
+            new_match = match self.check_type_matches(node, &type_schema.compiled, new_match) {
+                Ok(m) => match m {
+                    Some(m) => m,
+                    None => return Ok(None),
+                },
+                Err(e) => return Err(e.attach(ctx!("check node matches"))),
+            };
+        }
+
+        // Check node matches term schema
+        if let Some(ref term_schema) = pattern.term_schema {
+            new_match = match self.check_term_matches(node, &term_schema.compiled, new_match) {
+                Ok(m) => match m {
+                    Some(m) => m,
+                    None => return Ok(None),
+                },
+                Err(e) => return Err(e.attach(ctx!("check node matches"))),
+            }
+        }
+
+        // Check properties match
+        if let Some(ref properties) = pattern.properties {
+            match self.check_node_matches_properties(node, properties) {
+                Ok(true) => (),
+                Ok(false) => return Ok(None),
+                Err(e) => return Err(e.attach(ctx!("check node matches"))),
+            }
+        }
+
+        Ok(Some(new_match))
     }
 }
