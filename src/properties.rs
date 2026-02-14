@@ -95,25 +95,17 @@ impl PropertyMap {
         }
     }
 
-    pub fn contains_key(&self, key: &str) -> ImplicaResult<bool> {
-        let data_lock = self.data.read().map_err(|e| ImplicaError::LockError {
-            rw: "read".to_string(),
-            message: e.to_string(),
-            context: Some(ctx!("property map - contains key").to_string()),
-        })?;
-
-        Ok(data_lock.contains_key(key))
-    }
+    //pub fn contains_key(&self, key: &str) -> ImplicaResult<bool> {
+    //    let data_lock = self.data.read().map_err(|e| ImplicaError::LockError {
+    //        rw: "read".to_string(),
+    //        message: e.to_string(),
+    //        context: Some(ctx!("property map - contains key").to_string()),
+    //    })?;
+    //
+    //    Ok(data_lock.contains_key(key))
+    //}
 
     pub fn insert(&self, key: String, value: Dynamic) -> ImplicaResult<()> {
-        if self.contains_key(&key)? {
-            return Err(ImplicaError::VariableAlreadyExists {
-                name: key,
-                context: Some(ctx!("property map - insert").to_string()),
-            }
-            .into());
-        }
-
         let mut data_lock = self.data.write().map_err(|e| ImplicaError::LockError {
             rw: "write".to_string(),
             message: e.to_string(),
@@ -164,6 +156,20 @@ impl PropertyMap {
             Err(BreakReason::PredicateFailed) => Ok(false),
             Err(BreakReason::RuntimeError(e)) => Err(e),
         }
+    }
+
+    pub fn iter(&self) -> ImplicaResult<std::vec::IntoIter<(rhai::ImmutableString, Dynamic)>> {
+        let map_lock = self.data.read().map_err(|e| ImplicaError::LockError {
+            rw: "read".to_string(),
+            message: e.to_string(),
+            context: Some(ctx!("property map - iter").to_string()),
+        })?;
+
+        Ok(map_lock
+            .iter()
+            .map(|(k, v)| (k.clone().into(), v.clone()))
+            .collect::<Vec<_>>()
+            .into_iter())
     }
 }
 

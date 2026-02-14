@@ -20,7 +20,7 @@ enum QueryOperation {
     Create(PathPattern),
     Match(PathPattern),
     Remove(Vec<String>),
-    Set(String, PropertyMap),
+    Set(String, PropertyMap, bool),
 }
 
 impl Display for QueryOperation {
@@ -42,8 +42,14 @@ impl Display for QueryOperation {
 
                 Ok(())
             }
-            QueryOperation::Set(variable, properties) => {
-                write!(f, "SET {} {}", variable, properties)
+            QueryOperation::Set(variable, properties, overwrite) => {
+                write!(
+                    f,
+                    "SET {} {} {}",
+                    variable,
+                    if *overwrite { "=" } else { "+=" },
+                    properties
+                )
             }
         }
     }
@@ -94,9 +100,9 @@ impl Query {
                         .execute_remove(variables, mset)
                         .attach(ctx!("query - execute operation"))?;
                 }
-                QueryOperation::Set(variable, properties) => {
+                QueryOperation::Set(variable, properties, overwrite) => {
                     mset = self
-                        .execute_set(variable, properties, mset)
+                        .execute_set(variable, properties, *overwrite, mset)
                         .attach(ctx!("query - execute operation"))?;
                 }
             }
@@ -173,6 +179,7 @@ impl Query {
         &self,
         variable: &str,
         properties: &PropertyMap,
+        overwrite: bool,
         matches: MatchSet,
     ) -> ImplicaResult<MatchSet> {
         let result: ControlFlow<Report<ImplicaError>> = matches.par_iter().try_for_each(|entry| {
@@ -181,12 +188,17 @@ impl Query {
             if let Some(element) = r#match.get(variable) {
                 match element {
                     MatchElement::Node(n) => {
-                        self.graph.set_node_properties(&n, properties.clone());
-                        ControlFlow::Continue(())
+                        match self.graph.set_node_properties(&n, properties.clone(), overwrite) {
+                            Ok(()) => ControlFlow::Continue(()),
+                            Err(e) => ControlFlow::Break(e.attach(ctx!("query - execute set")))
+                        }
+
                     }
                     MatchElement::Edge(e) => {
-                        self.graph.set_edge_properties(&e, properties.clone());
-                        ControlFlow::Continue(())
+                        match self.graph.set_edge_properties(&e, properties.clone(), overwrite) {
+                            Ok(()) => ControlFlow::Continue(()),
+                            Err(e) => ControlFlow::Break(e.attach(ctx!("query - execute set")))
+                        }
                     }
                     MatchElement::Type(_) => ControlFlow::Break(ImplicaError::InvalidQuery {
                         query: self.to_string(),
@@ -247,12 +259,19 @@ impl Query {
         self.clone()
     }
 
-    pub fn set(&mut self, variable: String, properties: &Bound<PyAny>) -> PyResult<Query> {
+    #[pyo3(signature = (variable, properties, overwrite=true))]
+    pub fn set(
+        &mut self,
+        variable: String,
+        properties: &Bound<PyAny>,
+        overwrite: bool,
+    ) -> PyResult<Query> {
         let map = PropertyMap::new(properties)
             .attach(ctx!("query - set"))
             .into_py_result()?;
 
-        self.operations.push(QueryOperation::Set(variable, map));
+        self.operations
+            .push(QueryOperation::Set(variable, map, overwrite));
         Ok(self.clone())
     }
 

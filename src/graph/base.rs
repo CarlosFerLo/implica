@@ -740,12 +740,66 @@ impl Graph {
 }
 
 impl Graph {
-    pub(crate) fn set_node_properties(&self, node: &Uid, properties: PropertyMap) {
-        self.nodes.insert(*node, properties);
+    pub(crate) fn set_node_properties(
+        &self,
+        node: &Uid,
+        properties: PropertyMap,
+        overwrite: bool,
+    ) -> ImplicaResult<()> {
+        if overwrite {
+            self.nodes.insert(*node, properties);
+            Ok(())
+        } else if let Some(mut entry) = self.nodes.get_mut(node) {
+            let node_props = entry.value_mut();
+
+            for (k, v) in properties
+                .iter()
+                .attach(ctx!("graph - set node properties"))?
+            {
+                node_props
+                    .insert(k.to_string(), v)
+                    .attach(ctx!("graph - set node properties"))?;
+            }
+
+            Ok(())
+        } else {
+            Err(ImplicaError::NodeNotFound {
+                uid: *node,
+                context: Some("graph - set node properties".to_string()),
+            }
+            .into())
+        }
     }
 
-    pub(crate) fn set_edge_properties(&self, edge: &(Uid, Uid), properties: PropertyMap) {
-        self.edges.insert(*edge, properties);
+    pub(crate) fn set_edge_properties(
+        &self,
+        edge: &(Uid, Uid),
+        properties: PropertyMap,
+        overwrite: bool,
+    ) -> ImplicaResult<()> {
+        if overwrite {
+            self.edges.insert(*edge, properties);
+            Ok(())
+        } else if let Some(mut entry) = self.edges.get_mut(edge) {
+            let node_props = entry.value_mut();
+
+            for (k, v) in properties
+                .iter()
+                .attach(ctx!("graph - set node properties"))?
+            {
+                node_props
+                    .insert(k.to_string(), v)
+                    .attach(ctx!("graph - set node properties"))?;
+            }
+
+            Ok(())
+        } else {
+            Err(ImplicaError::EdgeNotFound {
+                uid: *edge,
+                context: Some("graph - set node properties".to_string()),
+            }
+            .into())
+        }
     }
 }
 
