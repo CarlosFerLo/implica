@@ -66,9 +66,22 @@ impl Graph {
                     };
 
                     if let Some(ref var) = node_pattern.variable {
-                        match new_match.insert(var, MatchElement::Node(node)) {
+
+                        if let Some(element) = new_match.get(var) {
+                            let matched_node = match element.as_node(var, Some("get previously matched element".to_string())) {
+                                Ok(n) => n,
+                                Err(e) => return ControlFlow::Break(e.attach(ctx!("graph - match path pattern")))
+                            };
+
+                            if matched_node != node {
+                                return  ControlFlow::Continue(());
+                            }
+
+                        } else {
+                            match new_match.insert(var, MatchElement::Node(node)) {
                             Ok(()) => (),
                             Err(e) => return ControlFlow::Break(e.attach(ctx!("graph - match path pattern")))
+                        }
                         }
                     }
 
