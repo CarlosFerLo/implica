@@ -119,6 +119,12 @@ pub enum ImplicaError {
         name: String,
         context: Option<String>,
     },
+
+    #[error("Hex Conversion Error: '{reason}'{}",context.as_ref().map(|c| format!(" ({})", c)).unwrap_or_default())]
+    HexConversionError {
+        reason: String,
+        context: Option<String>,
+    },
 }
 
 pub type ImplicaResult<T> = Result<T, Report<ImplicaError>>;
@@ -144,7 +150,8 @@ impl<T> IntoPyResult<T> for ImplicaResult<T> {
                 | ImplicaError::InvalidTerm { .. }
                 | ImplicaError::SchemaValidation { .. }
                 | ImplicaError::ContextConflict { .. }
-                | ImplicaError::InvalidNumberOfArguments { .. } => {
+                | ImplicaError::InvalidNumberOfArguments { .. }
+                | ImplicaError::HexConversionError { .. } => {
                     exceptions::PyValueError::new_err(full_message)
                 }
                 ImplicaError::VariableAlreadyExists { .. }

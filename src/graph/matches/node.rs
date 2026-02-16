@@ -93,8 +93,6 @@ impl Graph {
                     }
                 };
 
-                dbg!(&match_set);
-
                 match_set.par_iter().try_for_each(|entry| {
                     let (prev_uid, original_match) = entry.value().clone();
 

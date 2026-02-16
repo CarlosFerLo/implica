@@ -1,8 +1,10 @@
 use error_stack::ResultExt;
 use pyo3::prelude::*;
+use pyo3::types::PyDict;
 use rayon::iter::IntoParallelRefIterator;
 use sha2::{Digest, Sha256};
 use std::iter::zip;
+use std::ops::ControlFlow;
 use std::sync::Arc;
 
 use dashmap::{DashMap, DashSet};
@@ -10,12 +12,13 @@ use rayon::prelude::*;
 
 use crate::constants::Constant;
 use crate::ctx;
-use crate::errors::{ImplicaError, ImplicaResult};
+use crate::errors::{ImplicaError, ImplicaResult, IntoPyResult};
 use crate::matches::{Match, MatchElement};
 use crate::patterns::{TermPattern, TermSchema, TypePattern, TypeSchema};
 use crate::properties::PropertyMap;
 use crate::query::Query;
 use crate::typing::{Application, Arrow, BasicTerm, Term, Type, Variable};
+use crate::utils::hex_str_to_uid;
 use crate::{EdgeRef, NodeRef};
 
 #[path = "matches/edge.rs"]
@@ -874,5 +877,74 @@ impl PyGraph {
             .par_iter()
             .map(|entry| EdgeRef::new(self.graph.clone(), *entry.key()))
             .collect()
+    }
+
+    #[pyo3(signature = (map, overwrite=true))]
+    pub fn set_node_properties(&self, map: &Bound<PyAny>, overwrite: bool) -> PyResult<()> {
+        let dict = map.cast::<PyDict>()?;
+        let mapping = DashMap::new();
+
+        for (key, value) in dict.iter() {
+            let key_str: String = key.extract()?;
+            let uid = hex_str_to_uid(&key_str)
+                .attach(ctx!("graph - set node properties"))
+                .into_py_result()?;
+            let property_map = PropertyMap::new(&value)
+                .attach(ctx!("graph - set node properties"))
+                .into_py_result()?;
+
+            mapping.insert(uid, property_map);
+        }
+
+        let result = mapping.par_iter().try_for_each(|entry| {
+            let uid = *entry.key();
+            let properties = entry.value().clone();
+
+            match self.graph.set_node_properties(&uid, properties, overwrite) {
+                Ok(()) => ControlFlow::Continue(()),
+                Err(e) => ControlFlow::Break(e.attach(ctx!("graph - set node properties"))),
+            }
+        });
+
+        match result {
+            ControlFlow::Continue(()) => Ok(()),
+            ControlFlow::Break(e) => Err(e).into_py_result(),
+        }
+    }
+
+    #[pyo3(signature = (map, overwrite=true))]
+    pub fn set_edge_properties(&self, map: &Bound<PyAny>, overwrite: bool) -> PyResult<()> {
+        let dict = map.cast::<PyDict>()?;
+        let mapping = DashMap::new();
+
+        for (key, value) in dict.iter() {
+            let key_str: (String, String) = key.extract()?;
+            let left_uid = hex_str_to_uid(&key_str.0)
+                .attach(ctx!("graph - set node properties"))
+                .into_py_result()?;
+            let right_uid = hex_str_to_uid(&key_str.1)
+                .attach(ctx!("graph - set node properties"))
+                .into_py_result()?;
+            let property_map = PropertyMap::new(&value)
+                .attach(ctx!("graph - set node properties"))
+                .into_py_result()?;
+
+            mapping.insert((left_uid, right_uid), property_map);
+        }
+
+        let result = mapping.par_iter().try_for_each(|entry| {
+            let uid = *entry.key();
+            let properties = entry.value().clone();
+
+            match self.graph.set_edge_properties(&uid, properties, overwrite) {
+                Ok(()) => ControlFlow::Continue(()),
+                Err(e) => ControlFlow::Break(e.attach(ctx!("graph - set node properties"))),
+            }
+        });
+
+        match result {
+            ControlFlow::Continue(()) => Ok(()),
+            ControlFlow::Break(e) => Err(e).into_py_result(),
+        }
     }
 }
