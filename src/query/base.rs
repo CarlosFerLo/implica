@@ -86,24 +86,30 @@ impl Query {
         for op in self.operations.iter() {
             match op {
                 QueryOperation::Create(pattern) => {
-                    mset = self
-                        .execute_create(pattern, mset)
-                        .attach(ctx!("query - execute operation"))?;
+                    mset = self.execute_create(pattern, mset).attach(ctx!(format!(
+                        "query - execute operation - {}",
+                        self.to_string()
+                    )))?;
                 }
                 QueryOperation::Match(pattern) => {
-                    mset = self
-                        .execute_match(pattern, mset)
-                        .attach(ctx!("query - execute operation"))?;
+                    mset = self.execute_match(pattern, mset).attach(ctx!(format!(
+                        "query - execute operation - {}",
+                        self.to_string()
+                    )))?;
                 }
                 QueryOperation::Remove(variables) => {
-                    mset = self
-                        .execute_remove(variables, mset)
-                        .attach(ctx!("query - execute operation"))?;
+                    mset = self.execute_remove(variables, mset).attach(ctx!(format!(
+                        "query - execute operation - {}",
+                        self.to_string()
+                    )))?;
                 }
                 QueryOperation::Set(variable, properties, overwrite) => {
                     mset = self
                         .execute_set(variable, properties, *overwrite, mset)
-                        .attach(ctx!("query - execute operation"))?;
+                        .attach(ctx!(format!(
+                            "query - execute operation - {}",
+                            self.to_string()
+                        )))?;
                 }
             }
         }
@@ -114,13 +120,13 @@ impl Query {
     fn execute_create(&self, pattern: &PathPattern, matches: MatchSet) -> ImplicaResult<MatchSet> {
         self.graph
             .create_path(pattern, matches)
-            .attach(ctx!("query - execute create"))
+            .attach(ctx!(format!("query - execute create - {}", pattern)))
     }
 
     fn execute_match(&self, pattern: &PathPattern, matches: MatchSet) -> ImplicaResult<MatchSet> {
         self.graph
             .match_path_pattern(pattern, matches)
-            .attach(ctx!("query - execute match"))
+            .attach(ctx!(format!("query - execute match - {}", pattern)))
     }
 
     fn execute_remove(&self, variables: &[String], matches: MatchSet) -> ImplicaResult<MatchSet> {
@@ -168,7 +174,12 @@ impl Query {
 
             match result {
                 ControlFlow::Continue(()) => (),
-                ControlFlow::Break(e) => return Err(e.attach(ctx!("query - execute remove"))),
+                ControlFlow::Break(e) => {
+                    return Err(e.attach(ctx!(format!(
+                        "query - execute remove - {}",
+                        variables.join(", ")
+                    ))))
+                }
             }
         }
 
@@ -228,7 +239,12 @@ impl Query {
 
         match result {
             ControlFlow::Continue(()) => Ok(matches),
-            ControlFlow::Break(e) => Err(e.attach(ctx!("query - execute set"))),
+            ControlFlow::Break(e) => Err(e.attach(ctx!(format!(
+                "query - execute set - {} {} {}",
+                variable,
+                if overwrite { "=" } else { "+=" },
+                properties
+            )))),
         }
     }
 }

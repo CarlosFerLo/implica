@@ -96,6 +96,10 @@ impl Graph {
                 match_set.par_iter().try_for_each(|entry| {
                     let (prev_uid, original_match) = entry.value().clone();
 
+                    if !self.nodes.contains_key(&prev_uid) {
+                        return ControlFlow::Continue(());
+                    }
+
                     let m = Arc::new(Match::new(Some(original_match)));
 
                     if let Some(ref term_schema) = pattern.term_schema {
@@ -179,6 +183,10 @@ impl Graph {
 
                 match_set.par_iter().try_for_each(|entry| {
                     let (prev_uid, m) = entry.value().clone();
+
+                    if !self.nodes.contains_key(&prev_uid) {
+                        return ControlFlow::Continue(());
+                    }
 
                     if let Some(ref properties) = pattern.properties {
                         match self.check_node_matches_properties(&prev_uid, properties) {
