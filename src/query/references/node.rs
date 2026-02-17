@@ -5,6 +5,8 @@ use std::sync::Arc;
 use crate::ctx;
 use crate::errors::IntoPyResult;
 use crate::graph::{Graph, Uid};
+use crate::query::references::r#type::TypeRef;
+use crate::query::references::term::TermRef;
 
 #[pyclass(name = "Node")]
 #[derive(Debug, Clone)]
@@ -42,6 +44,18 @@ impl NodeRef {
             .into_py_result()?;
 
         map.into_pyobject(py) // TODO: add some kind of attachment
+    }
+
+    pub fn r#type(&self) -> TypeRef {
+        TypeRef::new(self.graph.clone(), self.uid)
+    }
+
+    pub fn term(&self) -> Option<TermRef> {
+        if self.graph.contains_term_of_type(&self.uid) {
+            Some(TermRef::new(self.graph.clone(), self.uid))
+        } else {
+            None
+        }
     }
 
     pub fn __str__(&self) -> PyResult<String> {

@@ -74,6 +74,14 @@ impl<'py> IntoPyObject<'py> for PropertyMap {
     }
 }
 
+impl Default for PropertyMap {
+    fn default() -> Self {
+        PropertyMap {
+            data: Arc::new(RwLock::new(Map::new())),
+        }
+    }
+}
+
 impl PropertyMap {
     pub fn new(data: &Bound<PyAny>) -> ImplicaResult<Self> {
         let dynamic_data = py_to_rhai(data).attach(ctx!("property map - new"))?;

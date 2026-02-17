@@ -281,7 +281,7 @@ impl Graph {
                             let type_uid = self.insert_type(r#type);                                
 
                             term_update = match self
-                            .infer_term(type_uid){
+                            .infer_term(&type_uid){
                                 Ok(t) => t,
                                 Err(e) => return ControlFlow::Break(e.attach(ctx!("graph - create path")))
                             };
@@ -700,7 +700,7 @@ impl Graph {
                             let type_uid = self.insert_type(r#type);
 
                             term_update = match self
-                            .infer_term(type_uid) {
+                            .infer_term(&type_uid) {
                                 Ok(t) => t,
                                 Err(e) => return ControlFlow::Break(e.attach(ctx!("graph - create node")))
                             };

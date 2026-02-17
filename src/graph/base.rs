@@ -213,7 +213,28 @@ impl Graph {
         if self.term_index.contains_key(&edge_uid.0) && !self.term_index.contains_key(&edge_uid.1) {
             let start_term = self.term_from_uid(&edge_uid.0)?;
 
-            self.insert_term(&term.apply(&start_term)?);
+            let new_term = self.insert_term(&term.apply(&start_term)?);
+
+            if !self.type_to_edge_index.contains_key(&new_term) {
+                // TODO: optimize this logic
+                let term = self.term_from_uid(&new_term)?;
+                if let Some(arr) = term.r#type().as_arrow() {
+                    let left_type = self.insert_type(&arr.left);
+                    let right_type = self.insert_type(&arr.right);
+
+                    if !self.nodes.contains_key(&left_type) {
+                        let term = self.infer_term(&left_type)?;
+                        self.add_node(arr.left.as_ref().clone(), term, PropertyMap::default())?;
+                    }
+
+                    if !self.nodes.contains_key(&right_type) {
+                        let term = self.infer_term(&right_type)?;
+                        self.add_node(arr.right.as_ref().clone(), term, PropertyMap::default())?;
+                    }
+
+                    self.add_edge(term, PropertyMap::default())?;
+                }
+            }
         }
 
         Ok(edge_uid)
@@ -807,13 +828,13 @@ impl Graph {
 }
 
 impl Graph {
-    fn infer_term(&self, r#type: Uid) -> ImplicaResult<Option<Term>> {
+    fn infer_term(&self, r#type: &Uid) -> ImplicaResult<Option<Term>> {
         for entry in self.constants.iter() {
             let constant = entry.value();
 
             if self
                 .check_type_matches(
-                    &r#type,
+                    r#type,
                     &constant.type_schema.compiled,
                     Arc::new(Match::new(None)),
                 )
@@ -821,7 +842,7 @@ impl Graph {
                 .is_some()
             {
                 let term_type = self
-                    .type_from_uid(&r#type)
+                    .type_from_uid(r#type)
                     .attach(ctx!("graph - infer term"))?;
                 return Ok(Some(Term::Basic(
                     BasicTerm::new(constant.name.clone(), Arc::new(term_type))
@@ -830,6 +851,23 @@ impl Graph {
             }
         }
         Ok(None)
+    }
+}
+
+impl Graph {
+    pub(crate) fn contains_term_of_type(&self, r#type: &Uid) -> bool {
+        self.term_index.contains_key(r#type)
+    }
+
+    pub(crate) fn get_edge_type(&self, edge: &(Uid, Uid)) -> ImplicaResult<Uid> {
+        match self.edge_to_type_index.get(edge) {
+            Some(t) => Ok(*t.value()),
+            None => Err(ImplicaError::EdgeNotFound {
+                uid: *edge,
+                context: Some("graph - get edge type".to_string()),
+            }
+            .into()),
+        }
     }
 }
 

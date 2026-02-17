@@ -300,3 +300,18 @@ class TestCreateInference:
         edges = graph.edges()
         assert len(edges) == 1
         assert str(edges[0]) == "Edge((A -> B):g {})"
+
+    def test_create_automatic_edge_composition(self):
+        graph = implica.Graph(
+            constants=[implica.Constant("f", "A -> (A -> B)"), implica.Constant("g", "A")]
+        )
+        graph.query().create("(:A:@g())").create("(:A -> B)").create("()-[::@f()]->()").execute()
+
+        result = graph.query().match("(:A->B:x)").return_()
+        assert len(result) == 1
+
+        result = graph.query().match("(:B:x)").return_()
+        assert len(result) == 1
+
+        result = graph.query().match("(:A)-[E::x y]->(:B)").return_("E")
+        assert len(result) == 1

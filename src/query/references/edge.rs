@@ -6,6 +6,7 @@ use std::sync::Arc;
 use crate::ctx;
 use crate::errors::IntoPyResult;
 use crate::graph::{Graph, Uid};
+use crate::query::references::{TermRef, TypeRef};
 
 #[pyclass(name = "Edge")]
 #[derive(Debug, Clone)]
@@ -41,6 +42,26 @@ impl EdgeRef {
             .attach(ctx!("edge reference - get properties"))
             .into_py_result()?;
         map.into_pyobject(py) // TODO: add some kind of attachment
+    }
+
+    pub fn r#type(&self) -> PyResult<TypeRef> {
+        let edge_type = self
+            .graph
+            .get_edge_type(&self.uid)
+            .attach(ctx!("edge - type"))
+            .into_py_result()?;
+
+        Ok(TypeRef::new(self.graph.clone(), edge_type))
+    }
+
+    pub fn term(&self) -> PyResult<TermRef> {
+        let edge_type = self
+            .graph
+            .get_edge_type(&self.uid)
+            .attach(ctx!("edge - type"))
+            .into_py_result()?;
+
+        Ok(TermRef::new(self.graph.clone(), edge_type))
     }
 
     pub fn __str__(&self) -> PyResult<String> {
