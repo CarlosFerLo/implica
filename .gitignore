@@ -76,3 +76,6 @@ docs/_build/
 
 # MyPy
 .mypy_cache
+
+# Demo
+.demo
