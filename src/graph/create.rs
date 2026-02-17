@@ -278,7 +278,7 @@ impl Graph {
 
                         if let Some(r#type) = node_data.r#type.as_ref().or(type_update.as_ref()) {
 
-                            let type_uid = self.insert_type(r#type);                                
+                            let type_uid = self.insert_type(r#type);
 
                             term_update = match self
                             .infer_term(&type_uid){
@@ -797,10 +797,8 @@ impl Graph {
 
                         prev_uid = match self.add_node(nd.r#type.unwrap(), nd.term, nd.properties) {
                             Ok(uid) => uid,
-                            Err(e) => {match e.current_context() {
-                                ImplicaError::NodeAlreadyExists { uid, context: _ } => *uid,
-                                _ => return ControlFlow::Break(e.attach(ctx!("graph - create path")))
-                            }}
+                            Err(e) => return ControlFlow::Break(e.attach(ctx!("graph - create path")))
+
                         };
 
                         match new_match.insert(node_var, MatchElement::Node(prev_uid)) {
@@ -812,10 +810,7 @@ impl Graph {
                     match self.add_node(nd.r#type.unwrap(), nd.term, nd.properties) {
                         Ok(_) => (),
                         Err(e) => {
-                            match e.current_context() {
-                                ImplicaError::NodeAlreadyExists { .. } => (),
-                                _ => return ControlFlow::Break(e.attach(ctx!("graph - create path")))
-                            }
+                            return ControlFlow::Break(e.attach(ctx!("graph - create path")))
                         }
                     }
                 }

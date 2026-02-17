@@ -122,33 +122,84 @@ impl Graph {
         term: Option<Term>,
         properties: PropertyMap,
     ) -> ImplicaResult<Uid> {
+        let mut expand = false;
         let type_uid = self.insert_type(&r#type);
 
         if let Some(term) = term {
-            let term_uid = self.insert_term(&term);
+            if !self.term_index.contains_key(&type_uid) {
+                // TODO: term comparison?
+                let term_uid = self.insert_term(&term);
 
-            if type_uid != term_uid {
-                return Err(ImplicaError::InvalidTerm {
-                    reason: "term provided is of a different type than the type provided"
-                        .to_string(),
+                if type_uid != term_uid {
+                    return Err(ImplicaError::InvalidTerm {
+                        reason: "term provided is of a different type than the type provided"
+                            .to_string(),
+                    }
+                    .into());
+                }
+
+                if let Some(arr) = term.r#type().as_arrow() {
+                    let left_type = self.insert_type(&arr.left);
+                    let right_type = self.insert_type(&arr.right);
+
+                    if !self.nodes.contains_key(&left_type) {
+                        let term = self.infer_term(&left_type)?;
+                        self.add_node(arr.left.as_ref().clone(), term, PropertyMap::default())?;
+                    }
+
+                    if !self.nodes.contains_key(&right_type) {
+                        let term = self.infer_term(&right_type)?;
+                        self.add_node(arr.right.as_ref().clone(), term, PropertyMap::default())?;
+                    }
+
+                    self.add_edge(term, PropertyMap::default())?;
+                }
+
+                expand = true;
+            }
+        }
+
+        if !self.nodes.contains_key(&type_uid) {
+            self.nodes.insert(type_uid, properties);
+            self.start_to_edge_index
+                .insert(type_uid, Arc::new(DashSet::new()));
+            self.end_to_edge_index
+                .insert(type_uid, Arc::new(DashSet::new()));
+        }
+
+        if expand {
+            if let Some(entry) = self.start_to_edge_index.get(&type_uid) {
+                let right_edges = entry.value().clone();
+
+                right_edges.par_iter().try_for_each(|row| -> ImplicaResult<()> {
+                    let edge = *row.key();
+
+                    if !self.term_index.contains_key(&edge.1) {
+                        let original_term = self.term_from_uid(&type_uid).attach(ctx!("graph - add node"))?;
+                        let edge_term = {
+                            let edge_type = match self.edge_to_type_index.get(&edge) {
+                                Some(t) => *t,
+                                None => return Err(ImplicaError::IndexCorruption { message: "edge exists in EdgeIndex without appearing in EdgeToTypeIndex".to_string(), context: Some("graph - add node".to_string()) }.into())
+                            };
+
+                            self.term_from_uid(&edge_type).attach(ctx!("graph - add node"))
+                        }?;
+
+                        let new_term = edge_term.apply(&original_term).attach(ctx!("graph - add node"))?;
+
+                        self.add_node(new_term.r#type().as_ref().clone(), Some(new_term), PropertyMap::default()).attach(ctx!("graph - add node"))?;
+                    }
+
+                    Ok(())
+                })?;
+            } else {
+                return Err(ImplicaError::IndexCorruption {
+                    message: "node exists without row in the StartToEdgeIndex".to_string(),
+                    context: Some("graph - add node".to_string()),
                 }
                 .into());
             }
         }
-
-        if self.nodes.contains_key(&type_uid) {
-            return Err(ImplicaError::NodeAlreadyExists {
-                uid: type_uid,
-                context: Some(ctx!("graph - add node")),
-            }
-            .into());
-        }
-
-        self.nodes.insert(type_uid, properties);
-        self.start_to_edge_index
-            .insert(type_uid, Arc::new(DashSet::new()));
-        self.end_to_edge_index
-            .insert(type_uid, Arc::new(DashSet::new()));
 
         Ok(type_uid)
     }

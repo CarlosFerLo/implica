@@ -84,9 +84,9 @@ class TestCreateNodeQuery:
 
         graph.query().create("(::@f(C, D))").execute()
         nodes = graph.nodes()
-        assert len(nodes) == 1
-        assert isinstance(nodes[0], implica.Node)
-        assert str(nodes[0]) == "Node((C -> D):f {})"
+        assert len(nodes) == 3
+        assert all([isinstance(n, implica.Node) for n in nodes])
+        assert {str(n) for n in nodes} == {"Node((C -> D):f {})", "Node(C: {})", "Node(D: {})"}
 
     def test_create_more_than_one_node_in_different_queries(self):
         graph = implica.Graph()
