@@ -13,6 +13,7 @@ use rayon::prelude::*;
 use crate::constants::Constant;
 use crate::ctx;
 use crate::errors::{ImplicaError, ImplicaResult, IntoPyResult};
+use crate::graph::mask::Mask;
 use crate::matches::{Match, MatchElement};
 use crate::patterns::{TermPattern, TermSchema, TypePattern, TypeSchema};
 use crate::properties::PropertyMap;
@@ -76,7 +77,7 @@ type EdgeSet = Arc<DashSet<(Uid, Uid)>>;
 #[derive(Clone, Debug)]
 pub struct Graph {
     nodes: Arc<DashMap<Uid, PropertyMap>>,
-    edges: Arc<DashMap<(Uid, Uid), PropertyMap>>,
+    pub(in crate::graph) edges: Arc<DashMap<(Uid, Uid), PropertyMap>>,
 
     type_index: Arc<DashMap<Uid, TypeRep>>,
     term_index: Arc<DashMap<Uid, TermRep>>,
@@ -962,6 +963,7 @@ impl Graph {
 #[derive(Debug, Clone)]
 pub struct PyGraph {
     graph: Arc<Graph>,
+    mask: Option<Mask>,
 }
 
 impl Default for PyGraph {
@@ -981,27 +983,63 @@ impl PyGraph {
 
         PyGraph {
             graph: Arc::new(graph),
+            mask: None,
         }
     }
 
+    pub fn subgraph(&self, nodes: Vec<String>) -> PyResult<PyGraph> {
+        let nodes_set = nodes
+            .iter()
+            .map(|n| hex_str_to_uid(n).attach(ctx!("graph - subgraph")))
+            .collect::<ImplicaResult<DashSet<Uid>>>()
+            .into_py_result()?;
+
+        Ok(PyGraph {
+            graph: self.graph.clone(),
+            mask: Some(Mask::new(Arc::new(nodes_set))),
+        })
+    }
+
     pub fn query(&self) -> Query {
-        Query::new(self.graph.clone())
+        Query::new(self.graph.clone(), self.mask.clone())
     }
 
     pub fn nodes(&self) -> Vec<NodeRef> {
-        self.graph
-            .nodes
-            .par_iter()
-            .map(|entry| NodeRef::new(self.graph.clone(), *entry.key()))
-            .collect()
+        if let Some(ref mask) = self.mask {
+            mask.nodes
+                .par_iter()
+                .map(|entry| NodeRef::new(self.graph.clone(), *entry.key()))
+                .collect()
+        } else {
+            self.graph
+                .nodes
+                .par_iter()
+                .map(|entry| NodeRef::new(self.graph.clone(), *entry.key()))
+                .collect()
+        }
     }
 
     pub fn edges(&self) -> Vec<EdgeRef> {
-        self.graph
-            .edges
-            .par_iter()
-            .map(|entry| EdgeRef::new(self.graph.clone(), *entry.key()))
-            .collect()
+        if let Some(ref mask) = self.mask {
+            self.graph
+                .edges
+                .par_iter()
+                .filter_map(|entry| {
+                    let (left, right) = entry.key();
+                    if mask.contains(left) && mask.contains(right) {
+                        Some(EdgeRef::new(self.graph.clone(), (*left, *right)))
+                    } else {
+                        None
+                    }
+                })
+                .collect()
+        } else {
+            self.graph
+                .edges
+                .par_iter()
+                .map(|entry| EdgeRef::new(self.graph.clone(), *entry.key()))
+                .collect()
+        }
     }
 
     #[pyo3(signature = (map, overwrite=true))]

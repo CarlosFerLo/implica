@@ -1,12 +1,13 @@
 use std::ops::ControlFlow;
 use std::sync::Arc;
 
-use dashmap::DashMap;
+use dashmap::{DashMap, DashSet};
 use rayon::prelude::*;
 
 use crate::ctx;
 use crate::errors::{ImplicaError, ImplicaResult};
 use crate::graph::base::{Graph, Uid};
+use crate::graph::Mask;
 use crate::matches::{next_match_id, Match, MatchElement, MatchSet};
 use crate::patterns::NodePattern;
 
@@ -15,6 +16,7 @@ impl Graph {
         &self,
         pattern: &NodePattern,
         matches: MatchSet,
+        mask: Option<Mask>,
     ) -> ImplicaResult<MatchSet> {
         let out_map: MatchSet = Arc::new(DashMap::new());
 
@@ -96,7 +98,11 @@ impl Graph {
                 match_set.par_iter().try_for_each(|entry| {
                     let (prev_uid, original_match) = entry.value().clone();
 
-                    if !self.nodes.contains_key(&prev_uid) {
+                    if let Some(ref mask) = mask {
+                        if !mask.contains(&prev_uid) {
+                            return ControlFlow::Continue(());
+                        }
+                    } else if !self.nodes.contains_key(&prev_uid) {
                         return ControlFlow::Continue(());
                     }
 
@@ -184,7 +190,11 @@ impl Graph {
                 match_set.par_iter().try_for_each(|entry| {
                     let (prev_uid, m) = entry.value().clone();
 
-                    if !self.nodes.contains_key(&prev_uid) {
+                    if let Some(ref mask) = mask {
+                        if !mask.contains(&prev_uid) {
+                            return ControlFlow::Continue(());
+                        }
+                    } else if !self.nodes.contains_key(&prev_uid) {
                         return ControlFlow::Continue(());
                     }
 
@@ -216,7 +226,18 @@ impl Graph {
                     ControlFlow::Continue(())
                 })
             } else {
-                self.nodes.par_iter().try_for_each(|entry| {
+                let nodes = if let Some(ref mask) = mask {
+                    mask.nodes.clone()
+                } else {
+                    Arc::new(
+                        self.nodes
+                            .par_iter()
+                            .map(|e| *e.key())
+                            .collect::<DashSet<_>>(),
+                    )
+                };
+
+                nodes.par_iter().try_for_each(|entry| {
                     let new_uid = *entry.key();
 
                     if let Some(ref properties) = pattern.properties {

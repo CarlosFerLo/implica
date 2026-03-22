@@ -7,7 +7,7 @@ use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 
 use crate::ctx;
 use crate::errors::{ImplicaError, ImplicaResult};
-use crate::graph::Uid;
+use crate::graph::{Mask, Uid};
 use crate::matches::{next_match_id, Match, MatchElement, MatchSet};
 use crate::patterns::CompiledDirection;
 use crate::{graph::base::Graph, patterns::EdgePattern};
@@ -17,6 +17,7 @@ impl Graph {
         &self,
         pattern: &EdgePattern,
         matches: MatchSet,
+        mask: Option<Mask>,
     ) -> ImplicaResult<MatchSet> {
         let out_map: MatchSet = Arc::new(DashMap::new());
 
@@ -78,6 +79,12 @@ impl Graph {
 
                     possible_edges.par_iter().try_for_each(|entry| -> ControlFlow<Report<ImplicaError>> {
                         let edge = *entry.key();
+
+                        if let Some(ref mask) = mask {
+                            if !mask.contains(&edge.0) || !mask.contains(&edge.1) {
+                                return ControlFlow::Continue(());
+                            }
+                        }
 
                         match self.check_edge_matches(&prev_uid, &edge, pattern, r#match.clone()) {
                             Ok(Some(new_match)) => {

@@ -8,7 +8,7 @@ use rayon::prelude::*;
 use crate::ctx;
 use crate::errors::{ImplicaError, ImplicaResult};
 use crate::graph::base::Graph;
-use crate::graph::Uid;
+use crate::graph::{Mask, Uid};
 use crate::matches::{next_match_id, Match, MatchElement, MatchSet};
 use crate::patterns::{CompiledDirection, PathPattern};
 use crate::properties::PropertyMap;
@@ -76,6 +76,7 @@ impl Graph {
         &self,
         pattern: &PathPattern,
         matches: MatchSet,
+        mask: Option<Mask>,
     ) -> ImplicaResult<MatchSet> {
         let out_map = Arc::new(DashMap::new());
 
@@ -805,14 +806,23 @@ impl Graph {
                             Ok(()) => (),
                             Err(e) => return ControlFlow::Break(e.attach(ctx!("graph - create path")))
                         }
+
+                        if let Some(ref mask) = mask {
+                            mask.add_node(&prev_uid);
+                        }
                     }
                 } else {
-                    match self.add_node(nd.r#type.unwrap(), nd.term, nd.properties) {
-                        Ok(_) => (),
+                    prev_uid = match self.add_node(nd.r#type.unwrap(), nd.term, nd.properties) {
+                        Ok(uid) => uid,
                         Err(e) => {
                             return ControlFlow::Break(e.attach(ctx!("graph - create path")))
                         }
+                    };
+
+                    if let Some(ref mask) = mask {
+                        mask.add_node(&prev_uid);
                     }
+
                 }
             }
 

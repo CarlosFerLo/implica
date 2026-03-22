@@ -9,6 +9,7 @@ use rayon::prelude::*;
 use crate::ctx;
 use crate::errors::{ImplicaError, ImplicaResult};
 use crate::graph::base::Graph;
+use crate::graph::Mask;
 use crate::matches::{next_match_id, MatchElement, MatchSet};
 use crate::patterns::PathPattern;
 
@@ -17,6 +18,7 @@ impl Graph {
         &self,
         pattern: &PathPattern,
         matches: MatchSet,
+        mask: Option<Mask>,
     ) -> ImplicaResult<MatchSet> {
         let out_map: MatchSet = Arc::new(DashMap::new());
 
@@ -34,7 +36,7 @@ impl Graph {
 
             let node_pattern = pattern.nodes.first().unwrap();
 
-            matches = match self.match_node_pattern(node_pattern, matches) {
+            matches = match self.match_node_pattern(node_pattern, matches, mask.clone()) {
                 Ok(m) => m,
                 Err(e) => return ControlFlow::Break(e.attach(ctx!("graph - match path pattern"))),
             };
@@ -44,6 +46,7 @@ impl Graph {
                 matches = match self.match_edge_pattern(
                     edge_pattern,
                     matches,
+                    mask.clone()
                 ) {
                     Ok(m) => m,
                     Err(e) => return ControlFlow::Break(e.attach(ctx!("graph - match path pattern"))),

@@ -13,7 +13,12 @@ use crate::errors::{ImplicaResult, IntoPyResult};
 use crate::matches::{default_match_set, MatchElement};
 use crate::properties::PropertyMap;
 use crate::query::references::*;
-use crate::{errors::ImplicaError, graph::Graph, matches::MatchSet, patterns::PathPattern};
+use crate::{
+    errors::ImplicaError,
+    graph::{Graph, Mask},
+    matches::MatchSet,
+    patterns::PathPattern,
+};
 
 #[derive(Debug, Clone)]
 enum QueryOperation {
@@ -60,6 +65,8 @@ impl Display for QueryOperation {
 pub struct Query {
     graph: Arc<Graph>,
     operations: Vec<QueryOperation>,
+
+    mask: Option<Mask>,
 }
 
 impl Display for Query {
@@ -73,10 +80,11 @@ impl Display for Query {
 }
 
 impl Query {
-    pub(crate) fn new(graph: Arc<Graph>) -> Self {
+    pub(crate) fn new(graph: Arc<Graph>, mask: Option<Mask>) -> Self {
         Query {
             graph,
             operations: Vec::new(),
+            mask,
         }
     }
 
@@ -119,13 +127,13 @@ impl Query {
 
     fn execute_create(&self, pattern: &PathPattern, matches: MatchSet) -> ImplicaResult<MatchSet> {
         self.graph
-            .create_path(pattern, matches)
+            .create_path(pattern, matches, self.mask.clone())
             .attach(ctx!(format!("query - execute create - {}", pattern)))
     }
 
     fn execute_match(&self, pattern: &PathPattern, matches: MatchSet) -> ImplicaResult<MatchSet> {
         self.graph
-            .match_path_pattern(pattern, matches)
+            .match_path_pattern(pattern, matches, self.mask.clone())
             .attach(ctx!(format!("query - execute match - {}", pattern)))
     }
 
@@ -136,10 +144,17 @@ impl Query {
 
                 if let Some(element) = r#match.remove(var) {
                     match element {
-                        MatchElement::Node(n) => match self.graph.remove_node(&n) {
-                            Ok(_) => ControlFlow::Continue(()),
-                            Err(e) => ControlFlow::Break(e),
-                        },
+                        MatchElement::Node(n) => {
+                            if let Some(ref mask) = self.mask {
+                                mask.remove_node(&n);
+                                ControlFlow::Continue(())
+                            } else {
+                                match self.graph.remove_node(&n) {
+                                    Ok(_) => ControlFlow::Continue(()),
+                                    Err(e) => ControlFlow::Break(e),
+                                }
+                            }
+                        }
                         MatchElement::Edge(e) => match self.graph.remove_edge(&e) {
                             Ok(_) => ControlFlow::Continue(()),
                             Err(e) => ControlFlow::Break(e),
