@@ -26,6 +26,7 @@ enum QueryOperation {
     Match(PathPattern),
     Remove(Vec<String>),
     Set(String, PropertyMap, bool),
+    LimitCreate(u32),
 }
 
 impl Display for QueryOperation {
@@ -55,6 +56,9 @@ impl Display for QueryOperation {
                     if *overwrite { "=" } else { "+=" },
                     properties
                 )
+            }
+            QueryOperation::LimitCreate(limit) => {
+                write!(f, "LIMIT {}", limit)
             }
         }
     }
@@ -114,6 +118,14 @@ impl Query {
                 QueryOperation::Set(variable, properties, overwrite) => {
                     mset = self
                         .execute_set(variable, properties, *overwrite, mset)
+                        .attach(ctx!(format!(
+                            "query - execute operation - {}",
+                            self.to_string()
+                        )))?;
+                }
+                QueryOperation::LimitCreate(limit) => {
+                    mset = self
+                        .execute_limit_create(*limit, mset)
                         .attach(ctx!(format!(
                             "query - execute operation - {}",
                             self.to_string()
@@ -262,6 +274,16 @@ impl Query {
             )))),
         }
     }
+
+    fn execute_limit_create(&self, limit: u32, matches: MatchSet) -> ImplicaResult<MatchSet> {
+        matches.par_iter_mut().for_each(|mut entry| {
+            let r#match = entry.value_mut().1.as_ref();
+
+            r#match.set_creation_limit(limit);
+        });
+
+        Ok(matches)
+    }
 }
 
 #[pymethods]
@@ -370,6 +392,12 @@ impl Query {
         }
 
         Ok(py_results)
+    }
+
+    pub fn limit(&mut self, limit: u32) -> Query {
+        self.operations.push(QueryOperation::LimitCreate(limit));
+
+        self.clone()
     }
 
     pub fn __str__(&self) -> String {

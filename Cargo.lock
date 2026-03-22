@@ -314,6 +314,7 @@ dependencies = [
  "error-stack",
  "fancy-regex",
  "hex",
+ "once_cell",
  "parking_lot",
  "pyo3",
  "rand",
