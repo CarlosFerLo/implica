@@ -37,6 +37,30 @@ impl TypeRef {
         hex::encode(self.uid)
     }
 
+    pub fn as_var(&self) -> PyResult<Option<String>> {
+        self.graph
+            .type_as_var(&self.uid)
+            .attach(ctx!("type reference - type as var"))
+            .into_py_result()
+    }
+
+    pub fn as_arrow(&self) -> PyResult<Option<(TypeRef, TypeRef)>> {
+        self.graph
+            .type_as_arrow(&self.uid)
+            .map(|pair| {
+                if let Some((left, right)) = pair {
+                    Some((
+                        TypeRef::new(self.graph.clone(), left),
+                        TypeRef::new(self.graph.clone(), right),
+                    ))
+                } else {
+                    None
+                }
+            })
+            .attach(ctx!("type reference - type as arrow"))
+            .into_py_result()
+    }
+
     pub fn __str__(&self) -> PyResult<String> {
         self.graph
             .type_to_string(&self.uid)

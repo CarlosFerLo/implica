@@ -694,6 +694,42 @@ impl Graph {
 }
 
 impl Graph {
+    pub(crate) fn type_as_var(&self, r#type: &Uid) -> ImplicaResult<Option<String>> {
+        if let Some(entry) = self.type_index.get(r#type) {
+            let type_rep = entry.value();
+
+            match type_rep {
+                TypeRep::Variable(var) => Ok(Some(var.clone())),
+                TypeRep::Arrow(..) => Ok(None),
+            }
+        } else {
+            Err(ImplicaError::TypeNotFound {
+                uid: *r#type,
+                context: Some("type as var".to_string()),
+            }
+            .into())
+        }
+    }
+
+    pub(crate) fn type_as_arrow(&self, r#type: &Uid) -> ImplicaResult<Option<(Uid, Uid)>> {
+        if let Some(entry) = self.type_index.get(r#type) {
+            let type_rep = entry.value();
+
+            match type_rep {
+                TypeRep::Variable(..) => Ok(None),
+                TypeRep::Arrow(left, right) => Ok(Some((*left, *right))),
+            }
+        } else {
+            Err(ImplicaError::TypeNotFound {
+                uid: *r#type,
+                context: Some("type as arrow".to_string()),
+            }
+            .into())
+        }
+    }
+}
+
+impl Graph {
     pub(crate) fn type_to_string(&self, r#type: &Uid) -> ImplicaResult<String> {
         if let Some(entry) = self.type_index.get(r#type) {
             let type_rep = entry.value();
