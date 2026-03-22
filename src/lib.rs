@@ -16,8 +16,12 @@ pub use graph::PyGraph;
 pub use query::references::*;
 pub use query::Query;
 
+use utils::start_deadlock_watchdog;
+
 #[pymodule]
 fn implica(m: &Bound<'_, PyModule>) -> PyResult<()> {
+    start_deadlock_watchdog();
+
     m.add_class::<PyGraph>()?;
 
     m.add_class::<Query>()?;

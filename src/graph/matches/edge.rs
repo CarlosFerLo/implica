@@ -55,8 +55,6 @@ impl Graph {
                                 Ok(None) => return ControlFlow::Continue(()),
                                 Err(e) => return ControlFlow::Break(e.attach(ctx!("graph - match edge pattern")))
                             }
-
-
                         }
                     }
 
