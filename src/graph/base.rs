@@ -5,6 +5,7 @@ use rayon::iter::IntoParallelRefIterator;
 use sha2::{Digest, Sha256};
 use std::iter::zip;
 use std::ops::ControlFlow;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 use dashmap::{DashMap, DashSet};
@@ -122,6 +123,7 @@ impl Graph {
         r#type: Type,
         term: Option<Term>,
         properties: PropertyMap,
+        creation_flag: Arc<AtomicBool>,
     ) -> ImplicaResult<Uid> {
         let mut expand = false;
         let type_uid = self.insert_type(&r#type);
@@ -145,15 +147,25 @@ impl Graph {
 
                     if !self.nodes.contains_key(&left_type) {
                         let term = self.infer_term(&left_type)?;
-                        self.add_node(arr.left.as_ref().clone(), term, PropertyMap::default())?;
+                        self.add_node(
+                            arr.left.as_ref().clone(),
+                            term,
+                            PropertyMap::default(),
+                            creation_flag.clone(),
+                        )?;
                     }
 
                     if !self.nodes.contains_key(&right_type) {
                         let term = self.infer_term(&right_type)?;
-                        self.add_node(arr.right.as_ref().clone(), term, PropertyMap::default())?;
+                        self.add_node(
+                            arr.right.as_ref().clone(),
+                            term,
+                            PropertyMap::default(),
+                            creation_flag.clone(),
+                        )?;
                     }
 
-                    self.add_edge(term, PropertyMap::default())?;
+                    self.add_edge(term, PropertyMap::default(), creation_flag.clone())?;
                 }
 
                 expand = true;
@@ -161,6 +173,8 @@ impl Graph {
         }
 
         if !self.nodes.contains_key(&type_uid) {
+            creation_flag.store(true, Ordering::Relaxed);
+
             self.nodes.insert(type_uid, properties);
             self.start_to_edge_index
                 .insert(type_uid, Arc::new(DashSet::new()));
@@ -188,7 +202,7 @@ impl Graph {
 
                         let new_term = edge_term.apply(&original_term).attach(ctx!("graph - add node"))?;
 
-                        self.add_node(new_term.r#type().as_ref().clone(), Some(new_term), PropertyMap::default()).attach(ctx!("graph - add node"))?;
+                        self.add_node(new_term.r#type().as_ref().clone(), Some(new_term), PropertyMap::default(), creation_flag.clone()).attach(ctx!("graph - add node"))?;
                     }
 
                     Ok(())
@@ -210,6 +224,7 @@ impl Graph {
         &self,
         term: Term,
         properties: PropertyMap,
+        creation_flag: Arc<AtomicBool>,
     ) -> ImplicaResult<(Uid, Uid)> {
         let term_uid = self.insert_term(&term);
 
@@ -260,7 +275,9 @@ impl Graph {
             .into());
         }
 
-        self.edges.insert(edge_uid, properties);
+        if self.edges.insert(edge_uid, properties).is_none() {
+            creation_flag.store(true, Ordering::Relaxed);
+        }
 
         if self.term_index.contains_key(&edge_uid.0) && !self.term_index.contains_key(&edge_uid.1) {
             let start_term = self.term_from_uid(&edge_uid.0)?;
@@ -276,15 +293,25 @@ impl Graph {
 
                     if !self.nodes.contains_key(&left_type) {
                         let term = self.infer_term(&left_type)?;
-                        self.add_node(arr.left.as_ref().clone(), term, PropertyMap::default())?;
+                        self.add_node(
+                            arr.left.as_ref().clone(),
+                            term,
+                            PropertyMap::default(),
+                            creation_flag.clone(),
+                        )?;
                     }
 
                     if !self.nodes.contains_key(&right_type) {
                         let term = self.infer_term(&right_type)?;
-                        self.add_node(arr.right.as_ref().clone(), term, PropertyMap::default())?;
+                        self.add_node(
+                            arr.right.as_ref().clone(),
+                            term,
+                            PropertyMap::default(),
+                            creation_flag.clone(),
+                        )?;
                     }
 
-                    self.add_edge(term, PropertyMap::default())?;
+                    self.add_edge(term, PropertyMap::default(), creation_flag.clone())?;
                 }
             }
         }

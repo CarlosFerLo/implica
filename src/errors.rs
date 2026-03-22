@@ -125,6 +125,9 @@ pub enum ImplicaError {
         reason: String,
         context: Option<String>,
     },
+
+    #[error("Creation Counter Not Found ({})", context.as_ref().map(|c| format!(" ({})", c)).unwrap_or_default())]
+    CreationCounterNotFound { context: Option<String> },
 }
 
 pub type ImplicaResult<T> = Result<T, Report<ImplicaError>>;
@@ -166,6 +169,7 @@ impl<T> IntoPyResult<T> for ImplicaResult<T> {
                 }
                 ImplicaError::PythonError { .. }
                 | ImplicaError::RuntimeError { .. }
+                | ImplicaError::CreationCounterNotFound { .. }
                 //| ImplicaError::EvaluationError { .. }
                 | ImplicaError::LockError { .. } => {
                     exceptions::PyRuntimeError::new_err(full_message)

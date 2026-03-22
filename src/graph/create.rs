@@ -1,6 +1,6 @@
 use error_stack::ResultExt;
 use std::ops::ControlFlow;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 
 use dashmap::DashMap;
@@ -86,6 +86,10 @@ impl Graph {
 
         let result = matches.par_iter().try_for_each(|row| {
             let (_prev_uid, r#match) = row.value().clone();
+
+            if !r#match.check_counter() {
+                return ControlFlow::Continue(());
+            }
 
             let mut new_match = Arc::new(Match::new(Some(r#match.clone())));
 
@@ -793,12 +797,21 @@ impl Graph {
             // -- Add nodes + edges to the graph
 
             let mut prev_uid: Uid = [0; 32];
+            let creation_flag = Arc::new(AtomicBool::new(false));
+            let counter = match r#match.get_counter() {
+                Ok(Some(c)) => Some(c),
+                Ok(None) => return ControlFlow::Continue(()),
+                Err(e) => match e.current_context() {
+                    ImplicaError::CreationCounterNotFound { .. } => None,
+                    _ => return ControlFlow::Break(e.attach(ctx!("graph - create path")))
+                }
+            };
 
             for nd in nodes_data.into_iter() {
                 if let Some(node_var) = &nd.variable {
                     if !new_match.contains_key(node_var) {
 
-                        prev_uid = match self.add_node(nd.r#type.unwrap(), nd.term, nd.properties) {
+                        prev_uid = match self.add_node(nd.r#type.unwrap(), nd.term, nd.properties, creation_flag.clone()) {
                             Ok(uid) => uid,
                             Err(e) => return ControlFlow::Break(e.attach(ctx!("graph - create path")))
 
@@ -814,7 +827,7 @@ impl Graph {
                         }
                     }
                 } else {
-                    prev_uid = match self.add_node(nd.r#type.unwrap(), nd.term, nd.properties) {
+                    prev_uid = match self.add_node(nd.r#type.unwrap(), nd.term, nd.properties, creation_flag.clone()) {
                         Ok(uid) => uid,
                         Err(e) => {
                             return ControlFlow::Break(e.attach(ctx!("graph - create path")))
@@ -824,14 +837,13 @@ impl Graph {
                     if let Some(ref mask) = mask {
                         mask.add_node(&prev_uid);
                     }
-
                 }
             }
 
             for ed in edges_data.into_iter() {
                 if let Some(edge_var) = &ed.variable {
                     if !new_match.contains_key(edge_var) {
-                    let edge = match self.add_edge(ed.term.unwrap(), ed.properties) {
+                    let edge = match self.add_edge(ed.term.unwrap(), ed.properties, creation_flag.clone()) {
                         Ok(e) => e,
                         Err(e) => return ControlFlow::Break(e.attach(ctx!("graph - create path")))
                     };
@@ -842,12 +854,19 @@ impl Graph {
                     }
                 }
                 } else {
-                    match self.add_edge(ed.term.unwrap(), ed.properties) {
+                    match self.add_edge(ed.term.unwrap(), ed.properties, creation_flag.clone()) {
                         Ok(..) => (),
                         Err(e) => return ControlFlow::Break(e.attach(ctx!("graph - create path")))
                     }
                 }
 
+            }
+
+            // -- Commit to the counter if something was added
+            if creation_flag.load(Ordering::Relaxed) {
+                if let Some(c) = counter {
+                    c.commit();
+                }
             }
 
             // -- Add new match to the out map

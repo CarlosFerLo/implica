@@ -1,10 +1,12 @@
 use std::sync::Arc;
 
 use dashmap::DashMap;
+use once_cell::sync::OnceCell;
 
 use crate::ctx;
-use crate::errors::ImplicaResult;
-use crate::{errors::ImplicaError, graph::Uid};
+use crate::errors::{ImplicaError, ImplicaResult};
+use crate::graph::Uid;
+use crate::utils::{CreationCounter, SlotGuard};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum MatchElement {
@@ -121,10 +123,12 @@ impl MatchElement {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct Match {
     previous: Option<Arc<Match>>,
     elements: Arc<DashMap<String, MatchElement>>,
+
+    creation_counter: OnceCell<CreationCounter>,
 }
 
 impl Match {
@@ -132,6 +136,7 @@ impl Match {
         Match {
             previous,
             elements: Arc::new(DashMap::new()),
+            creation_counter: OnceCell::new(),
         }
     }
 
@@ -175,6 +180,33 @@ impl Match {
             previous.remove(key)
         } else {
             None
+        }
+    }
+
+    pub fn set_creation_limit(&self, limit: u32) {
+        let _ = self.creation_counter.set(CreationCounter::new(limit)); // Ignores if already set
+    }
+
+    pub fn check_counter(&self) -> bool {
+        if let Some(counter) = self.creation_counter.get() {
+            counter.is_available()
+        } else if let Some(ref previous) = self.previous {
+            previous.check_counter()
+        } else {
+            true
+        }
+    }
+
+    pub fn get_counter(&self) -> ImplicaResult<Option<SlotGuard<'_>>> {
+        if let Some(counter) = self.creation_counter.get() {
+            Ok(counter.acquire())
+        } else if let Some(ref previous) = self.previous {
+            previous.get_counter()
+        } else {
+            Err(ImplicaError::CreationCounterNotFound {
+                context: Some("match - get counter".to_string()),
+            }
+            .into())
         }
     }
 }

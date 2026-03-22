@@ -1,11 +1,13 @@
 mod cmp;
 //mod eval;
+mod creation_counter;
 mod data_queue;
 mod deadlock_watchdog;
 mod hex_to_uid;
 mod validation;
 
 pub(crate) use cmp::compare_values;
+pub(crate) use creation_counter::{CreationCounter, SlotGuard};
 //pub(crate) use eval::{props_as_map, Evaluator};
 pub(crate) use data_queue::{DataQueue, QueueItem};
 pub(crate) use deadlock_watchdog::start_deadlock_watchdog;
