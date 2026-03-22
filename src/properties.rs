@@ -1,4 +1,5 @@
 use error_stack::{Report, ResultExt};
+use parking_lot::RwLock;
 use pyo3::prelude::*;
 use pyo3::types::{PyBool, PyDict, PyFloat, PyInt, PyList, PyString};
 use pyo3::IntoPyObject;
@@ -6,7 +7,7 @@ use rayon::prelude::*;
 use rhai::{Dynamic, Map};
 use std::convert::Infallible;
 use std::fmt::Display;
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
 
 use crate::ctx;
 use crate::errors::{ImplicaError, ImplicaResult, IntoPyResult};
@@ -27,7 +28,7 @@ pub struct PropertyMap {
 
 impl Display for PropertyMap {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let data_lock = self.data.read().map_err(|_| std::fmt::Error)?;
+        let data_lock = self.data.read();
 
         write!(f, "{{")?;
         let mut first = true;
@@ -48,18 +49,7 @@ impl<'py> IntoPyObject<'py> for PropertyMap {
     type Error = PyErr;
 
     fn into_pyobject(self, py: Python<'py>) -> Result<Self::Output, Self::Error> {
-        let data_lock = self
-            .data
-            .read()
-            .map_err(|e| {
-                ImplicaError::LockError {
-                    rw: "read".to_string(),
-                    message: e.to_string(),
-                    context: Some(ctx!("property map - into py object").to_string()),
-                }
-                .into()
-            })
-            .into_py_result()?;
+        let data_lock = self.data.read();
 
         let dict = PyDict::new(py);
         for (key, value) in data_lock.iter() {
@@ -114,22 +104,14 @@ impl PropertyMap {
     //}
 
     pub fn insert(&self, key: String, value: Dynamic) -> ImplicaResult<()> {
-        let mut data_lock = self.data.write().map_err(|e| ImplicaError::LockError {
-            rw: "write".to_string(),
-            message: e.to_string(),
-            context: Some(ctx!("property map - insert").to_string()),
-        })?;
+        let mut data_lock = self.data.write();
 
         data_lock.insert(key.into(), value);
         Ok(())
     }
 
     pub fn get(&self, key: &str) -> ImplicaResult<Option<Dynamic>> {
-        let data_lock = self.data.read().map_err(|e| ImplicaError::LockError {
-            rw: "read".to_string(),
-            message: e.to_string(),
-            context: Some(ctx!("property map - get").to_string()),
-        })?;
+        let data_lock = self.data.read();
 
         Ok(data_lock.get(key).cloned())
     }
@@ -138,11 +120,7 @@ impl PropertyMap {
     where
         F: Fn(&str, &Dynamic) -> ImplicaResult<bool> + Send + Sync,
     {
-        let data_lock = self.data.read().map_err(|e| ImplicaError::LockError {
-            rw: "read".to_string(),
-            message: e.to_string(),
-            context: Some(ctx!("property map - try par compare").to_string()),
-        })?;
+        let data_lock = self.data.read();
 
         enum BreakReason {
             PredicateFailed,
@@ -167,11 +145,7 @@ impl PropertyMap {
     }
 
     pub fn iter(&self) -> ImplicaResult<std::vec::IntoIter<(rhai::ImmutableString, Dynamic)>> {
-        let map_lock = self.data.read().map_err(|e| ImplicaError::LockError {
-            rw: "read".to_string(),
-            message: e.to_string(),
-            context: Some(ctx!("property map - iter").to_string()),
-        })?;
+        let map_lock = self.data.read();
 
         Ok(map_lock
             .iter()

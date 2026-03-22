@@ -1,4 +1,5 @@
 use std::ops::ControlFlow;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
 use dashmap::DashMap;
@@ -8,7 +9,7 @@ use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 use crate::ctx;
 use crate::errors::{ImplicaError, ImplicaResult};
 use crate::graph::{Mask, Uid};
-use crate::matches::{next_match_id, Match, MatchElement, MatchSet};
+use crate::matches::{Match, MatchElement, MatchSet};
 use crate::patterns::CompiledDirection;
 use crate::{graph::base::Graph, patterns::EdgePattern};
 
@@ -19,6 +20,7 @@ impl Graph {
         matches: MatchSet,
         mask: Option<Mask>,
     ) -> ImplicaResult<MatchSet> {
+        let next_match_id = AtomicU64::new(0);
         let out_map: MatchSet = Arc::new(DashMap::new());
 
         let result =
@@ -49,7 +51,7 @@ impl Graph {
                                         }
                                     };
 
-                                    out_map.insert(next_match_id(), (next_uid, new_match));
+                                    out_map.insert(next_match_id.fetch_add(1, Ordering::Relaxed), (next_uid, new_match));
 
                                     return ControlFlow::Continue(());
                                 },
@@ -104,7 +106,7 @@ impl Graph {
                                     }
                                 };
 
-                                out_map.insert(next_match_id(), (next_uid, new_match));
+                                out_map.insert(next_match_id.fetch_add(1, Ordering::Relaxed), (next_uid, new_match));
 
                                 ControlFlow::Continue(())
 

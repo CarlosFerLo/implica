@@ -1,5 +1,6 @@
 use error_stack::ResultExt;
 use std::ops::ControlFlow;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
 use dashmap::DashMap;
@@ -8,7 +9,7 @@ use rayon::prelude::*;
 use crate::ctx;
 use crate::errors::{ImplicaError, ImplicaResult};
 use crate::graph::base::{Graph, TypeRep, Uid};
-use crate::matches::{next_match_id, Match, MatchElement, MatchSet};
+use crate::matches::{Match, MatchElement, MatchSet};
 use crate::patterns::{TypePattern, TypeSchema};
 
 impl Graph {
@@ -26,6 +27,7 @@ impl Graph {
         pattern: &TypePattern,
         matches: MatchSet,
     ) -> ImplicaResult<MatchSet> {
+        let next_match_id = AtomicU64::new(0);
         let out_map: MatchSet = Arc::new(DashMap::new());
 
         let result = matches.par_iter().try_for_each(|row| {
@@ -36,7 +38,10 @@ impl Graph {
                 match self.check_type_matches(entry.key(), pattern, r#match.clone()) {
                     Ok(new_match_op) => {
                         if let Some(new_match) = new_match_op {
-                            out_map.insert(next_match_id(), (*entry.key(), new_match));
+                            out_map.insert(
+                                next_match_id.fetch_add(1, Ordering::Relaxed),
+                                (*entry.key(), new_match),
+                            );
                         }
                         ControlFlow::Continue(())
                     }

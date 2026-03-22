@@ -1,4 +1,5 @@
 use std::ops::ControlFlow;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
 use dashmap::{DashMap, DashSet};
@@ -8,7 +9,7 @@ use crate::ctx;
 use crate::errors::{ImplicaError, ImplicaResult};
 use crate::graph::base::{Graph, Uid};
 use crate::graph::Mask;
-use crate::matches::{next_match_id, Match, MatchElement, MatchSet};
+use crate::matches::{Match, MatchElement, MatchSet};
 use crate::patterns::NodePattern;
 
 impl Graph {
@@ -18,6 +19,7 @@ impl Graph {
         matches: MatchSet,
         mask: Option<Mask>,
     ) -> ImplicaResult<MatchSet> {
+        let next_match_id = AtomicU64::new(0);
         let out_map: MatchSet = Arc::new(DashMap::new());
 
         let result = matches.par_iter().try_for_each(|row| {
@@ -79,13 +81,19 @@ impl Graph {
                         }
                     }
 
-                    out_map.insert(next_match_id(), (old, new_match));
+                    out_map.insert(
+                        next_match_id.fetch_add(1, Ordering::Relaxed),
+                        (old, new_match),
+                    );
 
                     return ControlFlow::Continue(());
                 }
             }
             let mut match_set: MatchSet = Arc::new(DashMap::new());
-            match_set.insert(next_match_id(), (_prev_uid, r#match.clone()));
+            match_set.insert(
+                next_match_id.fetch_add(1, Ordering::Relaxed),
+                (_prev_uid, r#match.clone()),
+            );
 
             if let Some(ref type_schema) = pattern.type_schema {
                 match_set = match self.match_type_schema(type_schema, match_set) {
@@ -137,7 +145,10 @@ impl Graph {
                                         }
                                     }
 
-                                    out_map.insert(next_match_id(), (prev_uid, m.clone()));
+                                    out_map.insert(
+                                        next_match_id.fetch_add(1, Ordering::Relaxed),
+                                        (prev_uid, m.clone()),
+                                    );
 
                                     ControlFlow::Continue(())
                                 }
@@ -174,7 +185,10 @@ impl Graph {
                             }
                         }
 
-                        out_map.insert(next_match_id(), (prev_uid, m.clone()));
+                        out_map.insert(
+                            next_match_id.fetch_add(1, Ordering::Relaxed),
+                            (prev_uid, m.clone()),
+                        );
 
                         ControlFlow::Continue(())
                     }
@@ -221,7 +235,10 @@ impl Graph {
                         }
                     }
 
-                    out_map.insert(next_match_id(), (prev_uid, m.clone()));
+                    out_map.insert(
+                        next_match_id.fetch_add(1, Ordering::Relaxed),
+                        (prev_uid, m.clone()),
+                    );
 
                     ControlFlow::Continue(())
                 })
@@ -265,7 +282,10 @@ impl Graph {
                         }
                     }
 
-                    out_map.insert(next_match_id(), (new_uid, new_matches.clone()));
+                    out_map.insert(
+                        next_match_id.fetch_add(1, Ordering::Relaxed),
+                        (new_uid, new_matches.clone()),
+                    );
 
                     ControlFlow::Continue(())
                 })

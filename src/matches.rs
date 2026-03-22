@@ -1,4 +1,3 @@
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
 use dashmap::DashMap;
@@ -184,12 +183,6 @@ pub type MatchSet = Arc<DashMap<u64, (Uid, Arc<Match>)>>;
 
 pub(crate) fn default_match_set() -> MatchSet {
     let mset = Arc::new(DashMap::new());
-    mset.insert(next_match_id(), ([0; 32], Arc::new(Match::new(None))));
+    mset.insert(0, ([0; 32], Arc::new(Match::new(None))));
     mset
-}
-
-pub static MATCH_ID_COUNTER: AtomicU64 = AtomicU64::new(0);
-
-pub fn next_match_id() -> u64 {
-    MATCH_ID_COUNTER.fetch_add(1, Ordering::Relaxed)
 }

@@ -1,6 +1,7 @@
 use error_stack::{Report, ResultExt};
 use std::iter::zip;
 use std::ops::ControlFlow;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
 use dashmap::DashMap;
@@ -10,7 +11,7 @@ use crate::ctx;
 use crate::errors::{ImplicaError, ImplicaResult};
 use crate::graph::base::Graph;
 use crate::graph::Mask;
-use crate::matches::{next_match_id, MatchElement, MatchSet};
+use crate::matches::{MatchElement, MatchSet};
 use crate::patterns::PathPattern;
 
 impl Graph {
@@ -20,6 +21,7 @@ impl Graph {
         matches: MatchSet,
         mask: Option<Mask>,
     ) -> ImplicaResult<MatchSet> {
+        let next_match_id = AtomicU64::new(0);
         let out_map: MatchSet = Arc::new(DashMap::new());
 
         pattern
@@ -30,7 +32,7 @@ impl Graph {
             let (_prev_uid, r#match) = row.value().clone();
 
             let mut matches = Arc::new(DashMap::from_iter([(
-                next_match_id(),
+                next_match_id.fetch_add(1, Ordering::Relaxed),
                 (_prev_uid, r#match.clone()),
             )]));
 
@@ -88,7 +90,7 @@ impl Graph {
                         }
                     }
 
-                    new_matches.insert(next_match_id(), (node, new_match));
+                    new_matches.insert(next_match_id.fetch_add(1, Ordering::Relaxed), (node, new_match));
 
                     ControlFlow::Continue(())
 
@@ -103,7 +105,7 @@ impl Graph {
             matches
                 .par_iter()
                 .try_for_each(|m| {
-                    match out_map.insert(next_match_id(), m.value().clone()) {
+                    match out_map.insert(next_match_id.fetch_add(1, Ordering::Relaxed), m.value().clone()) {
                         None => ControlFlow::Continue(()),
                         Some(_) => ControlFlow::Break(ImplicaError::RuntimeError { message: "Unique identifier generator next_match_id created a previously existing id (should not happen)".to_string(), context: Some("match path pattern".to_string()) }.into())
                     }

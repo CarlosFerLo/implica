@@ -1,5 +1,6 @@
 use error_stack::ResultExt;
 use std::ops::ControlFlow;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
 use dashmap::DashMap;
@@ -9,7 +10,7 @@ use crate::ctx;
 use crate::errors::{ImplicaError, ImplicaResult};
 use crate::graph::base::Graph;
 use crate::graph::{Mask, Uid};
-use crate::matches::{next_match_id, Match, MatchElement, MatchSet};
+use crate::matches::{Match, MatchElement, MatchSet};
 use crate::patterns::{CompiledDirection, PathPattern};
 use crate::properties::PropertyMap;
 use crate::typing::{Arrow, Term, Type};
@@ -78,6 +79,7 @@ impl Graph {
         matches: MatchSet,
         mask: Option<Mask>,
     ) -> ImplicaResult<MatchSet> {
+        let next_match_id = AtomicU64::new(0);
         let out_map = Arc::new(DashMap::new());
 
         pattern.validate().attach(ctx!("graph - create path"))?;
@@ -850,7 +852,7 @@ impl Graph {
 
             // -- Add new match to the out map
 
-            out_map.insert(next_match_id(), (prev_uid, new_match));
+            out_map.insert(next_match_id.fetch_add(1, Ordering::Relaxed), (prev_uid, new_match));
 
             ControlFlow::Continue(())
         });
