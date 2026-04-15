@@ -14,6 +14,7 @@ use rayon::prelude::*;
 use crate::constants::Constant;
 use crate::ctx;
 use crate::errors::{ImplicaError, ImplicaResult, IntoPyResult};
+// use crate::graph::listener::Listener;
 use crate::graph::mask::Mask;
 use crate::matches::{Match, MatchElement};
 use crate::patterns::{TermPattern, TermSchema, TypePattern, TypeSchema};
@@ -90,6 +91,7 @@ pub struct Graph {
     end_to_edge_index: Arc<DashMap<Uid, EdgeSet>>,
 
     constants: Arc<DashMap<String, Constant>>,
+    //listener: Arc<OnceLock<Listener>>,
 }
 
 impl Default for Graph {
@@ -115,6 +117,7 @@ impl Graph {
                     .map(|c| (c.name.clone(), c.clone()))
                     .collect(),
             ),
+            //listener: Arc::new(OnceLock::new()),
         }
     }
 
@@ -131,7 +134,9 @@ impl Graph {
         if let Some(term) = term {
             if !self.term_index.contains_key(&type_uid) {
                 // TODO: term comparison?
-                let term_uid = self.insert_term(&term);
+                let term_uid = self
+                    .insert_term(&term, creation_flag.clone())
+                    .attach(ctx!("graph - add node"))?;
 
                 if type_uid != term_uid {
                     return Err(ImplicaError::InvalidTerm {
@@ -226,7 +231,9 @@ impl Graph {
         properties: PropertyMap,
         creation_flag: Arc<AtomicBool>,
     ) -> ImplicaResult<(Uid, Uid)> {
-        let term_uid = self.insert_term(&term);
+        let term_uid = self
+            .insert_term(&term, creation_flag.clone())
+            .attach(ctx!("graph - add node"))?;
 
         let edge_uid = if let Some(ref type_rep) = self.type_index.get(&term_uid) {
             match type_rep.value() {
@@ -282,7 +289,9 @@ impl Graph {
         if self.term_index.contains_key(&edge_uid.0) && !self.term_index.contains_key(&edge_uid.1) {
             let start_term = self.term_from_uid(&edge_uid.0)?;
 
-            let new_term = self.insert_term(&term.apply(&start_term)?);
+            let new_term = self
+                .insert_term(&term.apply(&start_term)?, creation_flag.clone())
+                .attach("graph - add edge")?;
 
             if !self.type_to_edge_index.contains_key(&new_term) {
                 // TODO: optimize this logic
@@ -422,7 +431,11 @@ impl Graph {
         }
     }
 
-    pub(in crate::graph) fn insert_term(&self, term: &Term) -> Uid {
+    pub(in crate::graph) fn insert_term(
+        &self,
+        term: &Term,
+        creation_flag: Arc<AtomicBool>,
+    ) -> ImplicaResult<Uid> {
         let term_type = term.r#type();
         let type_uid = self.insert_type(term_type.as_ref());
 
@@ -433,15 +446,27 @@ impl Graph {
                 self.term_index.insert(type_uid, term_rep);
             }
             Term::Application(app) => {
-                let function_uid = self.insert_term(app.function.as_ref());
-                let argument_uid = self.insert_term(app.argument.as_ref());
+                let function_uid = self
+                    .insert_term(app.function.as_ref(), creation_flag.clone())
+                    .attach(ctx!("graph - insert term"))?;
+                let argument_uid = self
+                    .insert_term(app.argument.as_ref(), creation_flag.clone())
+                    .attach(ctx!("graph - insert term"))?;
 
                 let term_rep = TermRep::Application(function_uid, argument_uid);
-                self.term_index.insert(type_uid, term_rep);
+                if self.term_index.insert(type_uid, term_rep).is_none() {
+                    self.add_node(
+                        (*term_type).clone(),
+                        Some(term.clone()),
+                        PropertyMap::empty(),
+                        creation_flag.clone(),
+                    )
+                    .attach(ctx!("graph - insert term"))?;
+                }
             }
         }
 
-        type_uid
+        Ok(type_uid)
     }
 }
 
@@ -986,6 +1011,28 @@ impl Graph {
     }
 }
 
+/*
+impl Graph {
+    pub(in crate::graph) fn add_listener(&self) -> ImplicaResult<()> {
+        let listener = Listener::new();
+        self.listener
+            .set(listener)
+            .map_err(|_| ImplicaError::ListenerAlreadyExists {}.into())
+    }
+
+    pub(in crate::graph) fn clear_listener(&self) -> ImplicaResult<()> {
+        if let Some(listener) = self.listener.get() {
+            listener.clear()
+        } else {
+            Err(ImplicaError::ListenerDoesNotExist {
+                context: Some("graph - clear listener".to_string()),
+            }
+            .into())
+        }
+    }
+}
+*/
+
 #[pyclass(name = "Graph")]
 #[derive(Debug, Clone)]
 pub struct PyGraph {
@@ -1138,3 +1185,15 @@ impl PyGraph {
         }
     }
 }
+
+/*
+impl PyGraph {
+    pub fn add_listener(&self) -> PyResult<()> {
+        self.graph.add_listener().into_py_result()
+    }
+
+    pub fn clear_listener(&self) -> PyResult<()> {
+        self.graph.clear_listener().into_py_result()
+    }
+}
+*/

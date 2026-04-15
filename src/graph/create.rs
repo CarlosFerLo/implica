@@ -82,6 +82,8 @@ impl Graph {
         let next_match_id = AtomicU64::new(0);
         let out_map = Arc::new(DashMap::new());
 
+        let creation_flag = Arc::new(AtomicBool::new(false));
+
         pattern.validate().attach(ctx!("graph - create path"))?;
 
         let result = matches.par_iter().try_for_each(|row| {
@@ -230,7 +232,10 @@ impl Graph {
                             if let Some(term_schema) = &node_pattern.term_schema {
                                 match &node_data.term {
                                     Some(t) => {
-                                        let term_uid = self.insert_term(t);
+                                        let term_uid = match self.insert_term(t, creation_flag.clone()) {
+                                            Ok(t) => t,
+                                            Err(e) => return  ControlFlow::Break(e.attach(ctx!("graph - create path")))
+                                        };
                                         match self.check_term_matches(
                                             &term_uid,
                                             &term_schema.compiled,
@@ -602,7 +607,10 @@ impl Graph {
                             if let Some(term_schema) = &edge_pattern.term_schema {
                                 match &edge_data.term {
                                     Some(t) => {
-                                        let term_uid = self.insert_term(t);
+                                        let term_uid = match self.insert_term(t, creation_flag.clone()) {
+                                            Ok(t) => t,
+                                            Err(e) => return ControlFlow::Break(e.attach(ctx!("graph - create path")))
+                                        };
                                         match self.check_term_matches(&term_uid, &term_schema.compiled, new_match.clone()){
                                             Ok(m) => match m {
                                                 Some(m) => {
@@ -797,7 +805,6 @@ impl Graph {
             // -- Add nodes + edges to the graph
 
             let mut prev_uid: Uid = [0; 32];
-            let creation_flag = Arc::new(AtomicBool::new(false));
             let counter = match r#match.get_counter() {
                 Ok(Some(c)) => Some(c),
                 Ok(None) => return ControlFlow::Continue(()),
