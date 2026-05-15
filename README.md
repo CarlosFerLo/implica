@@ -1,9 +1,3 @@
----
-noteId: "4ee5623025da11f19e8557ed8224f3ba"
-tags: []
-
----
-
 # Implica
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
